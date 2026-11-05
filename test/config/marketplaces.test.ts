@@ -81,6 +81,16 @@ test('registrations round-trip through their setting text', () => {
   for (const marketplace of registered) assert.ok(matches(parseEntry(entryText(marketplace)), marketplace), marketplace.name);
 });
 
+test('imported local registrations use canonical file URIs', () => {
+  const registered: Marketplace = {
+    name: 'custom', source: String.raw`file://D:\runner\some folder\marketplace`, ref: 'release/stable'
+  };
+  const expected = 'custom=file:///D:/runner/some%20folder/marketplace#release%2Fstable';
+  assert.equal(entryText(registered), expected);
+  assert.deepEqual(planSync([], [registered], {}).setting, [expected]);
+  assert.ok(matches(parseEntry(expected), registered));
+});
+
 test('legacy declarations retain names, hosts, refs and relative paths when migrated', () => {
   const root = join(homedir(), 'project');
   assert.equal(legacyEntry({ source: 'team/catalog', name: 'internal', host: 'git.example.com', ref: 'release' }),

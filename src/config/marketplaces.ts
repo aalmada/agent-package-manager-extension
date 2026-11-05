@@ -129,7 +129,7 @@ export function entryText(marketplace: Marketplace): string {
   const github = (marketplace.host ?? 'github.com').toLowerCase() === 'github.com'
     ? /^(?:https:\/\/github\.com\/|github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(source)?.slice(1).join('/')
     : undefined;
-  let text = github ?? (isLocal(source) && !source.startsWith('file://') ? pathToFileURL(localPath(source)).href : source);
+  let text = github ?? (isLocal(source) ? pathToFileURL(localPath(source)).href : source);
   if (supportsRef(source) && marketplace.ref && marketplace.ref !== DEFAULT_REF) {
     text += `#${isLocal(source) ? encodeURIComponent(marketplace.ref) : marketplace.ref}`;
   }

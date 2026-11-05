@@ -10,11 +10,11 @@ import * as vscode from 'vscode';
 
 const run$ = promisify(execFile);
 
-async function until(description: string, check: () => boolean | Promise<boolean>, timeoutMs = 90_000) {
+async function until(description: string, check: () => boolean | Promise<boolean>, timeoutMs = 90_000, details?: () => string | Promise<string>) {
   console.log(`[suite] waiting until ${description}`);
   const deadline = Date.now() + timeoutMs;
   while (!await check()) {
-    if (Date.now() > deadline) throw new Error(`Timed out waiting until ${description}`);
+    if (Date.now() > deadline) throw new Error(`Timed out waiting until ${description}${details ? `: ${await details()}` : ''}`);
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 }
@@ -162,7 +162,9 @@ async function steps() {
 
   // CLI → settings: registrations made outside VS Code.
   await run$(executable, ['marketplace', 'add', await marketplace('third')], { env: process.env });
-  await until('an external registration appears in settings', () => apm().get<string[]>('marketplaces', []).includes(pathToFileURL(join(home, 'markets', 'third')).href));
+  const third = pathToFileURL(join(home, 'markets', 'third')).href;
+  await until('an external registration appears in settings', () => apm().get<string[]>('marketplaces', []).includes(third), 90_000,
+    async () => JSON.stringify({ expected: third, settings: apm().get<string[]>('marketplaces', []), registered: await registered() }));
   await run$(executable, ['marketplace', 'remove', 'second', '--yes'], { env: process.env });
   await until('an external removal disappears from settings', () => !apm().get<string[]>('marketplaces', []).includes(second));
 

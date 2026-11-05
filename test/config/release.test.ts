@@ -17,7 +17,7 @@ test('Marketplace metadata identifies the public repository and uses a PNG icon'
 
 test('manual Marketplace publishing validates CI and publishes its VSIX with OIDC', () => {
   const ci = parse(readFileSync('.github/workflows/ci.yml', 'utf8')) as {
-    on: Record<string, unknown>; jobs: { test: { env: { APM_CI_VERSION: string } } };
+    on: Record<string, unknown>; jobs: { test: { env: { APM_CI_VERSION: string }; steps: { uses?: string }[] } };
   };
   const contract = JSON.parse(readFileSync('src/apm/contract.json', 'utf8')) as { version: string };
   assert.ok(Object.hasOwn(ci.on, 'workflow_call'));
@@ -34,7 +34,10 @@ test('manual Marketplace publishing validates CI and publishes its VSIX with OID
   assert.equal(workflow.jobs.validate.uses, './.github/workflows/ci.yml');
   assert.equal(workflow.jobs.publish.needs, 'validate');
   assert.equal(workflow.jobs.publish.permissions['id-token'], 'write');
-  assert.ok(workflow.jobs.publish.steps.some(step => step.uses === 'actions/download-artifact@v4'));
+  assert.ok(workflow.jobs.publish.steps.some(step => step.uses?.startsWith('actions/download-artifact@')));
   const publish = workflow.jobs.publish.steps.find(step => step.run?.includes('vsce publish'));
   assert.match(publish?.run ?? '', /vsce publish --oidc --packagePath/);
+  for (const step of [...ci.jobs.test.steps, ...workflow.jobs.publish.steps]) {
+    if (step.uses?.startsWith('actions/')) assert.match(step.uses, /^actions\/[\w-]+@[0-9a-f]{40}$/);
+  }
 });
