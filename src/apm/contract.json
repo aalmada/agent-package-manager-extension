@@ -1,0 +1,5936 @@
+{
+  "version": "0.35.0",
+  "commands": [
+    {
+      "id": "approve",
+      "label": "apm approve",
+      "category": "Governance",
+      "command": [
+        "approve"
+      ],
+      "description": "Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.\n\nBy default writes to the project ``apm.yml`` ``executables.allow`` block\n(committed). Use ``--user`` to record a personal grant in\n``~/.apm/config.json`` instead.\n\nExamples:\n\n    apm approve owner/repo\n\n    apm approve --recommended\n\n    apm approve --list\n\n    apm approve --user owner/repo",
+      "options": [
+        {
+          "name": "--pending",
+          "label": "pending",
+          "type": "boolean",
+          "aliases": [
+            "--pending"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "List packages with unapproved executables.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--all",
+          "label": "all",
+          "type": "boolean",
+          "aliases": [
+            "--all"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Approve every package with executables.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--recommended",
+          "label": "recommended",
+          "type": "boolean",
+          "aliases": [
+            "--recommended"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Approve the org-recommended executable set (executables.recommend).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--list",
+          "label": "list",
+          "type": "boolean",
+          "aliases": [
+            "--list"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "List effective trust decisions; fleet view for apm policy explain.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--user",
+          "label": "user",
+          "type": "boolean",
+          "aliases": [
+            "--user"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Persist to your personal ~/.apm/config.json (lowest authority) instead of the shared project apm.yml.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": false,
+          "variadic": true,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/approve.py"
+    },
+    {
+      "id": "audit",
+      "label": "apm audit",
+      "category": "Governance",
+      "command": [
+        "audit"
+      ],
+      "description": "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",
+      "options": [
+        {
+          "name": "--file",
+          "label": "file",
+          "type": "string",
+          "aliases": [
+            "--file"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Scan an arbitrary file (not just APM-managed files)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--strip",
+          "label": "strip",
+          "type": "boolean",
+          "aliases": [
+            "--strip"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Remove hidden characters from scanned files (preserves emoji and whitespace)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show all findings including harmless ones",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Preview what --strip would remove without modifying files",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--format",
+          "label": "format",
+          "type": "choice",
+          "aliases": [
+            "--format",
+            "-f"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Output format: text (default), json, sarif (GitHub Code Scanning), markdown (step summaries).",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "text",
+            "json",
+            "sarif",
+            "markdown"
+          ],
+          "default": "text",
+          "at": 1
+        },
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "string",
+          "aliases": [
+            "--output",
+            "-o"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Write output to file (auto-detects format from extension: .sarif, .json, .md).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--ci",
+          "label": "ci",
+          "type": "boolean",
+          "aliases": [
+            "--ci"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--policy",
+          "label": "policy",
+          "type": "string",
+          "aliases": [
+            "--policy"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-cache",
+          "label": "no cache",
+          "type": "boolean",
+          "aliases": [
+            "--no-cache"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Force fresh policy fetch (skip cache).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-policy",
+          "label": "no policy",
+          "type": "boolean",
+          "aliases": [
+            "--no-policy"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip org policy discovery and enforcement. Overridden when --policy is passed explicitly.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-fail-fast",
+          "label": "no fail fast",
+          "type": "boolean",
+          "aliases": [
+            "--no-fail-fast"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Run all checks even after a failure (default: stop at first failure).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-drift",
+          "label": "no drift",
+          "type": "boolean",
+          "aliases": [
+            "--no-drift"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip the install-replay drift check. Reduces coverage; use only for performance-constrained CI loops.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--external",
+          "label": "external",
+          "type": "string",
+          "aliases": [
+            "--external"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Ingest findings from an external SARIF-native scanner (repeatable). Names: skillspector, sarif. Not supported with --ci. Requires 'apm experimental enable external-scanners'. [experimental]",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--external-sarif",
+          "label": "external sarif",
+          "type": "string",
+          "aliases": [
+            "--external-sarif"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "SARIF file to ingest for '--external sarif'. [experimental]",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--external-llm",
+          "label": "external llm",
+          "type": "boolean",
+          "aliases": [
+            "--external-llm/--no-external-llm"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Force LLM-powered analysis on/off for external scanners this run (overrides config). LLM mode makes outbound API calls and needs an API key. Requires --external. [experimental]",
+          "optionalValue": false,
+          "hidden": false,
+          "negative": "--no-external-llm",
+          "at": 1
+        },
+        {
+          "name": "--external-args",
+          "label": "external args",
+          "type": "string",
+          "aliases": [
+            "--external-args"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Extra argv tokens for external scanners this run (shlex-split, allowlist-validated per scanner). Overrides config args. Requires --external. [experimental]",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "package",
+          "label": "package",
+          "required": false,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/audit.py"
+    },
+    {
+      "id": "auth",
+      "label": "apm auth",
+      "category": "Setup and maintenance",
+      "command": [
+        "auth"
+      ],
+      "description": "Get a working credential for a git host. Reports what APM resolves, and walks you through creating a token if there is none.",
+      "options": [
+        {
+          "name": "--check",
+          "label": "check",
+          "type": "boolean",
+          "aliases": [
+            "--check"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Validate the token against the host's REST API (one network call)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--export",
+          "label": "export",
+          "type": "boolean",
+          "aliases": [
+            "--export"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Print \"export VAR=token\" on stdout for eval; narration goes to stderr",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "host",
+          "label": "host",
+          "required": true,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": true,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/auth.py"
+    },
+    {
+      "id": "cache clean",
+      "label": "apm cache clean",
+      "category": "Setup and maintenance",
+      "command": [
+        "cache",
+        "clean"
+      ],
+      "description": "Remove all cached content",
+      "options": [
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force",
+            "-f"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/cache.py"
+    },
+    {
+      "id": "cache info",
+      "label": "apm cache info",
+      "category": "Setup and maintenance",
+      "command": [
+        "cache",
+        "info"
+      ],
+      "description": "Show cache location and size statistics",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/cache.py"
+    },
+    {
+      "id": "cache prune",
+      "label": "apm cache prune",
+      "category": "Setup and maintenance",
+      "command": [
+        "cache",
+        "prune"
+      ],
+      "description": "Remove Git checkout SHA groups older than N days",
+      "options": [
+        {
+          "name": "--days",
+          "label": "days",
+          "type": "string",
+          "aliases": [
+            "--days"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Remove SHA groups not accessed within this many days",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 30,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/cache.py"
+    },
+    {
+      "id": "compile",
+      "label": "apm compile",
+      "category": "Execution",
+      "command": [
+        "compile"
+      ],
+      "description": "Compile APM context into distributed AGENTS.md files",
+      "options": [
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "string",
+          "aliases": [
+            "--output",
+            "-o"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Output file path (for single-file mode)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Preview compilation without writing files (shows placement decisions)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-links",
+          "label": "no links",
+          "type": "boolean",
+          "aliases": [
+            "--no-links"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip markdown link resolution",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--chatmode",
+          "label": "chatmode",
+          "type": "string",
+          "aliases": [
+            "--chatmode"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Chatmode to prepend to AGENTS.md files",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--watch",
+          "label": "watch",
+          "type": "boolean",
+          "aliases": [
+            "--watch"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Auto-regenerate on changes",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--validate",
+          "label": "validate",
+          "type": "boolean",
+          "aliases": [
+            "--validate"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Validate primitives without compiling",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--with-constitution",
+          "label": "with constitution",
+          "type": "boolean",
+          "aliases": [
+            "--with-constitution/--no-constitution"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include Spec Kit constitution block at top if memory/constitution.md present",
+          "optionalValue": false,
+          "hidden": false,
+          "negative": "--no-constitution",
+          "default": true,
+          "at": 1
+        },
+        {
+          "name": "--single-agents",
+          "label": "single agents",
+          "type": "boolean",
+          "aliases": [
+            "--single-agents"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Force single-file compilation (legacy mode)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed source attribution and optimizer analysis",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--local-only",
+          "label": "local only",
+          "type": "boolean",
+          "aliases": [
+            "--local-only"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Ignore dependencies, compile only local primitives",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--clean",
+          "label": "clean",
+          "type": "boolean",
+          "aliases": [
+            "--clean"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. With --global, remove an unchanged redundant generated Claude root. Hand-authored files are never deleted; use --dry-run to preview removals.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--legacy-skill-paths",
+          "label": "legacy skill paths",
+          "type": "boolean",
+          "aliases": [
+            "--legacy-skill-paths"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of the shared .agents/skills/ directory. Compatibility flag for projects that need per-client skill layouts.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--all",
+          "label": "all",
+          "type": "boolean",
+          "aliases": [
+            "--all"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Compile for all canonical targets. Equivalent to --target all.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--force-instructions",
+          "label": "force instructions",
+          "type": "boolean",
+          "aliases": [
+            "--force-instructions/--no-force-instructions"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include the instructions section in CLAUDE.md even when .claude/rules/ is already populated, and in AGENTS.md even when .github/instructions/ is already populated, in .github/copilot-instructions.md even when the matching .github/instructions/ file is deployed, or in .agents/rules/ for Antigravity. Overrides the default deduplication that normally omits these sections to avoid duplicate context. Affects the Claude, Copilot, and Antigravity deduplication paths. Alias: --no-dedup.",
+          "optionalValue": false,
+          "hidden": false,
+          "negative": "--no-force-instructions",
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--no-dedup",
+          "label": "no dedup",
+          "type": "boolean",
+          "aliases": [
+            "--no-dedup"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Alias for --force-instructions.",
+          "optionalValue": false,
+          "hidden": true,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--root",
+          "label": "root",
+          "type": "string",
+          "aliases": [
+            "--root"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Write AGENTS.md / CLAUDE.md outputs under DIR instead of $PWD; sources (apm.yml, .apm/, project tree for placement scoring) continue resolving from $PWD. Pairs with 'apm install --root' for scratch-dir verification. Cannot be combined with --watch.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every supported target when undeclared. Cannot be combined with project-scoped output flags such as --target, --all, --watch, --root, or --output; use with --dry-run to preview changes.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/compile/cli.py"
+    },
+    {
+      "id": "config",
+      "label": "apm config",
+      "category": "Setup and maintenance",
+      "command": [
+        "config"
+      ],
+      "description": "Configure APM CLI. Run with no subcommand to show the merged project and global configuration.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/config.py"
+    },
+    {
+      "id": "config get",
+      "label": "apm config get",
+      "category": "Setup and maintenance",
+      "command": [
+        "config",
+        "get"
+      ],
+      "description": "Get a configuration value",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "key",
+          "label": "key",
+          "required": false,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/config.py"
+    },
+    {
+      "id": "config list",
+      "label": "apm config list",
+      "category": "Setup and maintenance",
+      "command": [
+        "config",
+        "list"
+      ],
+      "description": "List all configuration values",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/config.py"
+    },
+    {
+      "id": "config set",
+      "label": "apm config set",
+      "category": "Setup and maintenance",
+      "command": [
+        "config",
+        "set"
+      ],
+      "description": "Set a configuration value",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "key",
+          "label": "key",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        },
+        {
+          "name": "value",
+          "label": "value",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/config.py"
+    },
+    {
+      "id": "config unset",
+      "label": "apm config unset",
+      "category": "Setup and maintenance",
+      "command": [
+        "config",
+        "unset"
+      ],
+      "description": "Unset a configuration value",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "key",
+          "label": "key",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/config.py"
+    },
+    {
+      "id": "deny",
+      "label": "apm deny",
+      "category": "Governance",
+      "command": [
+        "deny"
+      ],
+      "description": "Deny executable primitives for packages (a narrowing override).\n\nWrites a deny entry to the project ``executables.deny`` (default) or your\npersonal ``~/.apm/config.json`` (``--user``). Deny always wins.\n\nExample:\n\n    apm deny owner/repo",
+      "options": [
+        {
+          "name": "--user",
+          "label": "user",
+          "type": "boolean",
+          "aliases": [
+            "--user"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Record the deny in your personal ~/.apm/config.json instead of apm.yml.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": true,
+          "variadic": true,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/approve.py"
+    },
+    {
+      "id": "deps clean",
+      "label": "apm deps clean",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "clean"
+      ],
+      "description": "Remove all APM dependencies",
+      "options": [
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show what would be removed without removing",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/cli.py"
+    },
+    {
+      "id": "deps info",
+      "label": "apm deps info",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "info"
+      ],
+      "description": "Show detailed package information (alias for 'apm view PACKAGE' for installed packages; prefer 'apm view' in new scripts)",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "package",
+          "label": "package",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/cli.py"
+    },
+    {
+      "id": "deps list",
+      "label": "apm deps list",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "list"
+      ],
+      "description": "List installed APM dependencies and their primitives",
+      "options": [
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "List user-scope dependencies (~/.apm/) instead of project",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--all",
+          "label": "all",
+          "type": "boolean",
+          "aliases": [
+            "--all"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show both project and user-scope dependencies",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--insecure",
+          "label": "insecure",
+          "type": "boolean",
+          "aliases": [
+            "--insecure"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show only installed dependencies locked to http:// sources",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/cli.py"
+    },
+    {
+      "id": "deps tree",
+      "label": "apm deps tree",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "tree"
+      ],
+      "description": "Show the full dependency tree",
+      "options": [
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show user-scope dependency tree (~/.apm/)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/cli.py"
+    },
+    {
+      "id": "deps update",
+      "label": "apm deps update",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "update"
+      ],
+      "description": "DEPRECATED: use 'apm update' instead (strict superset). Update APM dependencies to latest refs",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed update information",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite locally-authored files on collision",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--parallel-downloads",
+          "label": "parallel downloads",
+          "type": "number",
+          "aliases": [
+            "--parallel-downloads"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent package downloads (0 to disable parallelism)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 2
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Update user-scope dependencies (~/.apm/)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--legacy-skill-paths",
+          "label": "legacy skill paths",
+          "type": "boolean",
+          "aliases": [
+            "--legacy-skill-paths"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of the shared .agents/skills/ directory. Compatibility flag for projects that need per-client skill layouts.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": false,
+          "variadic": true,
+          "at": 2
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/cli.py"
+    },
+    {
+      "id": "deps why",
+      "label": "apm deps why",
+      "category": "Packages",
+      "command": [
+        "deps",
+        "why"
+      ],
+      "description": "Entry point for ``apm deps why <pkg>``.",
+      "options": [
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Resolve against the user-scope lockfile (~/.apm/apm.lock.yaml).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--json",
+          "label": "json",
+          "type": "boolean",
+          "aliases": [
+            "--json"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Emit machine-readable JSON to stdout.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "package",
+          "label": "package",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/deps/why.py"
+    },
+    {
+      "id": "doctor",
+      "label": "apm doctor",
+      "category": "Setup and maintenance",
+      "command": [
+        "doctor"
+      ],
+      "description": "Run environment diagnostics (git, network, auth, marketplace config). Reports a pass/fail table and exits non-zero if a critical check fails.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/doctor.py"
+    },
+    {
+      "id": "experimental",
+      "label": "apm experimental",
+      "category": "Setup and maintenance",
+      "command": [
+        "experimental"
+      ],
+      "description": "Manage experimental feature flags",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show verbose output",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/experimental.py"
+    },
+    {
+      "id": "experimental disable",
+      "label": "apm experimental disable",
+      "category": "Setup and maintenance",
+      "command": [
+        "experimental",
+        "disable"
+      ],
+      "description": "Disable an experimental feature",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/experimental.py"
+    },
+    {
+      "id": "experimental enable",
+      "label": "apm experimental enable",
+      "category": "Setup and maintenance",
+      "command": [
+        "experimental",
+        "enable"
+      ],
+      "description": "Enable an experimental feature",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/experimental.py"
+    },
+    {
+      "id": "experimental list",
+      "label": "apm experimental list",
+      "category": "Setup and maintenance",
+      "command": [
+        "experimental",
+        "list"
+      ],
+      "description": "List all experimental features",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--enabled",
+          "label": "enabled",
+          "type": "boolean",
+          "aliases": [
+            "--enabled"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show only enabled features",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--disabled",
+          "label": "disabled",
+          "type": "boolean",
+          "aliases": [
+            "--disabled"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show only disabled features",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--json",
+          "label": "json",
+          "type": "boolean",
+          "aliases": [
+            "--json"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Output as JSON array",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/experimental.py"
+    },
+    {
+      "id": "experimental reset",
+      "label": "apm experimental reset",
+      "category": "Setup and maintenance",
+      "command": [
+        "experimental",
+        "reset"
+      ],
+      "description": "Reset experimental features to defaults",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": false,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/experimental.py"
+    },
+    {
+      "id": "find",
+      "label": "apm find",
+      "category": "Packages",
+      "command": [
+        "find"
+      ],
+      "description": "Trace a materialized file back to its contributing package(s).\n\nFILE_PATH is a relative path to a file deployed by an installed package.\n\nExit 0 if the file is tracked; non-zero if it is unknown.",
+      "options": [
+        {
+          "name": "--source",
+          "label": "source",
+          "type": "boolean",
+          "aliases": [
+            "--source"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Append resolved origin (oci/git/local) to each package name.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--path",
+          "label": "path",
+          "type": "boolean",
+          "aliases": [
+            "--path"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Print full root-to-target dependency chain (like apm deps why).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "file_path",
+          "label": "file path",
+          "required": true,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/find.py"
+    },
+    {
+      "id": "init",
+      "label": "apm init",
+      "category": "Setup and maintenance",
+      "command": [
+        "init"
+      ],
+      "description": "Initialize a new APM project",
+      "options": [
+        {
+          "name": "--discover",
+          "label": "discover",
+          "type": "boolean",
+          "aliases": [
+            "--discover"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Inventory existing local packages without writes",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip interactive prompts and use auto-detected defaults",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--plugin",
+          "label": "plugin",
+          "type": "boolean",
+          "aliases": [
+            "--plugin"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "(deprecated) Use 'apm plugin init' instead. Scaffolds plugin.json + apm.yml.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--marketplace",
+          "label": "marketplace",
+          "type": "boolean",
+          "aliases": [
+            "--marketplace"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "(deprecated) Use 'apm marketplace init' instead. Seeds a marketplace block.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Comma-separated target list (skip prompt, write directly)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--apply",
+          "label": "apply",
+          "type": "boolean",
+          "aliases": [
+            "--apply",
+            "--write"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Add existing local package references to consumer apm.yml; never install.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--format",
+          "label": "format",
+          "type": "choice",
+          "aliases": [
+            "--format"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Discovery report format",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "text",
+            "json",
+            "yaml"
+          ],
+          "default": "text",
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Discover under home and declare packages in ~/.apm/apm.yml",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "project_name",
+          "label": "project name",
+          "required": false,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/init.py"
+    },
+    {
+      "id": "install",
+      "label": "apm install",
+      "category": "Packages",
+      "command": [
+        "install"
+      ],
+      "description": "Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)",
+      "options": [
+        {
+          "name": "--runtime",
+          "label": "runtime",
+          "type": "string",
+          "aliases": [
+            "--runtime"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--exclude",
+          "label": "exclude",
+          "type": "string",
+          "aliases": [
+            "--exclude"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Exclude one runtime from the resolved MCP/LSP target set",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--only",
+          "label": "only",
+          "type": "choice",
+          "aliases": [
+            "--only"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Install only APM packages or MCP/LSP service dependencies",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "apm",
+            "mcp"
+          ],
+          "at": 1
+        },
+        {
+          "name": "--update",
+          "label": "update",
+          "type": "boolean",
+          "aliases": [
+            "--update"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI). Unlike --refresh, --update restructures the entire dependency graph.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show what would change without writing files",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--frozen",
+          "label": "frozen",
+          "type": "boolean",
+          "aliases": [
+            "--frozen"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml, including Git source, ref, host provider, transport, and MCP config state (CI-safe; mutually exclusive with --update, --mcp, and positional packages). Use 'apm audit' for on-disk integrity.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed installation information",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--trust-transitive-mcp",
+          "label": "trust transitive mcp",
+          "type": "boolean",
+          "aliases": [
+            "--trust-transitive-mcp"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--parallel-downloads",
+          "label": "parallel downloads",
+          "type": "number",
+          "aliases": [
+            "--parallel-downloads"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent package downloads (0 to disable parallelism)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 1
+        },
+        {
+          "name": "--dev",
+          "label": "dev",
+          "type": "boolean",
+          "aliases": [
+            "--dev"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Install as development dependency (devDependencies)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--allow-insecure",
+          "label": "allow insecure",
+          "type": "boolean",
+          "aliases": [
+            "--allow-insecure"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Allow HTTP (insecure) dependencies. Required when dependencies use http:// URLs.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--allow-insecure-host",
+          "label": "allow insecure host",
+          "type": "string",
+          "aliases": [
+            "--allow-insecure-host"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Allow transitive HTTP (insecure) dependencies from this hostname. Repeat for multiple hosts.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Install to user scope (~/.apm/) instead of the current project. Direct MCP installs create or update ~/.apm/apm.yml. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--ssh",
+          "label": "ssh",
+          "type": "boolean",
+          "aliases": [
+            "--ssh"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Prefer SSH transport for shorthand (owner/repo) dependencies. Mutually exclusive with --https.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--https",
+          "label": "https",
+          "type": "boolean",
+          "aliases": [
+            "--https"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Prefer HTTPS transport for shorthand (owner/repo) dependencies. Mutually exclusive with --ssh.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--allow-protocol-fallback",
+          "label": "allow protocol fallback",
+          "type": "boolean",
+          "aliases": [
+            "--allow-protocol-fallback"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes; on servers that use different SSH and HTTPS ports, omit this flag and pin the dependency with an explicit ssh:// or https:// URL.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--mcp",
+          "label": "mcp",
+          "type": "string",
+          "aliases": [
+            "--mcp"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or a stdio command after `--`. Resolves active targets as --runtime/--target > apm.yml targets: > apm config set target ... > auto-detect (only when no higher-priority selection exists); writes only for active targets.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--transport",
+          "label": "transport",
+          "type": "choice",
+          "aliases": [
+            "--transport"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "MCP transport (stdio, http, sse, streamable-http). Inferred from --url or post-- command when omitted (requires --mcp).",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "stdio",
+            "http",
+            "sse",
+            "streamable-http"
+          ],
+          "at": 1
+        },
+        {
+          "name": "--url",
+          "label": "url",
+          "type": "string",
+          "aliases": [
+            "--url"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "MCP server URL for http/sse/streamable-http transports (requires --mcp).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--env",
+          "label": "env",
+          "type": "string",
+          "aliases": [
+            "--env"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Environment variable for stdio MCP, repeatable (requires --mcp).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--header",
+          "label": "header",
+          "type": "string",
+          "aliases": [
+            "--header"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "HTTP header for remote MCP, repeatable (requires --mcp and --url).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--mcp-version",
+          "label": "mcp version",
+          "type": "string",
+          "aliases": [
+            "--mcp-version"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Pin MCP registry entry to a specific version (requires --mcp).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--registry",
+          "label": "registry",
+          "type": "string",
+          "aliases": [
+            "--registry"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "MCP registry URL (http:// or https://) for resolving --mcp NAME. Precedence: this flag, MCP_REGISTRY_URL, apm config, then the public default. Captured in apm.yml on the entry's 'registry:' field for auditability. Not valid with --url or a stdio command (self-defined entries).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--skill",
+          "label": "skill",
+          "type": "string",
+          "aliases": [
+            "--skill"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--no-policy",
+          "label": "no policy",
+          "type": "boolean",
+          "aliases": [
+            "--no-policy"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--audit",
+          "label": "audit",
+          "type": "choice",
+          "aliases": [
+            "--audit"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Run 'apm audit' over deployed files during install: off, warn, or block. Overrides config/policy. Requires 'apm experimental enable external-scanners'. An org policy 'block' cannot be relaxed below by this flag.",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "off",
+            "warn",
+            "block"
+          ],
+          "at": 1
+        },
+        {
+          "name": "--no-audit",
+          "label": "no audit",
+          "type": "boolean",
+          "aliases": [
+            "--no-audit"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Disable the install-time audit for this invocation (equivalent to --audit off).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--refresh",
+          "label": "refresh",
+          "type": "boolean",
+          "aliases": [
+            "--refresh"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Re-fetch all dependencies from upstream and re-resolve all ref pins. Use 'apm update' for interactive upgrade planning.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--legacy-skill-paths",
+          "label": "legacy skill paths",
+          "type": "boolean",
+          "aliases": [
+            "--legacy-skill-paths"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of the shared .agents/skills/ directory. Compatibility flag for projects that need per-client skill layouts.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--as",
+          "label": "as",
+          "type": "string",
+          "aliases": [
+            "--as"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Override the log/display label when installing a local bundle (directory, .zip, or .tar.gz produced by 'apm pack'). Only valid for local-bundle installs; passing --as without a local bundle path is rejected.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--trust-bin",
+          "label": "trust bin",
+          "type": "boolean",
+          "aliases": [
+            "--trust-bin/--no-trust-bin"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Allow or skip bin/ executable deployment for this invocation. --trust-bin deploys bin/ executables (suppresses the trust warning). --no-trust-bin skips bin/ deployment even when policy allows it. Default: deploys bin/ but emits a warning; non-interactive contexts skip bin/ by default. Use 'apm approve' for persistent per-package trust.",
+          "optionalValue": false,
+          "hidden": false,
+          "negative": "--no-trust-bin",
+          "at": 1
+        },
+        {
+          "name": "--root",
+          "label": "root",
+          "type": "string",
+          "aliases": [
+            "--root"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Install into DIR instead of $PWD: apm_modules/, apm.lock.yaml, .claude/, .codex/, .agents/, .opencode/ are written under DIR while sources (apm.yml, .apm/, local-path packages) continue resolving from $PWD. Mirrors 'pip install --target' / 'npm install --prefix'. Project scope only; not valid with --global.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": false,
+          "variadic": true,
+          "at": 1
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/install.py"
+    },
+    {
+      "id": "lifecycle",
+      "label": "apm lifecycle",
+      "category": "Authoring",
+      "command": [
+        "lifecycle"
+      ],
+      "description": "Inspect, test, and scaffold lifecycle scripts.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "lifecycle init",
+      "label": "apm lifecycle init",
+      "category": "Authoring",
+      "command": [
+        "lifecycle",
+        "init"
+      ],
+      "description": "Inject a starter lifecycle: block into apm.yml.",
+      "options": [
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite existing lifecycle: block if present.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "lifecycle test",
+      "label": "apm lifecycle test",
+      "category": "Authoring",
+      "command": [
+        "lifecycle",
+        "test"
+      ],
+      "description": "Dry-run a synthetic lifecycle event through discovered scripts.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--execute",
+          "label": "execute",
+          "type": "boolean",
+          "aliases": [
+            "--execute"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Actually run the scripts (default is a non-executing dry-run).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "event",
+          "label": "event",
+          "required": false,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "lifecycle trust",
+      "label": "apm lifecycle trust",
+      "category": "Authoring",
+      "command": [
+        "lifecycle",
+        "trust"
+      ],
+      "description": "Trust the project apm.yml lifecycle: block so its scripts run on install.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "lifecycle untrust",
+      "label": "apm lifecycle untrust",
+      "category": "Authoring",
+      "command": [
+        "lifecycle",
+        "untrust"
+      ],
+      "description": "Revoke trust for the project apm.yml lifecycle: block.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "lifecycle validate",
+      "label": "apm lifecycle validate",
+      "category": "Authoring",
+      "command": [
+        "lifecycle",
+        "validate"
+      ],
+      "description": "Validate all discovered script files for errors.",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lifecycle.py"
+    },
+    {
+      "id": "list",
+      "label": "apm list",
+      "category": "Execution",
+      "command": [
+        "list"
+      ],
+      "description": "List available scripts in the current project",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/list_cmd.py"
+    },
+    {
+      "id": "lock",
+      "label": "apm lock",
+      "category": "Packages",
+      "command": [
+        "lock"
+      ],
+      "description": "Resolve dependencies and write apm.lock.yaml without deploying or deleting files",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show per-dependency resolution details",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Operate on ~/.apm/apm.yml instead of the current project",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--update",
+          "label": "update",
+          "type": "boolean",
+          "aliases": [
+            "--update"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Re-resolve refs to their latest SHAs before writing the lockfile",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--no-policy",
+          "label": "no policy",
+          "type": "boolean",
+          "aliases": [
+            "--no-policy"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip policy enforcement during resolution",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Agent target(s) to scope policy enforcement during resolution (e.g. claude, copilot, cursor). No files are deployed or deleted regardless of this value.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--parallel-downloads",
+          "label": "parallel downloads",
+          "type": "number",
+          "aliases": [
+            "--parallel-downloads"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent package downloads (0 to disable parallelism)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lock.py"
+    },
+    {
+      "id": "lock export",
+      "label": "apm lock export",
+      "category": "Packages",
+      "command": [
+        "lock",
+        "export"
+      ],
+      "description": "Export an SBOM/inventory from apm.lock.yaml, or legacy apm.lock without migration",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show per-dependency resolution details",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Read the user-scope (~/.apm/) lockfile instead of the current project",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 2
+        },
+        {
+          "name": "--update",
+          "label": "update",
+          "type": "boolean",
+          "aliases": [
+            "--update"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Re-resolve refs to their latest SHAs before writing the lockfile",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--no-policy",
+          "label": "no policy",
+          "type": "boolean",
+          "aliases": [
+            "--no-policy"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip policy enforcement during resolution",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Agent target(s) to scope policy enforcement during resolution (e.g. claude, copilot, cursor). No files are deployed or deleted regardless of this value.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--parallel-downloads",
+          "label": "parallel downloads",
+          "type": "number",
+          "aliases": [
+            "--parallel-downloads"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent package downloads (0 to disable parallelism)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 1
+        },
+        {
+          "name": "--format",
+          "label": "format",
+          "type": "string",
+          "aliases": [
+            "--format",
+            "-f"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "SBOM output format",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "string",
+          "aliases": [
+            "--output",
+            "-o"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Write the SBOM to a file instead of stdout",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--timestamp",
+          "label": "timestamp",
+          "type": "string",
+          "aliases": [
+            "--timestamp"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. 2024-06-01T00:00:00+00:00) for reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's legacy generated_at, then the Unix epoch.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/lock.py"
+    },
+    {
+      "id": "marketplace add",
+      "label": "apm marketplace add",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "add"
+      ],
+      "description": "Register a marketplace",
+      "options": [
+        {
+          "name": "--name",
+          "label": "name",
+          "type": "string",
+          "aliases": [
+            "--name",
+            "-n"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Display name (defaults to repo name)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--ref",
+          "label": "ref",
+          "type": "string",
+          "aliases": [
+            "--ref",
+            "-r"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Git ref (branch, tag, or commit). Default: main. Applies to git-backed sources only.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--branch",
+          "label": "branch",
+          "type": "string",
+          "aliases": [
+            "--branch",
+            "-b"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deprecated alias for --ref",
+          "optionalValue": false,
+          "hidden": true,
+          "at": 2
+        },
+        {
+          "name": "--host",
+          "label": "host",
+          "type": "string",
+          "aliases": [
+            "--host"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Git host FQDN for OWNER/REPO shorthand (default: github.com)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "source",
+          "label": "source",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "marketplace audit",
+      "label": "apm marketplace audit",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "audit"
+      ],
+      "description": "Check that plugin dependencies resolve through the marketplace",
+      "options": [
+        {
+          "name": "--strict",
+          "label": "strict",
+          "type": "boolean",
+          "aliases": [
+            "--strict"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Exit non-zero on bypasses, fetch errors, or no verified plugins",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/audit.py"
+    },
+    {
+      "id": "marketplace browse",
+      "label": "apm marketplace browse",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "browse"
+      ],
+      "description": "Browse plugins in a marketplace",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "marketplace check",
+      "label": "apm marketplace check",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "check"
+      ],
+      "description": "Validate marketplace entries are resolvable",
+      "options": [
+        {
+          "name": "--offline",
+          "label": "offline",
+          "type": "boolean",
+          "aliases": [
+            "--offline"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Schema + cached-ref checks only (no network)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/check.py"
+    },
+    {
+      "id": "marketplace init",
+      "label": "apm marketplace init",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "init"
+      ],
+      "description": "Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)",
+      "options": [
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite an existing 'marketplace:' block in apm.yml",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--no-gitignore-check",
+          "label": "no gitignore check",
+          "type": "boolean",
+          "aliases": [
+            "--no-gitignore-check"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip the .gitignore staleness check",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--name",
+          "label": "name",
+          "type": "string",
+          "aliases": [
+            "--name"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Marketplace/package name (default: my-marketplace)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--owner",
+          "label": "owner",
+          "type": "string",
+          "aliases": [
+            "--owner"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Owner name for the marketplace",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/init.py"
+    },
+    {
+      "id": "marketplace list",
+      "label": "apm marketplace list",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "list"
+      ],
+      "description": "List registered marketplaces",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "marketplace migrate",
+      "label": "apm marketplace migrate",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "migrate"
+      ],
+      "description": "Fold marketplace.yml into apm.yml's 'marketplace:' block",
+      "options": [
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force",
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite an existing 'marketplace:' block in apm.yml (alias: --yes/-y)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show the proposed apm.yml changes without writing them",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/migrate.py"
+    },
+    {
+      "id": "marketplace outdated",
+      "label": "apm marketplace outdated",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "outdated"
+      ],
+      "description": "Show packages with available upgrades",
+      "options": [
+        {
+          "name": "--offline",
+          "label": "offline",
+          "type": "boolean",
+          "aliases": [
+            "--offline"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Use cached refs only (no network)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--include-prerelease",
+          "label": "include prerelease",
+          "type": "boolean",
+          "aliases": [
+            "--include-prerelease"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include prerelease versions",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/outdated.py"
+    },
+    {
+      "id": "marketplace package add",
+      "label": "apm marketplace package add",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "package",
+        "add"
+      ],
+      "description": "Add a package to marketplace authoring config. SOURCE accepts owner/repo, host.tld/owner/repo, or https://host.tld/owner/repo (nested paths allowed).",
+      "options": [
+        {
+          "name": "--name",
+          "label": "name",
+          "type": "string",
+          "aliases": [
+            "--name"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Package name (default: repo name)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--version",
+          "label": "version",
+          "type": "string",
+          "aliases": [
+            "--version"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Semver range (e.g. '>=1.0.0')",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--ref",
+          "label": "ref",
+          "type": "string",
+          "aliases": [
+            "--ref"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--subdir",
+          "label": "subdir",
+          "type": "string",
+          "aliases": [
+            "-s",
+            "--subdir"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Subdirectory inside source repo",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--tag-pattern",
+          "label": "tag pattern",
+          "type": "string",
+          "aliases": [
+            "--tag-pattern"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Tag pattern (e.g. 'v{version}')",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--tags",
+          "label": "tags",
+          "type": "string",
+          "aliases": [
+            "--tags"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Comma-separated tags",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--include-prerelease",
+          "label": "include prerelease",
+          "type": "boolean",
+          "aliases": [
+            "--include-prerelease"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include prerelease versions",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--no-verify",
+          "label": "no verify",
+          "type": "boolean",
+          "aliases": [
+            "--no-verify"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip remote reachability check",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        }
+      ],
+      "positionals": [
+        {
+          "name": "source",
+          "label": "source",
+          "required": true,
+          "variadic": false,
+          "at": 3
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/plugin/add.py"
+    },
+    {
+      "id": "marketplace package remove",
+      "label": "apm marketplace package remove",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "package",
+        "remove"
+      ],
+      "description": "Remove a package from marketplace authoring config",
+      "options": [
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 3
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/plugin/remove.py"
+    },
+    {
+      "id": "marketplace package set",
+      "label": "apm marketplace package set",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "package",
+        "set"
+      ],
+      "description": "Update a package entry in marketplace authoring config",
+      "options": [
+        {
+          "name": "--version",
+          "label": "version",
+          "type": "string",
+          "aliases": [
+            "--version"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Semver range (e.g. '>=1.0.0')",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--ref",
+          "label": "ref",
+          "type": "string",
+          "aliases": [
+            "--ref"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--subdir",
+          "label": "subdir",
+          "type": "string",
+          "aliases": [
+            "--subdir"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Subdirectory inside source repo",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--tag-pattern",
+          "label": "tag pattern",
+          "type": "string",
+          "aliases": [
+            "--tag-pattern"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Tag pattern (e.g. 'v{version}')",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--tags",
+          "label": "tags",
+          "type": "string",
+          "aliases": [
+            "--tags"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Comma-separated tags",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--include-prerelease",
+          "label": "include prerelease",
+          "type": "boolean",
+          "aliases": [
+            "--include-prerelease"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include prerelease versions",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 3
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 3
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/plugin/set.py"
+    },
+    {
+      "id": "marketplace remove",
+      "label": "apm marketplace remove",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "remove"
+      ],
+      "description": "Remove a registered marketplace",
+      "options": [
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip confirmation prompt",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "marketplace update",
+      "label": "apm marketplace update",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "update"
+      ],
+      "description": "Refresh marketplace cache",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": false,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "marketplace validate",
+      "label": "apm marketplace validate",
+      "category": "Marketplaces",
+      "command": [
+        "marketplace",
+        "validate"
+      ],
+      "description": "Validate marketplace structure and plugin schema",
+      "options": [
+        {
+          "name": "--check-refs",
+          "label": "check refs",
+          "type": "boolean",
+          "aliases": [
+            "--check-refs"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Verify version refs are reachable (network)",
+          "optionalValue": false,
+          "hidden": true,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace/validate.py"
+    },
+    {
+      "id": "mcp install",
+      "label": "apm mcp install",
+      "category": "Governance",
+      "command": [
+        "mcp",
+        "install"
+      ],
+      "description": "Add an MCP server to apm.yml. Alias for 'apm install --mcp'.\n\nExamples:\n\n  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n  apm mcp install api --transport http --url https://example.com/mcp\n\n\b\nForwarded install options (see 'apm install --help' for the full list):\n  --transport [stdio|http|sse|streamable-http]\n  --url URL              Server URL for remote transports\n  --env KEY=VALUE        Environment variable (repeatable)\n  --header KEY=VALUE     HTTP header (repeatable)\n  -t, --target TARGET    Agent target(s) to deploy to\n  --registry URL         Custom registry URL\n  --mcp-version VER      Pin registry entry to a specific version\n  -g, --global           Install to user scope (~/.apm/)\n  --trust-transitive-mcp Trust MCP servers from transitive dependencies\n  --dev / --dry-run / --force / --verbose / --no-policy",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "name",
+          "label": "name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/mcp.py"
+    },
+    {
+      "id": "mcp list",
+      "label": "apm mcp list",
+      "category": "Governance",
+      "command": [
+        "mcp",
+        "list"
+      ],
+      "description": "List all available MCP servers",
+      "options": [
+        {
+          "name": "--limit",
+          "label": "limit",
+          "type": "string",
+          "aliases": [
+            "--limit"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Number of results to show",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 20,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/mcp.py"
+    },
+    {
+      "id": "mcp search",
+      "label": "apm mcp search",
+      "category": "Governance",
+      "command": [
+        "mcp",
+        "search"
+      ],
+      "description": "Search MCP servers in registry",
+      "options": [
+        {
+          "name": "--limit",
+          "label": "limit",
+          "type": "string",
+          "aliases": [
+            "--limit"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Number of results to show",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 10,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "query",
+          "label": "query",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/mcp.py"
+    },
+    {
+      "id": "mcp show",
+      "label": "apm mcp show",
+      "category": "Governance",
+      "command": [
+        "mcp",
+        "show"
+      ],
+      "description": "Show detailed MCP server information",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "server_name",
+          "label": "server name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/mcp.py"
+    },
+    {
+      "id": "outdated",
+      "label": "apm outdated",
+      "category": "Packages",
+      "command": [
+        "outdated"
+      ],
+      "description": "Show outdated locked dependencies",
+      "options": [
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Check user-scope dependencies (~/.apm/)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show additional info (e.g., available tags for outdated deps)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--parallel-checks",
+          "label": "parallel checks",
+          "type": "number",
+          "aliases": [
+            "--parallel-checks",
+            "-j"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent remote checks (default: 4, 0 = sequential)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": true,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/outdated.py"
+    },
+    {
+      "id": "pack",
+      "label": "apm pack",
+      "category": "Authoring",
+      "command": [
+        "pack"
+      ],
+      "description": "Pack APM artifacts: bundle and/or marketplace.json.",
+      "options": [
+        {
+          "name": "--claude-plugin",
+          "label": "claude plugin",
+          "type": "boolean",
+          "aliases": [
+            "--claude-plugin"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Select the legacy Claude plugin bundle output (current no-flag default).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--format",
+          "label": "format",
+          "type": "string",
+          "aliases": [
+            "--format"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Bundle format selector. 'agent-plugin' emits portable Agent Plugins v1; 'plugin' is the compatibility alias for the legacy Claude plugin bundle; 'claude' / 'claude-plugin' also emit that bundle; and 'apm' emits the legacy APM bundle layout. The current no-flag default is 'claude-plugin'.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--archive",
+          "label": "archive",
+          "type": "boolean",
+          "aliases": [
+            "--archive"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Produce a .zip archive instead of a directory (previous default: .tar.gz; use --archive-format tar.gz for legacy CI pipelines).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--archive-format",
+          "label": "archive format",
+          "type": "choice",
+          "aliases": [
+            "--archive-format"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Archive format when --archive is set. 'zip' (default) is Claude Code and plugin-host compatible and matches apm publish output. 'tar.gz' is typically smaller for text-heavy bundles and preserves the previous default for CI pipelines that rely on it.",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "zip",
+            "tar.gz"
+          ],
+          "default": "zip",
+          "at": 1
+        },
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "string",
+          "aliases": [
+            "-o",
+            "--output"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Bundle output directory (default: ./build).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": "./build",
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show what would be packed without writing",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Allow overwriting on collision: last-writer-wins in plugin bundles; overwrites any existing plugin.json at the generated manifest path.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed packing information.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--offline",
+          "label": "offline",
+          "type": "boolean",
+          "aliases": [
+            "--offline"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Marketplace: use cached refs, skip network.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--include-prerelease",
+          "label": "include prerelease",
+          "type": "boolean",
+          "aliases": [
+            "--include-prerelease"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Marketplace: include pre-release version tags.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--check-versions",
+          "label": "check versions",
+          "type": "boolean",
+          "aliases": [
+            "--check-versions"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Release gate: verify per-package versions agree with the configured marketplace.versioning.strategy (lockstep | tag_pattern | per_package). Exits 3 on misalignment. Composes with --check-clean and --dry-run.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--check-clean",
+          "label": "check clean",
+          "type": "boolean",
+          "aliases": [
+            "--check-clean"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Release gate: regenerate every configured marketplace output to a temp representation and diff against the effective on-disk path, including --marketplace-path overrides. This check is always read-only. Exits 4 for drift or uncertifiable remote metadata.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--strict-metadata",
+          "label": "strict metadata",
+          "type": "boolean",
+          "aliases": [
+            "--strict-metadata"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Marketplace: fail before writing when remote description/version metadata cannot be fetched. Exits 5; --check-clean always rejects uncertifiable metadata with exit 4.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--marketplace",
+          "label": "marketplace",
+          "type": "string",
+          "aliases": [
+            "-m",
+            "--marketplace"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Comma-separated marketplace outputs to build (e.g. 'claude,codex'). Use 'all' for every configured output, 'none' to skip marketplace. Default: build all configured outputs.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--marketplace-path",
+          "label": "marketplace path",
+          "type": "string",
+          "aliases": [
+            "--marketplace-path"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Override output path for a format: FORMAT=PATH (repeatable). Example: --marketplace-path claude=dist/marketplace.json",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--json",
+          "label": "json",
+          "type": "boolean",
+          "aliases": [
+            "--json"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Emit machine-readable JSON to stdout; logs go to stderr.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--legacy-skill-paths",
+          "label": "legacy skill paths",
+          "type": "boolean",
+          "aliases": [
+            "--legacy-skill-paths"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of the shared .agents/skills/ directory. Compatibility flag for projects that need per-client skill layouts.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/pack.py"
+    },
+    {
+      "id": "plugin init",
+      "label": "apm plugin init",
+      "category": "Authoring",
+      "command": [
+        "plugin",
+        "init"
+      ],
+      "description": "Scaffold a plugin project (creates plugin.json + apm.yml)",
+      "options": [
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip interactive prompts and use auto-detected defaults",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Comma-separated target list (skip prompt, write directly)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--format",
+          "label": "format",
+          "type": "string",
+          "aliases": [
+            "--format"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Plugin format. 'agent-plugin' selects portable Agent Plugins v1; 'plugin', 'claude', and 'claude-plugin' select the current Claude-compatible default.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--claude-plugin",
+          "label": "claude plugin",
+          "type": "boolean",
+          "aliases": [
+            "--claude-plugin"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Scaffold the legacy Claude-compatible layout (current no-flag default)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        }
+      ],
+      "positionals": [
+        {
+          "name": "project_name",
+          "label": "project name",
+          "required": false,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/plugin/init.py"
+    },
+    {
+      "id": "policy explain",
+      "label": "apm policy explain",
+      "category": "Governance",
+      "command": [
+        "policy",
+        "explain"
+      ],
+      "description": "Explain the effective executable-trust decision for an installed package",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "package",
+          "label": "package",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/policy.py"
+    },
+    {
+      "id": "policy status",
+      "label": "apm policy status",
+      "category": "Governance",
+      "command": [
+        "policy",
+        "status"
+      ],
+      "description": "Show the current policy posture (discovery, cache, rules)",
+      "options": [
+        {
+          "name": "--policy-source",
+          "label": "policy source",
+          "type": "string",
+          "aliases": [
+            "--policy-source"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--no-cache",
+          "label": "no cache",
+          "type": "boolean",
+          "aliases": [
+            "--no-cache"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Force a fresh fetch (skip the policy cache).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--json",
+          "label": "json",
+          "type": "boolean",
+          "aliases": [
+            "--json"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Emit the report as JSON (alias of -o json).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "choice",
+          "aliases": [
+            "-o",
+            "--output"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Output format (default: table).",
+          "optionalValue": false,
+          "hidden": false,
+          "choices": [
+            "table",
+            "json"
+          ],
+          "default": "table",
+          "at": 2
+        },
+        {
+          "name": "--check",
+          "label": "check",
+          "type": "boolean",
+          "aliases": [
+            "--check"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Exit non-zero (1) when no usable policy is found. Use in CI to gate on policy resolvability; default exit is always 0 for human / SIEM use.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/policy.py"
+    },
+    {
+      "id": "preview",
+      "label": "apm preview",
+      "category": "Execution",
+      "command": [
+        "preview"
+      ],
+      "description": "Preview a script's compiled prompt files",
+      "options": [
+        {
+          "name": "--param",
+          "label": "param",
+          "type": "string",
+          "aliases": [
+            "--param",
+            "-p"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Parameter in format name=value",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "script_name",
+          "label": "script name",
+          "required": false,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/run.py"
+    },
+    {
+      "id": "prune",
+      "label": "apm prune",
+      "category": "Packages",
+      "command": [
+        "prune"
+      ],
+      "description": "Remove APM packages absent from the resolved dependency graph and repair stale deployment owners",
+      "options": [
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Preview package removal and ownership repair without mutating anything",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/prune.py"
+    },
+    {
+      "id": "publish",
+      "label": "apm publish",
+      "category": "Authoring",
+      "command": [
+        "publish"
+      ],
+      "description": "Publish a package version to a registry.",
+      "options": [
+        {
+          "name": "--registry",
+          "label": "registry",
+          "type": "string",
+          "aliases": [
+            "--registry"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Registry name (from apm.yml 'registries:' block). Required when multiple registries are configured.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--package",
+          "label": "package",
+          "type": "string",
+          "aliases": [
+            "--package"
+          ],
+          "required": true,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Package identity to publish as (owner/repo, e.g. acme/my-skill).",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--zip",
+          "label": "zip",
+          "type": "string",
+          "aliases": [
+            "--zip"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Path to a pre-built .zip archive. Skips the pack step.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Preview without uploading.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output.",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/publish.py"
+    },
+    {
+      "id": "run",
+      "label": "apm run",
+      "category": "Execution",
+      "command": [
+        "run"
+      ],
+      "description": "Run a script with parameters (experimental)",
+      "options": [
+        {
+          "name": "--param",
+          "label": "param",
+          "type": "string",
+          "aliases": [
+            "--param",
+            "-p"
+          ],
+          "required": false,
+          "repeatable": true,
+          "nargs": 1,
+          "description": "Parameter in format name=value",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "script_name",
+          "label": "script name",
+          "required": false,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": true,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/run.py"
+    },
+    {
+      "id": "runtime list",
+      "label": "apm runtime list",
+      "category": "Execution",
+      "command": [
+        "runtime",
+        "list"
+      ],
+      "description": "List available and installed runtimes",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/runtime.py"
+    },
+    {
+      "id": "runtime remove",
+      "label": "apm runtime remove",
+      "category": "Execution",
+      "command": [
+        "runtime",
+        "remove"
+      ],
+      "description": "Remove an installed runtime",
+      "options": [
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Confirm the action without prompting",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "runtime_name",
+          "label": "runtime name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": true,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/runtime.py"
+    },
+    {
+      "id": "runtime setup",
+      "label": "apm runtime setup",
+      "category": "Execution",
+      "command": [
+        "runtime",
+        "setup"
+      ],
+      "description": "Set up a runtime",
+      "options": [
+        {
+          "name": "--version",
+          "label": "version",
+          "type": "string",
+          "aliases": [
+            "--version"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Specific version to install",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--vanilla",
+          "label": "vanilla",
+          "type": "boolean",
+          "aliases": [
+            "--vanilla"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Install runtime without APM configuration (uses runtime's native defaults)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 2
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "runtime_name",
+          "label": "runtime name",
+          "required": true,
+          "variadic": false,
+          "at": 2
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": true,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/runtime.py"
+    },
+    {
+      "id": "runtime status",
+      "label": "apm runtime status",
+      "category": "Execution",
+      "command": [
+        "runtime",
+        "status"
+      ],
+      "description": "Show active runtime and preference order",
+      "options": [
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": true,
+      "deprecated": false,
+      "source": "apm_cli/commands/runtime.py"
+    },
+    {
+      "id": "search",
+      "label": "apm search",
+      "category": "Marketplaces",
+      "command": [
+        "search"
+      ],
+      "description": "Search plugins in a marketplace (QUERY@MARKETPLACE)",
+      "options": [
+        {
+          "name": "--limit",
+          "label": "limit",
+          "type": "string",
+          "aliases": [
+            "--limit"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max results to show",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 20,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed output",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "expression",
+          "label": "expression",
+          "required": true,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/marketplace.py"
+    },
+    {
+      "id": "self-update",
+      "label": "apm self-update",
+      "category": "Setup and maintenance",
+      "command": [
+        "self-update"
+      ],
+      "description": "Update the APM CLI binary itself to the latest version.\n\nSet these to route updates through an internal mirror (optional):\n  APM_RELEASE_METADATA_URL  latest.json mirror URL.\n  APM_RELEASE_BASE_URL      release asset mirror base URL.\n  APM_INSTALLER_BASE_URL    install.sh/install.ps1 mirror base URL.\n  APM_PYPI_INDEX_URL        PyPI mirror for installer fallback.\n  APM_NO_DIRECT_FALLBACK    1 means fail closed on public fallback.\n",
+      "options": [
+        {
+          "name": "--check",
+          "label": "check",
+          "type": "boolean",
+          "aliases": [
+            "--check"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Only check for updates without installing",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/self_update.py"
+    },
+    {
+      "id": "targets",
+      "label": "apm targets",
+      "category": "Execution",
+      "command": [
+        "targets"
+      ],
+      "description": "Show resolved targets for the current project. If APM detects a target you don't intend (e.g. CLAUDE.md is documentation, not a Claude Code config), pin your targets explicitly in apm.yml.",
+      "options": [
+        {
+          "name": "--json",
+          "label": "json",
+          "type": "boolean",
+          "aliases": [
+            "--json"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Output as JSON instead of a table.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--all",
+          "label": "all",
+          "type": "boolean",
+          "aliases": [
+            "--all"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Include explicit-only targets (e.g. agent-skills, grok-bot) in JSON output (excluded by default).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [],
+      "global": false,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/targets.py"
+    },
+    {
+      "id": "uninstall",
+      "label": "apm uninstall",
+      "category": "Packages",
+      "command": [
+        "uninstall"
+      ],
+      "description": "Remove packages using manifest entries or direct locked keys from 'apm deps list'",
+      "options": [
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Preview removal plan (pre-uninstall scripts still run)",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed removal information",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Remove from user scope (~/.apm/) instead of the current project",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": true,
+          "variadic": true,
+          "at": 1
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/uninstall/cli.py"
+    },
+    {
+      "id": "unpack",
+      "label": "apm unpack",
+      "category": "Authoring",
+      "command": [
+        "unpack"
+      ],
+      "description": "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+      "options": [
+        {
+          "name": "--output",
+          "label": "output",
+          "type": "string",
+          "aliases": [
+            "-o",
+            "--output"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Target directory (default: current directory).",
+          "optionalValue": false,
+          "hidden": false,
+          "default": ".",
+          "at": 1
+        },
+        {
+          "name": "--skip-verify",
+          "label": "skip verify",
+          "type": "boolean",
+          "aliases": [
+            "--skip-verify"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip bundle completeness check.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show what would be unpacked without writing",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Deploy despite critical hidden-character findings.",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show detailed unpacking information",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "bundle_path",
+          "label": "bundle path",
+          "required": true,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": false,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": true,
+      "source": "apm_cli/commands/pack.py"
+    },
+    {
+      "id": "update",
+      "label": "apm update",
+      "category": "Packages",
+      "command": [
+        "update"
+      ],
+      "description": "Refresh APM dependencies to the latest matching refs",
+      "options": [
+        {
+          "name": "--yes",
+          "label": "yes",
+          "type": "boolean",
+          "aliases": [
+            "--yes",
+            "-y"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Skip the confirmation prompt (for CI / automation)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--dry-run",
+          "label": "dry run",
+          "type": "boolean",
+          "aliases": [
+            "--dry-run"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Render the update plan and exit without changing anything",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "aliases": [
+            "--verbose",
+            "-v"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Show unchanged deps and detailed pipeline diagnostics",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Refresh user-scope dependencies (~/.apm/) instead of the current project",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--force",
+          "label": "force",
+          "type": "boolean",
+          "aliases": [
+            "--force"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Overwrite locally-authored files and deploy despite critical security findings; does not bypass upstream ref resolution",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--parallel-downloads",
+          "label": "parallel downloads",
+          "type": "number",
+          "aliases": [
+            "--parallel-downloads"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Max concurrent package downloads (0 to disable parallelism)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": 4,
+          "at": 1
+        },
+        {
+          "name": "--check",
+          "label": "check",
+          "type": "boolean",
+          "aliases": [
+            "--check"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
+          "optionalValue": false,
+          "hidden": true,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--target",
+          "label": "target",
+          "type": "string",
+          "aliases": [
+            "--target",
+            "-t"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "",
+          "optionalValue": false,
+          "hidden": false,
+          "at": 1
+        }
+      ],
+      "positionals": [
+        {
+          "name": "packages",
+          "label": "packages",
+          "required": false,
+          "variadic": true,
+          "at": 1
+        }
+      ],
+      "global": true,
+      "mutates": true,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/update.py"
+    },
+    {
+      "id": "view",
+      "label": "apm view",
+      "category": "Packages",
+      "command": [
+        "view"
+      ],
+      "description": "View package metadata or list remote versions.",
+      "options": [
+        {
+          "name": "--global",
+          "label": "global",
+          "type": "boolean",
+          "aliases": [
+            "--global",
+            "-g"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "Inspect package from user scope (~/.apm/)",
+          "optionalValue": false,
+          "hidden": false,
+          "default": false,
+          "at": 1
+        },
+        {
+          "name": "--registry",
+          "label": "registry",
+          "type": "string",
+          "aliases": [
+            "--registry"
+          ],
+          "required": false,
+          "repeatable": false,
+          "nargs": 1,
+          "description": "List versions from a registry (bare to use the default, or name one). Use a full git URL to force the git path instead.",
+          "optionalValue": true,
+          "hidden": false,
+          "at": 1
+        },
+        {
+          "name": "--verbose",
+          "label": "verbose",
+          "type": "boolean",
+          "at": 0,
+          "description": "Enable APM debug logging (root option)."
+        }
+      ],
+      "positionals": [
+        {
+          "name": "package",
+          "label": "package",
+          "required": true,
+          "variadic": false,
+          "at": 1
+        },
+        {
+          "name": "field",
+          "label": "field",
+          "required": false,
+          "variadic": false,
+          "at": 1
+        }
+      ],
+      "global": true,
+      "mutates": false,
+      "interactive": false,
+      "experimental": false,
+      "deprecated": false,
+      "source": "apm_cli/commands/view.py"
+    }
+  ]
+}

@@ -1,0 +1,468 @@
+{
+  "name": "apm-package-manager",
+  "displayName": "APM - Agent Package Manager",
+  "description": "Visual package, marketplace, and workflow management for Microsoft's Agent Package Manager.",
+  "version": "0.1.0",
+  "publisher": "antao-almada",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aalmada/agent-package-manager-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aalmada/agent-package-manager-extension/issues"
+  },
+  "homepage": "https://github.com/aalmada/agent-package-manager-extension#readme",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "apm",
+    "agents",
+    "skills",
+    "marketplace"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Trust the workspace before reading package sources or running APM."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "APM requires a local or remote filesystem and executable."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "apm",
+          "title": "Agent Package Manager",
+          "icon": "media/apm.svg"
+        }
+      ]
+    },
+    "views": {
+      "apm": [
+        {
+          "id": "apm.browser",
+          "name": "Packages",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "apm.refresh",
+        "title": "APM: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "apm.tools",
+        "title": "APM: Run Command..."
+      },
+      {
+        "command": "apm.marketplaces",
+        "title": "APM: Open Marketplace Settings"
+      },
+      {
+        "command": "apm.settings",
+        "title": "APM: Open Settings",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "apm.install",
+        "title": "APM: Install Package",
+        "icon": "$(add)"
+      },
+      {
+        "command": "apm.setup",
+        "title": "APM: Install or Upgrade CLI"
+      },
+      {
+        "command": "apm.output",
+        "title": "APM: Show Output"
+      },
+      {
+        "command": "apm.filter.installed",
+        "title": "Installed",
+        "category": "APM Filter",
+        "toggled": "apm.filter.installed"
+      },
+      {
+        "command": "apm.filter.updates",
+        "title": "Updates",
+        "category": "APM Filter",
+        "toggled": "apm.filter.updates"
+      },
+      {
+        "command": "apm.filter.scope.workspace",
+        "title": "Workspace",
+        "category": "APM Filter",
+        "toggled": "apm.filter.scopeKind == 'workspace'"
+      },
+      {
+        "command": "apm.filter.scope.global",
+        "title": "Global (user)",
+        "category": "APM Filter",
+        "toggled": "apm.filter.scopeKind == 'global'"
+      },
+      {
+        "command": "apm.filter.marketplace.all",
+        "title": "All Marketplaces",
+        "category": "APM Filter",
+        "toggled": "apm.filter.marketplace == ''"
+      },
+      {
+        "command": "apm.filter.marketplace.choose",
+        "title": "Choose Marketplace...",
+        "category": "APM Filter",
+        "toggled": "apm.filter.marketplace != ''"
+      },
+      {
+        "command": "apm.filter.sort.name",
+        "title": "Name (A-Z)",
+        "category": "APM Filter",
+        "toggled": "apm.filter.sort == 'name'"
+      },
+      {
+        "command": "apm.filter.sort.name-desc",
+        "title": "Name (Z-A)",
+        "category": "APM Filter",
+        "toggled": "apm.filter.sort == 'name-desc'"
+      },
+      {
+        "command": "apm.filter.sort.marketplace",
+        "title": "Marketplace",
+        "category": "APM Filter",
+        "toggled": "apm.filter.sort == 'marketplace'"
+      },
+      {
+        "command": "apm.filter.sort.version",
+        "title": "Version (Ascending)",
+        "category": "APM Filter",
+        "toggled": "apm.filter.sort == 'version'"
+      },
+      {
+        "command": "apm.filter.sort.version-desc",
+        "title": "Version (Descending)",
+        "category": "APM Filter",
+        "toggled": "apm.filter.sort == 'version-desc'"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "apm.refresh",
+          "when": "view == apm.browser",
+          "group": "navigation"
+        },
+        {
+          "command": "apm.settings",
+          "when": "view == apm.browser",
+          "group": "navigation"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "apm.filter.installed",
+          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "group": "1_status@1"
+        },
+        {
+          "command": "apm.filter.updates",
+          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "group": "1_status@2"
+        },
+        {
+          "submenu": "apm.filter.scope",
+          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "group": "2_filters@1"
+        },
+        {
+          "submenu": "apm.filter.marketplace",
+          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "group": "2_filters@2"
+        },
+        {
+          "submenu": "apm.filter.sort",
+          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "group": "3_sort@1"
+        }
+      ],
+      "apm.filter.scope": [
+        {
+          "command": "apm.filter.scope.workspace",
+          "group": "1@1"
+        },
+        {
+          "command": "apm.filter.scope.global",
+          "group": "1@2"
+        }
+      ],
+      "apm.filter.marketplace": [
+        {
+          "command": "apm.filter.marketplace.all",
+          "group": "1@1"
+        },
+        {
+          "command": "apm.filter.marketplace.choose",
+          "group": "1@2"
+        }
+      ],
+      "apm.filter.sort": [
+        {
+          "command": "apm.filter.sort.name",
+          "group": "1@1"
+        },
+        {
+          "command": "apm.filter.sort.name-desc",
+          "group": "1@2"
+        },
+        {
+          "command": "apm.filter.sort.marketplace",
+          "group": "1@3"
+        },
+        {
+          "command": "apm.filter.sort.version",
+          "group": "1@4"
+        },
+        {
+          "command": "apm.filter.sort.version-desc",
+          "group": "1@5"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "apm.filter.installed",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.updates",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.scope.workspace",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.scope.global",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.marketplace.all",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.marketplace.choose",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.sort.name",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.sort.name-desc",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.sort.marketplace",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.sort.version",
+          "when": "false"
+        },
+        {
+          "command": "apm.filter.sort.version-desc",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "id": "apm",
+        "title": "APM",
+        "order": 0,
+        "properties": {
+          "apm.executablePath": {
+            "type": "string",
+            "default": "apm",
+            "scope": "machine-overridable",
+            "restricted": true,
+            "description": "APM executable in the workspace host (local, SSH, WSL, or container)."
+          },
+          "apm.allowRemoteImages": {
+            "type": "boolean",
+            "default": false,
+            "scope": "machine",
+            "markdownDescription": "Allow package documentation to load HTTPS images from remote hosts. Those hosts can see your network address and that you opened the documentation."
+          }
+        }
+      },
+      {
+        "id": "apm.marketplaces",
+        "title": "Marketplaces",
+        "order": 1,
+        "properties": {
+          "apm.marketplaces": {
+            "type": "array",
+            "default": [],
+            "scope": "machine",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "markdownDescription": "Plugin marketplaces registered with APM. Use `owner/repo`, `host/owner/repo`, Git HTTPS or SSH URLs, a `marketplace.json` URL, or a local path. Do not include URL credentials; use APM authentication instead (SSH usernames are supported). Append `#ref` to Git sources, including `file:///` URIs for local repositories. Relative paths require one local workspace folder and are converted to absolute file URIs. Prefix an entry with `name=` to choose its alias; otherwise an alias is derived from the source to avoid replacing another registration. Adding or removing an item runs the corresponding `apm marketplace` command, and external changes appear in this list."
+          }
+        }
+      },
+      {
+        "id": "apm.config",
+        "title": "CLI Configuration",
+        "order": 2,
+        "properties": {
+          "apm.config.autoIntegrate": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "order": 0,
+            "markdownDescription": "Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. Mirrors `apm config` key `auto-integrate`."
+          },
+          "apm.config.target": {
+            "type": "array",
+            "default": [],
+            "scope": "machine",
+            "order": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "agent-skills",
+                "agents",
+                "agy",
+                "all",
+                "antigravity",
+                "claude",
+                "codex",
+                "copilot",
+                "copilot-app",
+                "copilot-cowork",
+                "cursor",
+                "gemini",
+                "grok-bot",
+                "grok-build",
+                "grok-cloud",
+                "hermes",
+                "intellij",
+                "kiro",
+                "openclaw",
+                "opencode",
+                "vscode",
+                "windsurf"
+              ]
+            },
+            "markdownDescription": "Default targets for `apm install` and `apm update` when `--target` and the `apm.yml` targets are absent. Empty uses auto-detection. Mirrors `apm config` key `target`."
+          },
+          "apm.config.preferSsh": {
+            "type": "boolean",
+            "default": false,
+            "scope": "machine",
+            "order": 2,
+            "markdownDescription": "Prefer SSH transport for shorthand (`owner/repo`) dependencies. Mirrors `apm config` key `prefer-ssh`."
+          },
+          "apm.config.allowProtocolFallback": {
+            "type": "boolean",
+            "default": false,
+            "scope": "machine",
+            "order": 3,
+            "markdownDescription": "Retry a failed clone with the opposite protocol (SSH ↔ HTTPS). Mirrors `apm config` key `allow-protocol-fallback`."
+          },
+          "apm.config.mcpRegistryUrl": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "order": 4,
+            "pattern": "^(https?://\\S+)?$",
+            "patternErrorMessage": "Use an http:// or https:// URL, or leave empty for the public registry.",
+            "markdownDescription": "Private MCP registry endpoint used by `apm mcp` and `apm install --mcp`. Do not include credentials in the URL. Empty uses the public registry. `MCP_REGISTRY_URL` overrides it. Mirrors `apm config` key `mcp-registry-url`."
+          },
+          "apm.config.tempDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "order": 5,
+            "markdownDescription": "Existing directory for clone and download operations. Empty uses the system temporary directory. `APM_TEMP_DIR` overrides it. Mirrors `apm config` key `temp-dir`."
+          }
+        }
+      }
+    ],
+    "submenus": [
+      {
+        "id": "apm.filter.scope",
+        "label": "Scope"
+      },
+      {
+        "id": "apm.filter.marketplace",
+        "label": "Marketplace"
+      },
+      {
+        "id": "apm.filter.sort",
+        "label": "Sort By"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test scripts",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:extension": "node scripts/test-extension.mjs",
+    "test:browser": "playwright test",
+    "vscode:prepublish": "npm run typecheck && npm run build",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0",
+    "sanitize-html": "^2.17.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.19.0",
+    "@types/sanitize-html": "^2.16.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.0",
+    "jsdom": "^26.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "^11.0.4"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.4"
+    }
+  }
+}

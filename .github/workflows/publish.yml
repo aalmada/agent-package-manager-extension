@@ -1,0 +1,51 @@
+name: Publish to VS Code Marketplace
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: marketplace-publish
+  cancel-in-progress: false
+jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the default branch
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$WORKFLOW_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Run this workflow from the repository's default branch."
+            exit 1
+          fi
+  validate:
+    needs: validate-ref
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: apm-ubuntu-latest
+          path: release
+      - name: Publish the validated VSIX
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(release/*.vsix)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one VSIX from the Linux validation job."
+            exit 1
+          fi
+          npx vsce publish --oidc --packagePath "${packages[0]}"

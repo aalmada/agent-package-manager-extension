@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.vsix
+.vscode-test/
+coverage/
+test-results/
+playwright-report/
+.DS_Store
+.aspire
+.sharplsp
+
+
+# APM dependencies
+apm_modules/
+.agents/skills/

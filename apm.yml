@@ -1,0 +1,16 @@
+name: agent-package-manager-extension
+version: 1.0.0
+description: APM project for agent-package-manager-extension
+author: Antão Almada
+# Which agent platforms to deploy to.
+# Resolution order: --target flag > this field > auto-detect from filesystem.
+# Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, kiro, opencode, windsurf
+targets:
+  - copilot
+dependencies:
+  apm:
+    - netfabric/intelligentium/plugins/agent-authoring
+    - github/awesome-copilot/plugins/accessibility-kanban
+  mcp: []
+includes: auto
+scripts: {}
