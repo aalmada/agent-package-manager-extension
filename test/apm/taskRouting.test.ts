@@ -242,6 +242,40 @@ test('sign-in clears failed marketplace settings and refreshes the browser', asy
   assert.deepEqual(calls, ['retry', 'refresh']);
 });
 
+test('catalog refresh cannot overlap registry mutations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-refresh-queue-'));
+  const host = harness({ root });
+  const prototype = Object.getPrototypeOf(host.extension);
+  Reflect.set(host.extension, 'serialize', prototype.serialize);
+  Reflect.set(host.extension, 'settingsSync', { sync: async () => {} });
+  Reflect.set(host.extension, 'broadcast', () => {});
+  const calls: string[] = [];
+  let release!: () => void, started!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const catalogStarted = new Promise<void>(resolve => { started = resolve; });
+  Reflect.set(host.extension, 'client', () => ({
+    probe: async () => ({ version: '0.35.0', commands: [] }),
+    getMarketplaces: async () => [],
+    getInstalled: async () => [],
+    getCatalog: async () => {
+      calls.push('catalog:start'); started();
+      await pending;
+      calls.push('catalog:end');
+      return { items: [], errors: [] };
+    }
+  }));
+  try {
+    const refresh: Promise<void> = prototype.doRefresh.call(host.extension);
+    await catalogStarted;
+    const mutation: Promise<void> = prototype.serialize.call(host.extension, 'apm-mutations', async () => { calls.push('mutation'); });
+    await Promise.resolve();
+    assert.deepEqual(calls, ['catalog:start'], 'Registry mutations wait for marketplace update');
+    release();
+    await Promise.all([refresh, mutation]);
+    assert.deepEqual(calls, ['catalog:start', 'catalog:end', 'mutation']);
+  } finally { release(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('interactive APM tasks inherit the authorized VS Code account without putting tokens in arguments', async () => {
   const host = harness({ token: 'opaque-account-credential' });
   await host.run('compile', { '--watch': true });

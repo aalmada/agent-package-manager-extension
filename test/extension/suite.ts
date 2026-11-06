@@ -166,7 +166,7 @@ async function steps() {
   await until('registered marketplaces are imported', () => apm().get<string[]>('marketplaces', []).includes(seeded));
   await until('CLI config is imported', () => apm().get('config.autoIntegrate') === false);
   await until('legacy marketplace declarations are migrated', async () =>
-    apm().get<string[]>('marketplaces', []).includes(legacy) && (await registered()).includes('legacy-alias'), 20_000);
+    apm().get<string[]>('marketplaces', []).includes(legacy) && (await registered()).includes('legacy-alias'));
   assert.equal(apm().inspect('marketplaceEntries')?.globalValue, undefined);
   await until('an explicit setting wins on first synchronization', async () => (await json('config.json')).prefer_ssh === true);
 
@@ -215,10 +215,10 @@ async function steps() {
 
     const slow = `slow=${pathToFileURL(await marketplace('slow')).href}`;
     await apm().update('marketplaces', [legacy, slow, collisionEntry, resolved], vscode.ConfigurationTarget.Global);
-    await until('a delayed registration starts', () => existsSync(join(home, 'slow-started')), 20_000);
+    await until('a delayed registration starts', () => existsSync(join(home, 'slow-started')));
     await apm().update('marketplaces', [legacy, second, collisionEntry, resolved], vscode.ConfigurationTarget.Global);
     await writeFile(join(home, 'slow-release'), '');
-    await until('the delayed registration finishes', () => existsSync(join(home, 'slow-finished')), 20_000);
+    await until('the delayed registration finishes', () => existsSync(join(home, 'slow-finished')));
     await until('a concurrent setting edit wins without losing the original registration', async () => {
       const names = await registered();
       const entries = apm().get<string[]>('marketplaces', []);

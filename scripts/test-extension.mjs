@@ -3,7 +3,6 @@ import { resolve, dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
 
 let vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH ?? await downloadAndUnzipVSCode();
 // Newer macOS builds use "Code" instead of the legacy Electron bundle executable.
@@ -22,7 +21,7 @@ try {
   await mkdir(join(home, '.apm'), { recursive: true });
   await writeFile(join(seeded, 'marketplace.json'), JSON.stringify({ name: 'seeded', plugins: [] }));
   await writeFile(join(legacy, 'marketplace.json'), JSON.stringify({ name: 'legacy', plugins: [] }));
-  await writeFile(join(home, '.apm', 'marketplaces.json'), JSON.stringify({ marketplaces: [{ name: 'seeded', url: pathToFileURL(seeded).href }] }));
+  await writeFile(join(home, '.apm', 'marketplaces.json'), JSON.stringify({ marketplaces: [{ name: 'seeded', url: seeded }] }));
   await writeFile(join(home, '.apm', 'config.json'), JSON.stringify({ auto_integrate: false, prefer_ssh: false }));
   await mkdir(join(userData, 'User'), { recursive: true });
   await writeFile(join(userData, 'User', 'settings.json'), JSON.stringify({

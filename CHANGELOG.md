@@ -4,6 +4,7 @@
 
 - Add native project initialization, compilation previews, manifest validation, diagnostics, and APM tasks.
 - Reuse task discovery between requests and refresh it when manifests, workspace folders, or script settings change.
+- Serialize catalog refreshes with marketplace mutations to avoid concurrent registry writes.
 - Collect optional project metadata and deployment targets during initialization.
 - Keep search and filters fixed above resizable package sections with saved layouts and item counts.
 - Add a native Views menu for section visibility and checkmarks for selected view and filter options.

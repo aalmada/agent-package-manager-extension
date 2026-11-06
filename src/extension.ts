@@ -283,11 +283,13 @@ class ApmExtension implements vscode.Disposable {
       this.state.projectPresent = scope.kind === 'workspace' && (await readOptional(join(scope.path, 'apm.yml'))) !== undefined;
       await this.settingsSync.sync();
       if (epoch !== this.epoch) return;
-      const registered = await client.getMarketplaces();
+      const { registered, catalog, installed } = await this.serialize('apm-mutations', async () => {
+        const registered = await client.getMarketplaces();
+        const [catalog, installed] = await Promise.allSettled([client.getCatalog(registered), client.getInstalled(scope)]);
+        return { registered, catalog, installed };
+      });
       if (epoch !== this.epoch) return;
       this.state.marketplaces = registered;
-      const [catalog, installed] = await Promise.allSettled([client.getCatalog(registered), client.getInstalled(scope)]);
-      if (epoch !== this.epoch) return;
       if (catalog.status === 'fulfilled') {
         const failed = registered.filter(m => !catalog.value.items.some(i => i.marketplace === m.name) && catalog.value.errors.some(error => error.startsWith(`${m.name}:`))).map(m => m.name);
         this.state.catalog = [...catalog.value.items, ...this.state.catalog.filter(i => failed.includes(i.marketplace)).map(i => ({ ...i, metadata: { ...i.metadata, stale: true } }))];
