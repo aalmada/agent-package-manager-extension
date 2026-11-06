@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { descriptors, buildCommandArguments, requiresTerminal } from '../../src/apm/commands';
+
+test('utility commands stay contextual instead of cluttering the Command Palette', () => {
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+  const menus = manifest.contributes.menus;
+  for (const command of ['apm.settings', 'apm.output', 'apm.refresh', 'apm.targets']) {
+    assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
+    assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
+  }
+  for (const command of ['apm.settings', 'apm.refresh']) {
+    assert.ok(menus['view/title'].some((entry: { command: string; when: string }) => entry.command === command && entry.when === 'view == apm.browser'), command);
+  }
+});
 
 test('baseline contains every command family and nested marketplace workflow', () => {
   const expected = ['approve', 'audit', 'auth', 'cache', 'compile', 'config', 'deny', 'deps', 'doctor', 'experimental', 'find', 'init', 'install', 'lifecycle', 'list', 'lock', 'marketplace', 'mcp', 'outdated', 'pack', 'plugin', 'policy', 'preview', 'prune', 'publish', 'run', 'runtime', 'search', 'self-update', 'targets', 'uninstall', 'unpack', 'update', 'view'];
@@ -36,9 +49,46 @@ test('marketplace command arguments retain whitespace and shell metacharacters w
   assert.throws(() => buildCommandArguments(descriptor, {}, {}), /required/);
   assert.throws(() => buildCommandArguments(descriptor, { source: 'owner/repo' }, { '--unknown': true }), /Unknown/);
 });
+test('watch mode and initialization select terminal tasks only when needed', () => {
+  const command = (id: string) => descriptors.find(d => d.id === id)!;
+  assert.equal(requiresTerminal(command('compile'), { '--watch': true }), true);
+  assert.equal(requiresTerminal(command('compile'), { '--watch': false }), false);
+  assert.equal(requiresTerminal(command('compile'), {}), false);
+  for (const id of ['init', 'plugin init']) {
+    assert.equal(command(id).interactive, true);
+    assert.equal(requiresTerminal(command(id), {}), true);
+    assert.equal(requiresTerminal(command(id), { '--yes': false }), true);
+    assert.equal(requiresTerminal(command(id), { '--yes': true }), false);
+  }
+  for (const flag of ['--discover', '--apply']) assert.equal(requiresTerminal(command('init'), { [flag]: true }), false);
+});
+test('computed format choices are complete, case-insensitive, and validated', () => {
+  const expected: Record<string, string[]> = {
+    'lock export': ['cyclonedx', 'spdx'],
+    pack: ['plugin', 'agent-plugin', 'claude', 'claude-plugin', 'apm'],
+    'plugin init': ['plugin', 'agent-plugin', 'claude', 'claude-plugin']
+  };
+  for (const [id, choices] of Object.entries(expected)) {
+    const descriptor = descriptors.find(d => d.id === id)!;
+    const option = descriptor.options.find(o => o.name === '--format')!;
+    assert.equal(option.type, 'choice', id);
+    assert.deepEqual(option.choices, choices, id);
+    assert.equal(option.caseSensitive, false, id);
+    for (const choice of choices) assert.ok(buildCommandArguments(descriptor, {}, { '--format': choice.toUpperCase() }).includes(choice.toUpperCase()));
+    assert.throws(() => buildCommandArguments(descriptor, {}, { '--format': 'json' }), /Unsupported --format/);
+  }
+  const init = descriptors.find(d => d.id === 'init')!;
+  assert.throws(() => buildCommandArguments(init, {}, { '--format': 'JSON' }), /Unsupported --format/);
+});
+test('command annotations identify gated publishing and both deprecated workflows', () => {
+  const publish = descriptors.find(d => d.id === 'publish')!;
+  assert.equal(publish.experimental, true);
+  assert.equal(publish.experimentalFeature, 'registries');
+  for (const id of ['deps update', 'unpack']) assert.equal(descriptors.find(d => d.id === id)!.deprecated, true);
+});
 test('group flags are placed before nested subcommands', () => {
   const descriptor = descriptors.find(d => d.id === 'lock export')!;
-  const args = buildCommandArguments(descriptor, {}, { '--target': 'copilot', '--global': true, '--format': 'json' });
+  const args = buildCommandArguments(descriptor, {}, { '--target': 'copilot', '--global': true, '--format': 'spdx' });
   assert.ok(args.indexOf('--target') < args.indexOf('export'));
   assert.ok(args.indexOf('--global') > args.indexOf('export'));
   assert.ok(args.indexOf('--format') > args.indexOf('export'));

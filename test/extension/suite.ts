@@ -83,7 +83,62 @@ async function steps() {
   await apm().update('allowRemoteImages', undefined, vscode.ConfigurationTarget.Global);
   assert.equal(apm().get('allowRemoteImages'), false);
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['apm.refresh', 'apm.tools', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name', 'apm.filter.sort.version-desc']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript']) assert.ok(commands.includes(command), command);
+  assert.ok(!commands.includes('apm.getStarted'));
+  for (const command of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!commands.includes(command), command);
+  assert.equal(apm().get('tasks.includeScripts'), false);
+  const nativeFolder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(nativeFolder);
+  const manifestUri = vscode.Uri.joinPath(nativeFolder.uri, 'apm.yml');
+  const nativeManifest = 'name: native-test\nversion: 1.0.0\ndescription: Native task test\nauthor: Example\nscripts:\n  check: echo explicit-only\n';
+  await writeFile(manifestUri.fsPath, nativeManifest);
+  await vscode.commands.executeCommand('apm.refresh');
+  assert.ok(commands.includes('apm.browser.focus'));
+  await vscode.commands.executeCommand('apm.browser.focus');
+  for (const section of ['catalog', 'installed', 'updates']) {
+    assert.ok(commands.includes(`apm.views.${section}`), `Views menu command registered for ${section}`);
+    assert.ok(commands.includes(`apm.views.${section}.checked`));
+    await vscode.commands.executeCommand(`apm.views.${section}`);
+    await vscode.commands.executeCommand(`apm.views.${section}.checked`);
+  }
+  await vscode.commands.executeCommand('apm.filter.dependencies');
+  await vscode.commands.executeCommand('apm.filter.dependencies');
+  await vscode.commands.executeCommand('apm.browser.focus');
+  await mkdir(join(nativeFolder.uri.fsPath, '.apm', 'instructions'), { recursive: true });
+  const instructionPath = join(nativeFolder.uri.fsPath, '.apm', 'instructions', 'test.instructions.md');
+  await writeFile(instructionPath, '---\ndescription: Test instruction\napplyTo: "**"\n---\nReview the code.\n');
+  await run$(process.env.APM_TEST_EXECUTABLE!, ['compile', '--validate'], { cwd: nativeFolder.uri.fsPath });
+  const nativeTasks = (await vscode.tasks.fetchTasks({ type: 'apm' })).filter(task => task.scope === nativeFolder || typeof task.scope !== 'number' && task.scope?.uri.toString() === nativeFolder.uri.toString());
+  assert.deepEqual(nativeTasks.map(task => task.definition.workflow).sort(), ['audit', 'compile', 'validate', 'watch']);
+  const validationTask = nativeTasks.find(task => task.definition.workflow === 'validate');
+  assert.ok(validationTask);
+  let taskFinished = false;
+  let taskExitCode: number | undefined;
+  const taskEnd = vscode.tasks.onDidEndTask(event => { if (event.execution.task.definition.workflow === 'validate') taskFinished = true; });
+  const taskProcessEnd = vscode.tasks.onDidEndTaskProcess(event => { if (event.execution.task.definition.workflow === 'validate') taskExitCode = event.exitCode; });
+  try {
+    await vscode.tasks.executeTask(validationTask);
+    await until('the native validation task completes', () => taskFinished, 30_000);
+    assert.equal(taskExitCode, 0, 'Native validation task succeeds, not merely terminates');
+    assert.equal(await readFile(manifestUri.fsPath, 'utf8'), nativeManifest);
+  } finally { taskEnd.dispose(); taskProcessEnd.dispose(); }
+  await vscode.commands.executeCommand('apm.validate', manifestUri);
+  assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.label === 'APM Tools'));
+  await vscode.commands.executeCommand('apm.previewCompile', manifestUri);
+  const previewDocument = vscode.workspace.textDocuments.find(document => document.uri.scheme === 'apm-result');
+  assert.ok(previewDocument, 'Compilation preview uses the native read-only document provider');
+  assert.match(previewDocument.getText(), /Compilation preview/);
+  assert.equal(previewDocument.isDirty, false);
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  const manifestDocument = await vscode.workspace.openTextDocument(manifestUri);
+  const manifestEditor = await vscode.window.showTextDocument(manifestDocument);
+  const hover = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', manifestUri, new vscode.Position(0, 1));
+  assert.ok(hover?.length, 'Manifest editor provides local APM field help');
+  assert.equal(manifestEditor.document.isDirty, false);
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  await unlink(manifestUri.fsPath);
+  await unlink(instructionPath);
+  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name', 'apm.filter.sort.version-desc']) assert.ok(commands.includes(command), command);
 
   // Settings editor, not a custom page.
   await vscode.commands.executeCommand('apm.marketplaces');
@@ -180,7 +235,6 @@ async function steps() {
   await run$(executable, ['config', 'set', 'auto-integrate', 'true'], { env: process.env });
   await until('an external config change appears in settings', () => apm().get('config.autoIntegrate') === true);
 
-  await vscode.commands.executeCommand('apm.tools', 'install');
-  await until('the Tools page opens', () => vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.label === 'APM Tools'), 10_000);
+  assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.label === 'APM Tools'));
   console.log('APM extension integration tests passed.');
 }

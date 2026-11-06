@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import { homedir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
+import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
-import type { VariablePrompt } from './apm/adapters';
+import { record, type VariablePrompt } from './apm/adapters';
 import { descriptors, buildCommandArguments, requiresTerminal } from './apm/commands';
 import type { PackageItem, Scope } from './apm/types';
-import type { Message, Mode, State } from './protocol';
+import type { Message, Mode, PackageSection, State } from './protocol';
 import { parseMessage, scopeKey } from './protocol';
 import { SettingsSync } from './config/sync';
 import { webviewHtml } from './views/html';
@@ -13,12 +14,19 @@ import { filterTokens, withStatus, withToken, type Ordering } from './webview/fi
 import { renderMarkdown } from './views/markdown';
 import { containsUrlCredentials, redact, safePayload } from './apm/redact';
 import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm/installation';
-import { packageIdentity, parseAudit, parseTargets, parseVersions, tail, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
-import { applyUpdateRows, findInstalledPackage, reconcileDetailContexts, retainUpdateResults } from './apm/packageState';
+import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
+import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults } from './apm/packageState';
+import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
+import { AuditDiagnostics, contentNavigation, openNavigation, type NavigationTarget, type AuditTicket } from './navigation';
+import { registerManifestAssistance } from './manifestAssistance';
+import { registerApmTaskProvider } from './taskProvider';
+import type { ContentGroup } from './apm/contents';
+import { readOptional, resolveContained } from './apm/manifest';
+import { githubEnvironment, githubFetch, signInToGithub } from './authentication';
 
 interface PanelContext {
-  webview: vscode.Webview;
-  mode: Mode;
+  webview?: vscode.Webview;
+  mode: Mode | 'native';
   panel?: vscode.WebviewPanel;
   scope?: Scope;
   item?: PackageItem;
@@ -27,13 +35,17 @@ interface PanelContext {
   detailsRequest?: number;
   refreshError?: string;
   extra: Partial<State>;
+  navigation?: Map<string, NavigationTarget>;
+  retry?: () => Promise<void>;
+  preview?: { id: string; args: Record<string, string>; options: Record<string, unknown>; title: string; action: PackageAction };
 }
 
-class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
+class ApmExtension implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel('APM');
   private readonly subscriptions: vscode.Disposable[] = [];
   private readonly panels = new Map<string, PanelContext>();
   private sidebar?: PanelContext;
+  private sidebarView?: vscode.WebviewView;
   private search = '';
   private refreshing?: Promise<void>;
   private refreshAgain = false;
@@ -41,19 +53,47 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
   private operation?: AbortController;
   private refreshController?: AbortController;
   private queues = new Map<string, Promise<void>>();
+  private readonly commandTasks = new Map<PanelContext, { execution?: vscode.TaskExecution; cancelled: boolean }>();
+  private readonly nativeOperations = new Set<PanelContext>();
+  private readonly results = new Map<string, string>();
+  private resultId = 0;
+  private refreshNotices = new Set<string>();
+  private readonly readmeNotices = new Set<string>();
   private epoch = 0;
   private readonly settingsSync: SettingsSync;
+  private readonly diagnostics = new AuditDiagnostics();
   private state: State = {
     mode: 'browser', trusted: vscode.workspace.isTrusted, scopes: [], scopeKey: '', busy: false,
     catalog: [], installed: [], marketplaces: [], commands: descriptors, availableCommands: [], errors: []
   };
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.search = context.workspaceState.get<string>('browserSearch', '');
+    this.state.hiddenSections = context.workspaceState.get<PackageSection[]>('hiddenSections', []);
     this.rebuildScopes();
     this.settingsSync = new SettingsSync(
       context.globalState, () => this.client(this.globalScope()), text => this.output.append(redact(text)),
       message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation)
     );
-    this.subscriptions.push(this.output);
+    this.subscriptions.push(this.output, this.diagnostics);
+    this.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('apm-result', {
+      provideTextDocumentContent: uri => {
+        const content = this.results.get(uri.toString());
+        if (content === undefined) throw new Error('This APM result has expired. Run the action again.');
+        return content;
+      }
+    }), vscode.workspace.onDidCloseTextDocument(document => {
+      if (document.uri.scheme === 'apm-result') this.results.delete(document.uri.toString());
+    }));
+    this.subscriptions.push(registerManifestAssistance({
+      details: (dependency, uri) => this.findDependency(dependency, uri)
+    }));
+    this.subscriptions.push(registerApmTaskProvider(message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation)));
+    this.subscriptions.push(vscode.authentication.onDidChangeSessions(event => {
+      if (event.provider.id === 'github') {
+        this.settingsSync.retry();
+        void this.settingsSync.sync().then(() => this.scheduleRefresh());
+      }
+    }));
     this.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => { this.rebuildScopes(); this.scheduleRefresh(); }));
     this.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => { void this.settingsSync.sync(); this.scheduleRefresh(); }));
     this.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
@@ -62,7 +102,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
         for (const entry of this.panels.values()) {
           if (entry.mode !== 'details') continue;
           if (typeof entry.extra.details?.readme === 'string') this.setReadme(entry, entry.extra.details.readme);
-          entry.webview.html = webviewHtml(entry.webview, this.context.extensionUri, this.allowRemoteImages());
+          if (entry.webview) entry.webview.html = webviewHtml(entry.webview, this.context.extensionUri, this.allowRemoteImages());
         }
       }
       if (event.affectsConfiguration('apm.marketplaces')) {
@@ -85,9 +125,13 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
   dispose() {
     this.operation?.abort();
     this.refreshController?.abort();
+    for (const task of this.commandTasks.values()) { task.cancelled = true; task.execution?.terminate(); }
+    this.commandTasks.clear();
+    for (const context of this.nativeOperations) context.controller?.abort();
+    this.nativeOperations.clear(); this.results.clear();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     for (const disposable of this.subscriptions) disposable.dispose();
-    for (const entry of this.panels.values()) entry.panel?.dispose();
+    for (const entry of this.panels.values()) { entry.controller?.abort(); entry.detailsController?.abort(); entry.panel?.dispose(); }
   }
   private rebuildScopes() {
     const previous = this.state.scopeKey || this.context.workspaceState.get<string>('scopeKey');
@@ -107,6 +151,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       executable: vscode.workspace.getConfiguration('apm', resource).get<string>('executablePath', 'apm'),
       cwd: scope.kind === 'global' ? homedir() : scope.path,
       signal,
+      environment: githubEnvironment, fetcher: githubFetch,
       onOutput: text => this.output.append(redact(text))
     });
   }
@@ -117,8 +162,15 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     return vscode.workspace.getConfiguration('apm').get<boolean>('allowRemoteImages', false);
   }
   resolveWebviewView(view: vscode.WebviewView) {
+    this.sidebarView = view;
     this.sidebar = this.attach(view.webview, 'browser');
-    this.subscriptions.push(view.onDidChangeVisibility(() => { if (view.visible) void this.refresh(); }));
+    this.updateBadge();
+    this.subscriptions.push(
+      view.onDidChangeVisibility(() => { if (view.visible) void this.refresh(); }),
+      view.onDidDispose(() => {
+        if (this.sidebarView === view) { this.sidebarView = undefined; this.sidebar = undefined; }
+      })
+    );
   }
   private attach(webview: vscode.Webview, mode: Mode, panel?: vscode.WebviewPanel): PanelContext {
     const context: PanelContext = { webview, mode, panel, extra: {} };
@@ -130,22 +182,69 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     return context;
   }
   private send(context: PanelContext) {
+    if (!context.webview || context.mode === 'native') return;
     const state: State = {
       ...this.state, ...context.extra, mode: context.mode, trusted: vscode.workspace.isTrusted,
+      host: this.hostLabel(),
+      browserSearch: this.search,
       errors: context.refreshError ? [...this.state.errors, context.refreshError] : this.state.errors,
       ...(context.scope ? { scopeKey: scopeKey(context.scope) } : {}), ...(context.item ? { item: context.item } : {})
     };
-    void context.webview.postMessage({ type: 'state', state: safePayload(state) });
+    void context.webview?.postMessage({ type: 'state', state: safePayload(state) });
   }
   private broadcast() {
+    this.updateBadge();
     if (this.sidebar) this.send(this.sidebar);
     for (const panel of this.panels.values()) this.send(panel);
   }
-  private report(error: unknown, context?: PanelContext) {
+  private updateBadge() {
+    if (this.sidebarView) this.sidebarView.badge = getUpdateBadge({ ...this.state, trusted: vscode.workspace.isTrusted });
+  }
+  report(error: unknown, context?: PanelContext) {
     const message = redact(error instanceof Error ? error.message : String(error));
     this.output.appendLine(`\nERROR: ${message}`);
     if (context) { context.extra.error = message; this.send(context); } else { this.state.error = message; this.broadcast(); }
-    void vscode.window.showErrorMessage(message, 'Show Output').then(choice => { if (choice) this.output.show(); });
+    this.notifyError(message, context);
+  }
+  private notifyError(message: string, context?: PanelContext) {
+    const labels = recoveryActions(message).map(action => ({ output: 'Show APM Output', doctor: 'Run Doctor', authentication: 'Authentication Help', policy: 'Explain Policy', targets: 'Show Targets', retry: 'Retry' })[action]);
+    if (context?.retry && !labels.includes('Retry')) labels.push('Retry');
+    if (labels.includes('Authentication Help')) labels.unshift('Sign in to GitHub');
+    void vscode.window.showErrorMessage(message, ...labels).then(choice => {
+      if (choice === 'Show APM Output') this.output.show();
+      else if (choice === 'Run Doctor') void this.workflow('doctor', undefined, context?.scope).catch(error => this.report(error, context));
+      else if (choice === 'Explain Policy') void this.workflow('policy', undefined, context?.scope).catch(error => this.report(error, context));
+      else if (choice === 'Show Targets') void this.showTargets(context).catch(error => this.report(error, context));
+      else if (choice === 'Authentication Help') void vscode.env.openExternal(vscode.Uri.parse('https://microsoft.github.io/apm/getting-started/authentication/'));
+      else if (choice === 'Sign in to GitHub') void this.signIn().catch(error => this.report(error, context));
+      else if (choice === 'Retry' && context?.retry) void context.retry().catch(error => this.report(error, context));
+    });
+  }
+  async signIn() {
+    await signInToGithub();
+    await this.refreshAll();
+  }
+  private notifyRefresh() {
+    const notices = new Set<string>();
+    for (const message of this.state.errors) {
+      const key = `${this.state.scopeKey}:error:${message}`;
+      notices.add(key);
+      if (!this.refreshNotices.has(key)) {
+        this.output.appendLine(`\nERROR: ${message}`);
+        this.notifyError(message);
+      }
+    }
+    if (this.state.warning) {
+      const message = this.state.warning, key = `${this.state.scopeKey}:warning:${message}`;
+      notices.add(key);
+      if (!this.refreshNotices.has(key)) {
+        void vscode.window.showWarningMessage(message, 'Update APM', 'Show APM Output').then(choice => {
+          if (choice === 'Update APM') void this.setup().catch(error => this.report(error));
+          else if (choice === 'Show APM Output') this.output.show();
+        });
+      }
+    }
+    this.refreshNotices = notices;
   }
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -163,7 +262,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
   }
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
-    this.refreshing = this.doRefresh().catch(error => this.report(error)).finally(() => {
+    this.refreshing = Promise.resolve(vscode.window.withProgress({ location: { viewId: 'apm.browser' } }, () => this.doRefresh())).catch(error => this.report(error)).finally(() => {
       this.refreshing = undefined;
       if (this.refreshAgain) { this.refreshAgain = false; this.scheduleRefresh(); }
     });
@@ -181,6 +280,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       const probe = await client.probe();
       if (epoch !== this.epoch) return;
       this.state.version = probe.version; this.state.warning = probe.warning; this.state.availableCommands = probe.commands;
+      this.state.projectPresent = scope.kind === 'workspace' && (await readOptional(join(scope.path, 'apm.yml'))) !== undefined;
       await this.settingsSync.sync();
       if (epoch !== this.epoch) return;
       const registered = await client.getMarketplaces();
@@ -221,7 +321,10 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       await this.refreshOtherDetailScopes(scope, controller.signal, epoch);
     } catch (error) {
       if (epoch === this.epoch) throw error;
-    } finally { this.refreshController = undefined; this.state.busy = false; this.broadcast(); }
+    } finally {
+      this.refreshController = undefined; this.state.busy = false; this.broadcast();
+      if (epoch === this.epoch) this.notifyRefresh();
+    }
   }
   private withDescriptions(items: PackageItem[]): PackageItem[] {
     return items.map(item => item.description ? item : { ...item, description: this.state.catalog.find(c => c.id === item.id)?.description });
@@ -231,7 +334,10 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
   }
   private setDetailRefreshError(scope: Scope, error?: string) {
     const entries = this.detailContexts(scope);
-    if (error && entries.some(entry => entry.refreshError !== error)) this.output.appendLine(`\n${error}`);
+    if (error && entries.some(entry => entry.refreshError !== error)) {
+      this.output.appendLine(`\n${error}`);
+      this.notifyError(error, entries[0]);
+    }
     for (const entry of entries) entry.refreshError = error;
   }
   private updateDetailItems(scope: Scope, installed: PackageItem[]) {
@@ -273,33 +379,230 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       }
     }));
   }
-  open(command?: string, args: Record<string, string> = {}, options: Record<string, unknown> = {}, scope?: Scope) {
-    let entry = this.panels.get('tools');
-    if (!entry) {
-      const panel = vscode.window.createWebviewPanel('apm.tools', 'APM Tools', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
-      entry = this.attach(panel.webview, 'tools', panel);
-      this.panels.set('tools', entry);
-      panel.onDidDispose(() => this.panels.delete('tools'));
+  private hostLabel() { return vscode.env.remoteName ? `Remote: ${vscode.env.remoteName}` : 'Local'; }
+  showOutput() { this.output.show(); }
+  async chooseAnyScope() {
+    const picked = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
+      label: scope.kind === 'global' ? '$(globe) Global (user)' : `$(folder) ${scope.label}`,
+      description: scope.path, detail: `${this.hostLabel()}${scopeKey(scope) === this.state.scopeKey ? ' — Current scope' : ''}`, scope
+    })), { title: 'APM package scope', placeHolder: 'Choose where packages are installed' });
+    if (picked) await this.selectScope(scopeKey(picked.scope));
+  }
+  private async workflowScope(uri?: vscode.Uri, capturedScope?: Scope, projectOnly = false): Promise<Scope | undefined> {
+    this.requireTrust();
+    const folder = uri && vscode.workspace.getWorkspaceFolder(uri);
+    const scope = capturedScope ?? (folder ? { kind: 'workspace' as const, label: folder.name, path: folder.uri.fsPath } : { ...this.scope() });
+    if (!projectOnly || scope.kind === 'workspace') return scope;
+    const folders = this.state.scopes.filter(scope => scope.kind === 'workspace');
+    if (!folders.length) throw new Error('Open a workspace folder to use this APM action.');
+    const picked = await vscode.window.showQuickPick(folders.map(scope => ({ label: scope.label, description: scope.path, scope })),
+      { title: 'Choose APM project', placeHolder: 'Select the project for this action' });
+    return picked?.scope;
+  }
+  async workflow(workflow: Workflow, uri?: vscode.Uri, capturedScope?: Scope) {
+    const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor');
+    if (!scope) return;
+    if (workflow === 'previewInstall') { await this.installPackage(scope, true); return; }
+    if (workflow === 'runScript') { await this.runProjectScript(scope); return; }
+    const command = workflowCommands[workflow];
+    const args: Record<string, string> = {}, options: Record<string, unknown> = { ...command.options };
+    let inputLines: string[] | undefined;
+    if (workflow === 'initialize') {
+      if (await readOptional(join(scope.path, 'apm.yml')) !== undefined) {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml'))));
+        return;
+      }
+      const name = await vscode.window.showInputBox({ title: 'Initialize APM project (1/5)', prompt: 'Project name', value: scope.label, ignoreFocusOut: true,
+        validateInput: value => /^[a-zA-Z0-9][\w.-]*$/.test(value) ? undefined : 'Use letters, numbers, dots, underscores or hyphens; start with a letter or number.' });
+      if (name === undefined) return;
+      const fields: string[] = [name];
+      for (const [index, field, value] of [[2, 'Version', '1.0.0'], [3, 'Description', `APM project: ${name}`], [4, 'Author', '']] as const) {
+        const answer = await vscode.window.showInputBox({ title: `Initialize APM project (${index}/5)`, prompt: `${field} (optional; leave blank to use APM's default)`, value, ignoreFocusOut: true,
+          validateInput: text => /[\r\n\0]/.test(text) ? `${field} cannot contain line breaks or NUL.` : undefined });
+        if (answer === undefined) return;
+        fields.push(answer.trim());
+      }
+      const help = await this.client(scope).execute(['compile', '--help']);
+      if (help.exitCode !== 0) throw new Error('Could not read the CLI target choices. Review APM Output before initializing.');
+      const targets = parseTargets(help.stdout);
+      if (!targets.length) throw new Error('This APM CLI does not list supported initialization targets. Upgrade APM before initializing.');
+      const selected = await vscode.window.showQuickPick(targets.filter(target => target !== 'all').map(label => ({ label })), {
+        title: 'Initialize APM project (5/5)', placeHolder: 'Choose target harnesses; leave empty to use APM auto-detection',
+        canPickMany: true, ignoreFocusOut: true
+      });
+      if (selected === undefined) return;
+      if (selected.length) options['--target'] = selected.map(target => target.label).join(',');
+      args.project_name = '.';
+      inputLines = [...fields, 'y'];
     }
-    entry.scope = scope;
-    if (command) entry.extra = { ...entry.extra, selectedCommand: command, commandRequest: (entry.extra.commandRequest ?? 0) + 1, commandArgs: args, commandOptions: options, error: undefined };
-    entry.panel?.reveal();
-    this.send(entry);
+    if (workflow === 'policy') {
+      const installed = await this.client(scope).getInstalled(scope);
+      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
+      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
+        { title: 'Explain package policy', placeHolder: 'Select an installed dependency' });
+      if (!picked) return;
+      args.package = packageIdentity(picked.item, picked.item, false);
+    }
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try { await this.runCommand({ type: 'command', id: command.id, args, options }, context, inputLines); }
+    finally { this.nativeOperations.delete(context); }
+    if (!context.extra.result) return;
+    if (context.extra.error && !context.extra.actionResult?.audit) throw new Error(context.extra.error);
+    if (workflow === 'initialize') {
+      const manifest = await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml')));
+      const parsed = parseDocument(manifest.getText());
+      for (const [index, key] of ['name', 'version', 'description', 'author'].entries()) {
+        if (inputLines?.[index] && parsed.get(key) !== inputLines[index]) throw new Error(`APM initialization did not preserve the selected ${key}. Review apm.yml and APM Output.`);
+      }
+      await vscode.window.showTextDocument(manifest);
+    } else if (workflow === 'auditWorkspace') {
+      await vscode.commands.executeCommand('workbench.actions.view.problems');
+      const audit = context.extra.actionResult?.audit;
+      void vscode.window.showInformationMessage(audit?.passed ? `APM audit passed in ${scope.label}.` :
+        `APM audit reported findings or incomplete coverage in ${scope.label}. Review Problems.`, 'Show Output').then(choice => {
+        if (choice) this.output.show();
+      });
+    } else if (workflow === 'previewCompile' || workflow === 'policy' || workflow === 'doctor') {
+      await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : workflow === 'doctor' ? 'APM health check' : 'Package policy', context.extra.result);
+    } else {
+      void vscode.window.showInformationMessage(`APM ${workflow === 'validate' ? 'validation' : 'compilation'} completed in ${scope.label}.`, 'Show Output').then(choice => {
+        if (choice) this.output.show();
+      });
+    }
+  }
+  private async showTextResult(title: string, content: string) {
+    const uri = vscode.Uri.from({ scheme: 'apm-result', path: `/${title.replace(/[^a-zA-Z0-9._-]/g, '-')}.txt`, query: String(++this.resultId) });
+    this.results.set(uri.toString(), `${title}\n\n${redact(content)}`);
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: true });
+  }
+  async installPackage(capturedScope?: Scope, preview = false) {
+    const scope = await this.workflowScope(undefined, capturedScope);
+    if (!scope) return;
+    const choices = [
+      { label: '$(edit) Enter package source...', description: 'Repository or marketplace package', item: undefined as PackageItem | undefined },
+      ...this.state.catalog.map(item => ({ label: item.name, description: item.marketplace ?? item.source, detail: item.description, item }))
+    ];
+    const picked = await vscode.window.showQuickPick(choices, { title: preview ? 'Preview package installation' : 'Install APM package',
+      placeHolder: `Choose a package for ${scope.label}`, matchOnDescription: true, matchOnDetail: true });
+    if (!picked) return;
+    let item = picked.item;
+    if (!item) {
+      const source = await vscode.window.showInputBox({ title: 'Install APM package', prompt: 'Package source, for example owner/repository or package@marketplace',
+        validateInput: value => !value.trim() || value.startsWith('-') || /[\s\0]/.test(value) || containsUrlCredentials(value)
+          ? 'Enter a package source without whitespace, leading flags, or credentials.' : undefined });
+      if (source === undefined) return;
+      item = { id: source, name: source, source, marketplace: '', version: '', installed: false };
+    }
+    const context: PanelContext = { mode: 'details', scope, item, extra: {} };
+    this.nativeOperations.add(context);
+    try { await this.packageAction(preview ? 'previewInstall' : 'install', context); }
+    finally { this.nativeOperations.delete(context); }
+    const result = context.extra.actionResult;
+    if (!result) return;
+    if (result.status === 'failed') return;
+    if (result.status === 'cancelled') {
+      void vscode.window.showInformationMessage(`APM installation cancelled in ${scope.label}. Partial changes may remain.`, 'Show Output').then(choice => {
+        if (choice) this.output.show();
+      });
+      return;
+    }
+    if (preview) await this.showTextResult(`Installation preview for ${item.name}`, result.output ?? result.summary ?? '');
+    else {
+      void vscode.window.showInformationMessage(`${item.name} installed in ${scope.label}.`, 'Open Package').then(choice => {
+        if (choice) void this.openPackageDetails(context.item ?? item, scope).catch(error => this.report(error));
+      });
+    }
+  }
+  private async runProjectScript(scope: Scope) {
+    const uri = vscode.Uri.file(scope.path), settings = vscode.workspace.getConfiguration('apm', uri);
+    if (!settings.get<boolean>('tasks.includeScripts', false)) throw new Error('Enable apm.tasks.includeScripts in Settings to run project scripts. Scripts execute project-defined commands.');
+    const text = await readOptional(join(scope.path, 'apm.yml'));
+    if (text === undefined) throw new Error('This project has no apm.yml. Initialize it before running scripts.');
+    const document = parseDocument(text);
+    if (document.errors.length) throw new Error(`Cannot read APM scripts: ${document.errors[0].message}`);
+    const manifest: unknown = document.toJS(), scripts = record(manifest) && record(manifest.scripts) ? manifest.scripts : {};
+    const choices = Object.entries(scripts).filter((entry): entry is [string, string] => typeof entry[1] === 'string').map(([label, script]) => ({ label, description: redact(script) }));
+    if (!choices.length) throw new Error('No named scripts are declared in apm.yml.');
+    const picked = await vscode.window.showQuickPick(choices, { title: 'Run APM project script', placeHolder: 'Choose a manifest script' });
+    if (!picked) return;
+    const task = (await vscode.tasks.fetchTasks({ type: 'apm' })).find(task => task.definition.workflow === 'script' &&
+      task.definition.script === picked.label && typeof task.scope !== 'number' && task.scope?.uri.fsPath === scope.path);
+    if (!task) throw new Error('The selected script task is no longer available. Review apm.yml and try again.');
+    await vscode.tasks.executeTask(task);
+  }
+  async findDependency(dependency: string, uri?: vscode.Uri) {
+    this.requireTrust();
+    const folder = uri && vscode.workspace.getWorkspaceFolder(uri);
+    const scope = folder ? { kind: 'workspace' as const, label: folder.name, path: folder.uri.fsPath } : { ...this.scope() };
+    const installed = scopeKey(scope) === this.state.scopeKey ? this.state.installed : await this.client(scope).getInstalled(scope);
+    const item = [...installed, ...this.state.catalog].find(item => item.name === dependency || item.source === dependency ||
+      item.metadata?.cliIdentity === dependency || item.metadata?.installExpression === dependency);
+    if (item) await this.openPackageDetails(item, scope);
+    else {
+      const result = await this.client(scope).execute(['view', dependency]);
+      if (result.exitCode !== 0) throw new Error(redact(result.stderr || result.stdout || 'Could not inspect this dependency.'));
+      await this.showTextResult(`Package: ${dependency}`, result.stdout);
+    }
+  }
+  async showTargets(context = this.sidebar, uri?: vscode.Uri) {
+    const scope = await this.workflowScope(uri, context?.scope, true);
+    if (!scope) return;
+    const client = this.client(scope);
+    if (!await client.supports(['targets'], ['--json'])) throw new Error('This APM CLI cannot report targets as JSON. Upgrade APM.');
+    const result = await client.execute(['targets', '--json']);
+    if (result.exitCode !== 0) throw new Error(`Target discovery failed: ${redact(result.stderr || result.stdout)}`);
+    const targets = resolvedTargets(result.stdout);
+    const picked = await vscode.window.showQuickPick(targets.map(target => ({
+      label: target.target, description: target.status,
+      detail: [target.source, target.deployDir, target.needs].filter(Boolean).join(' — '), target
+    })), { title: `APM deployment targets — ${scope.label}`, placeHolder: 'Select a target to locate its project configuration' });
+    if (!picked) return;
+    await this.configureTargets({ mode: 'native', scope, extra: {} });
+  }
+  private async configureTargets(context: PanelContext) {
+    this.requireTrust();
+    const scope = this.scope(context);
+    if (scope.kind !== 'workspace') throw new Error('Open a workspace folder to configure project targets.');
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml')));
+    const editor = await vscode.window.showTextDocument(document);
+    const offset = document.getText().search(/^targets?:/m);
+    if (offset >= 0) { const position = document.positionAt(offset); editor.selection = new vscode.Selection(position, position); editor.revealRange(new vscode.Range(position, position)); }
+  }
+  private async openTarget(target: string, context: PanelContext) {
+    this.requireTrust();
+    const row = context.extra.targets?.find(row => row.target === target);
+    if (!row?.deployDir) throw new Error('This target has no deployment directory. Refresh targets.');
+    const actual = await resolveContained(this.scope(context).path, row.deployDir);
+    if (!actual) throw new Error('The deployment directory does not exist yet. Install or compile for this target first.');
+    await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(actual));
   }
   updateFilterContext() {
     const tokens = filterTokens(this.search);
     const keys: Record<string, unknown> = {
-      'apm.filter.installed': tokens.installed, 'apm.filter.updates': tokens.updates, 'apm.filter.sort': tokens.sort,
+      'apm.filter.installed': tokens.installed, 'apm.filter.updates': tokens.updates, 'apm.filter.dependencies': tokens.dependencies, 'apm.filter.sort': tokens.sort,
       'apm.filter.marketplace': tokens.marketplace, 'apm.filter.scopeKind': this.scope()?.kind ?? ''
     };
+    for (const section of ['catalog', 'installed', 'updates'] as const) keys[`apm.views.${section}`] = !this.state.hiddenSections?.includes(section);
     for (const [key, value] of Object.entries(keys)) void vscode.commands.executeCommand('setContext', key, value);
+  }
+  async toggleSection(section: PackageSection) {
+    const hidden = this.state.hiddenSections ?? [];
+    const next = hidden.includes(section) ? hidden.filter(value => value !== section) : [...hidden, section];
+    await this.context.workspaceState.update('hiddenSections', next);
+    this.state.hiddenSections = next;
+    this.updateFilterContext();
+    this.broadcast();
   }
   private setSearch(search: string) {
     this.search = search; this.updateFilterContext();
-    if (this.sidebar) void this.sidebar.webview.postMessage({ type: 'setSearch', search });
+    void Promise.resolve(this.context.workspaceState.update('browserSearch', search)).catch(error => this.report(error));
+    if (this.sidebar) void this.sidebar.webview?.postMessage({ type: 'setSearch', search });
+    this.broadcast();
   }
-  toggleStatus(status: '@installed' | '@updates') {
-    const tokens = filterTokens(this.search), on = status === '@installed' ? tokens.installed : tokens.updates;
+  toggleStatus(status: '@installed' | '@updates' | '@dependencies') {
+    const tokens = filterTokens(this.search), on = status === '@installed' ? tokens.installed : status === '@updates' ? tokens.updates : tokens.dependencies;
     this.setSearch(withStatus(this.search, on ? '' : status));
   }
   sortBy(order: Ordering) { this.setSearch(withToken(this.search, '@sort:', order === 'name' ? '' : order)); }
@@ -330,23 +633,21 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
   private async selectScope(key: string) {
     this.epoch++; this.refreshController?.abort(); if (this.refreshing) this.refreshAgain = true;
     this.state.scopeKey = key; this.state.catalog = []; this.state.installed = []; this.state.checkedAt = undefined;
+    this.state.projectPresent = undefined;
+    if (this.sidebar) this.sidebar.extra.targets = undefined;
     await this.context.workspaceState.update('scopeKey', key);
     this.updateFilterContext();
     await this.refresh();
-  }
-  async pickCommand() {
-    const available = new Set(this.state.availableCommands);
-    const items = descriptors
-      .filter(d => !available.size || available.has(d.command[0]))
-      .map(d => ({ label: d.label, description: `apm ${d.command.join(' ')}`, detail: d.description, id: d.id }));
-    const picked = await vscode.window.showQuickPick(items, { title: 'Run APM Command', placeHolder: 'Select an APM command to configure and run', matchOnDescription: true, matchOnDetail: true });
-    if (picked) this.open(picked.id);
   }
   private async openDetails(id: string) {
     this.requireTrust();
     const item = this.state.installed.find(i => i.id === id) ?? this.state.catalog.find(i => i.id === id);
     if (!item) throw new Error('Package is no longer available. Refresh and retry.');
-    const scope = this.scope(), key = `details:${scopeKey(scope)}:${id}`;
+    await this.openPackageDetails(item, { ...this.scope() });
+  }
+  private async openPackageDetails(item: PackageItem, scope: Scope) {
+    this.requireTrust();
+    const key = `details:${scopeKey(scope)}:${item.id}`;
     let entry = this.panels.get(key);
     if (!entry) {
       const panel = vscode.window.createWebviewPanel('apm.details', item.name, vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
@@ -374,6 +675,11 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     try {
       const details = await this.client(scope, controller.signal).getDetails(item, scope);
       if (request !== entry.detailsRequest) return;
+      const groups = details.contents as ContentGroup[] | undefined;
+      entry.navigation = typeof details.localContentRoot === 'string' && Array.isArray(groups)
+        ? await contentNavigation(details.localContentRoot, groups, item.installed, typeof item.metadata?.deployedSkillPath === 'string') : new Map();
+      delete details.localContentRoot;
+      if (request !== entry.detailsRequest) return;
       entry.extra.details = safePayload(details) as Record<string, unknown>;
       if (typeof entry.extra.details.readme === 'string') this.setReadme(entry, entry.extra.details.readme);
     } catch (error) { if (request === entry.detailsRequest) this.report(error, entry); }
@@ -387,6 +693,16 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     const rendered = renderMarkdown(text, this.allowRemoteImages());
     entry.extra.readmeHtml = rendered.html;
     entry.extra.readmeImagesBlocked = rendered.blockedImages;
+    if (rendered.blockedImages.https && !this.readmeNotices.has('https')) {
+      this.readmeNotices.add('https');
+      void vscode.window.showInformationMessage('Remote README images are blocked for privacy. Allow HTTPS images in VS Code Settings if you trust their hosts.', 'Open Image Settings').then(choice => {
+        if (choice === 'Open Image Settings') void Promise.resolve(openSettings('apm.allowRemoteImages')).catch(error => this.report(error, entry));
+      });
+    }
+    if (rendered.blockedImages.insecure && !this.readmeNotices.has('insecure')) {
+      this.readmeNotices.add('insecure');
+      void vscode.window.showWarningMessage('README images with insecure HTTP or protocol-relative URLs are blocked.');
+    }
   }
   private async handle(message: Message, context: PanelContext) {
     if (message.type !== 'ready' && message.type !== 'filters') context.extra.error = undefined;
@@ -396,12 +712,45 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       case 'scope': {
         const scope = this.state.scopes.find(s => scopeKey(s) === message.key);
         if (!scope) throw new Error('Unknown APM scope.');
-        if (context.mode === 'tools') context.scope = scope;
+        if (context.mode === 'native') {
+          if (context.controller || this.commandTasks.has(context)) throw new Error('Stop the current command before changing its execution scope.');
+          context.scope = scope;
+          context.extra.targets = undefined;
+        }
         await this.selectScope(message.key); break;
       }
-      case 'filters': if (context.mode === 'browser') { this.search = message.search; this.updateFilterContext(); } break;
+      case 'filters':
+        if (context.mode === 'browser' && message.search !== this.search) this.setSearch(message.search);
+        break;
+      case 'dependencies': {
+        this.requireTrust();
+        const scope = this.scope(context);
+        if (!this.state.scopes.some(candidate => scopeKey(candidate) === scopeKey(scope))) throw new Error('This package scope is no longer available. Select a current workspace or global scope.');
+        if (scopeKey(scope) !== this.state.scopeKey) await this.selectScope(scopeKey(scope));
+        this.setSearch('@dependencies');
+        await vscode.commands.executeCommand('apm.browser.focus');
+        break;
+      }
+      case 'chooseScope': await this.chooseAnyScope(); break;
+      case 'workflow': await this.workflow(message.workflow, undefined, { ...this.scope(context) }); break;
+      case 'targets': await this.showTargets(context); break;
+      case 'configureTargets': await this.configureTargets(context); break;
+      case 'openTarget': await this.openTarget(message.target, context); break;
+      case 'openFolder': await vscode.commands.executeCommand('vscode.openFolder'); break;
+      case 'retry':
+        if (context.retry) await context.retry();
+        else if (context.mode === 'browser') await this.refreshAll();
+        else if (context.mode === 'details') await this.loadDetails(context);
+        else throw new Error('Select and run an APM command before retrying.');
+        break;
+      case 'navigate': {
+        const target = context.navigation?.get(message.id);
+        if (!target) throw new Error('This file link has expired. Refresh the package or run the audit again.');
+        await openNavigation(target);
+        break;
+      }
       case 'details': await this.openDetails(message.id); break;
-      case 'tools': this.open(); break;
+      case 'install': await this.installPackage({ ...this.scope(context) }); break;
       case 'marketplaces': await openSettings('apm.marketplaces'); break;
       case 'setup': await this.setup(); break;
       case 'output': this.output.show(); break;
@@ -413,19 +762,15 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
         if (!['https', 'http', 'mailto'].includes(uri.scheme) || uri.authority.includes('@')) throw new Error('Unsafe external link.');
         await vscode.env.openExternal(uri); break;
       }
-      case 'selectCommand': this.open(message.id, message.args, message.options, this.scope(context)); break;
-      case 'command': await this.runCommand(message, context); break;
       case 'packageAction': await this.packageAction(message.action, context); break;
-      case 'help': {
-        this.requireTrust();
-        const descriptor = descriptors.find(c => c.id === message.id);
-        if (!descriptor) throw new Error('Unknown command.');
-        const result = await this.client(this.scope(context)).execute([...descriptor.command, '--help']);
-        context.extra.result = redact(result.stdout + result.stderr); this.send(context); break;
-      }
       case 'cancel':
         if (context.mode === 'details') context.controller?.abort();
-        else { this.operation?.abort(); this.refreshController?.abort(); }
+        else {
+          const task = this.commandTasks.get(context);
+          if (task) { task.cancelled = true; task.execution?.terminate(); }
+          else if (context.controller) context.controller.abort();
+          else this.refreshController?.abort();
+        }
         break;
     }
   }
@@ -434,6 +779,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     if (context.mode !== 'details' || !context.item) throw new Error('Open a package page to run package actions.');
     if (context.controller) throw new Error('Another action is already running on this page. Wait for it or cancel it.');
     const item = context.item, scope = this.scope(context);
+    context.retry = () => this.packageAction(action, context);
     const installed = scopeKey(scope) === this.state.scopeKey
       ? findInstalledPackage(item, this.state.installed)
       : item.installed ? item : undefined;
@@ -448,44 +794,69 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
         await this.runPackageCommand(context, action, `Install ${item.name}`, 'install', { packages: packageIdentity(item, installed, true) }, global ? { '--global': true } : {}, true);
         break;
       }
+      case 'previewInstall':
+        await this.runPackageCommand(context, action, `Preview install ${item.name}`, 'install', { packages: packageIdentity(item, installed, true) },
+          { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
+        break;
+      case 'previewUpdate': {
+        if (!installed) throw new Error('Install this package before previewing an update.');
+        const command = packageUpdateCommand(installed);
+        await this.runPackageCommand(context, action, `Preview update ${item.name}`, command.id, { packages: command.packages },
+          { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
+        break;
+      }
+      case 'applyPreview': {
+        const preview = context.preview;
+        if (!preview || !context.extra.actionResult?.preview || context.extra.actionResult.status !== 'success') throw new Error('Run a successful preview before applying its options.');
+        await this.runPackageCommand(context, preview.action, preview.title, preview.id, preview.args, preview.options, true);
+        break;
+      }
       case 'installWithOptions': {
         const choice = await this.chooseInstallOptions(context, item, installed);
         if (!choice) return;
         await this.runPackageCommand(context, action, `Install ${item.name}${choice.ref ? ` #${choice.ref}` : ''}`, 'install',
           { packages: withRef(packageIdentity(item, installed, true), choice.ref) },
-          { ...(global ? { '--global': true } : {}), ...(choice.targets.length ? { '--target': choice.targets.join(',') } : {}) }, true);
+          global ? { '--global': true } : {}, true);
+        break;
+      }
+      case 'previewWithOptions': {
+        const choice = await this.chooseInstallOptions(context, item, installed);
+        if (!choice) return;
+        await this.runPackageCommand(context, action, `Preview install ${item.name}`, 'install',
+          { packages: withRef(packageIdentity(item, installed, true), choice.ref) },
+          { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
         break;
       }
       case 'uninstall':
         if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
         await this.runPackageCommand(context, action, `Uninstall ${item.name}`, 'uninstall', { packages: packageIdentity(item, installed, false) }, global ? { '--global': true } : {}, true);
         break;
-      case 'update':
+      case 'update': {
         if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
-        await this.runPackageCommand(context, action, `Update ${item.name}`, 'update', { packages: packageIdentity(item, installed, false) }, global ? { '--global': true } : {}, true);
+        const command = packageUpdateCommand(installed);
+        await this.runPackageCommand(context, action, `Update ${item.name}${command.id === 'install' ? ` to ${installed.latestVersion}` : ''}`, command.id, { packages: command.packages }, global ? { '--global': true } : {}, true);
         break;
+      }
       case 'audit': {
         if (global) throw new Error('APM audit scans a project. Select a workspace folder.');
         if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
         const json = await this.client(scope).supports(['audit'], ['--format']);
         await this.runPackageCommand(context, action, `Audit ${item.name}`, 'audit', { package: packageIdentity(item, installed, false) }, json ? { '--format': 'json' } : {}, false, stdout => {
           const audit = json ? parseAudit(stdout) : undefined;
+          if (json && !audit) throw new Error('Unrecognized APM JSON audit report. Review APM Output.');
           if (!audit) return {};
           const counts = Object.entries(audit.summary).filter(([key]) => key !== 'files_scanned' && key !== 'files_affected').map(([key, count]) => `${count} ${key}`).join(', ');
-          return { audit, status: audit.passed ? 'success' : 'failed', summary: `${audit.passed ? 'Passed' : 'Findings reported'} — ${audit.summary.files_scanned ?? 0} files scanned${counts ? `; ${counts}` : ''}.` };
+          return { audit, status: audit.passed ? 'success' : 'failed', summary: `${audit.passed ? 'Passed' : 'Audit failed'} — ${audit.summary.files_scanned ?? 0} files scanned${counts ? `; ${counts}` : ''}${audit.coverage?.complete === false ? '; scan coverage is incomplete' : ''}.` };
         });
         break;
       }
-      case 'tree':
-        await this.runPackageCommand(context, action, 'Dependency tree (whole scope)', 'deps tree', {}, global ? { '--global': true } : {}, false);
-        break;
     }
   }
-  private async chooseInstallOptions(context: PanelContext, item: PackageItem, installed: PackageItem | undefined): Promise<{ ref: string; targets: string[] } | undefined> {
+  private async chooseInstallOptions(context: PanelContext, item: PackageItem, installed: PackageItem | undefined): Promise<{ ref: string } | undefined> {
     const scope = this.scope(context), client = this.client(scope);
     type RefPick = vscode.QuickPickItem & { ref?: string; manual?: boolean };
     const quickPick = vscode.window.createQuickPick<RefPick>();
-    quickPick.title = `Install ${item.name}: version or ref (1/2)`;
+    quickPick.title = `Install ${item.name}: version or ref`;
     quickPick.placeholder = 'Select a tag or branch, or type a ref';
     quickPick.matchOnDescription = true;
     const fixed: RefPick[] = [
@@ -502,7 +873,10 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
         const group = (label: string, list: typeof refs, icon: string): RefPick[] => list.length ? [{ label, kind: vscode.QuickPickItemKind.Separator },
           ...list.map(ref => ({ label: `$(${icon}) ${ref.name}`, description: ref.commit, ref: ref.name }))] : [];
         quickPick.items = [...fixed, ...group('Tags', tags, 'tag'), ...group('Branches', branches, 'git-branch')];
-      }).catch(() => { quickPick.items = [...fixed, { label: 'Versions could not be listed', kind: vscode.QuickPickItemKind.Separator }]; })
+      }).catch(error => {
+        if (!controller.signal.aborted) this.output.appendLine(`Could not list versions: ${redact(String(error))}`);
+        quickPick.items = [...fixed, { label: 'Versions could not be listed. See APM Output.', kind: vscode.QuickPickItemKind.Separator }];
+      })
       .finally(() => { quickPick.busy = false; });
     const picked = await new Promise<RefPick | undefined>(resolve => {
       quickPick.onDidAccept(() => resolve(quickPick.selectedItems[0] ?? (quickPick.value ? { label: quickPick.value, ref: quickPick.value } : undefined)));
@@ -516,21 +890,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       if (typed === undefined) return undefined;
       ref = typed.trim();
     }
-    let targets: string[] = [];
-    try { targets = parseTargets((await client.execute(['install', '--help'], { timeoutMs: 30_000 })).stdout); } catch { /* fall back to free text */ }
-    let selectedTargets: string[];
-    if (targets.length) {
-      const picks = await vscode.window.showQuickPick(targets.map(label => ({ label })), {
-        title: `Install ${item.name}: targets (2/2)`, placeHolder: 'Select target harnesses, or none to use apm.yml / auto-detection', canPickMany: true
-      });
-      if (!picks) return undefined;
-      selectedTargets = picks.map(p => p.label);
-    } else {
-      const typed = await vscode.window.showInputBox({ title: `Install ${item.name}: targets (2/2)`, prompt: 'Comma-separated targets; leave empty to use apm.yml / auto-detection' });
-      if (typed === undefined) return undefined;
-      selectedTargets = typed.split(',').map(t => t.trim()).filter(Boolean);
-    }
-    return { ref, targets: selectedTargets };
+    return { ref };
   }
   private askVariable(prompt: VariablePrompt): Promise<string | undefined> {
     return Promise.resolve(vscode.window.showInputBox({
@@ -544,57 +904,104 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     const descriptor = descriptors.find(c => c.id === id);
     if (!descriptor) throw new Error(`Unknown APM command ${id}.`);
     const scope = this.scope(context), client = this.client(scope);
+    const preview = options['--dry-run'] === true;
+    context.retry = async () => {
+      this.requireTrust();
+      if (context.controller) throw new Error('Wait for the current package action or cancel it before retrying.');
+      context.scope = scope;
+      context.controller = new AbortController();
+      try { await this.runPackageCommand(context, action, title, id, { ...args }, { ...options }, mutating, interpret); }
+      finally { context.controller = undefined; }
+    };
     let argv = buildCommandArguments(descriptor, args, options);
     const flags = Object.keys(options);
     if (!await client.supports(descriptor.command, flags)) throw new Error(`This APM CLI does not support ${descriptor.label} with ${flags.join(' ') || 'these arguments'}. Upgrade APM.`);
     if (mutating) {
-      const confirmation = await vscode.window.showWarningMessage(`${title}?`, {
-        modal: true,
-        detail: `Scope: ${scope.label} (${scope.path})\n\napm ${redact(argv.join(' '))}\n\nAPM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`
-      }, action === 'uninstall' ? 'Uninstall' : action === 'update' ? 'Update' : 'Install');
+      const confirmation = await vscode.window.showWarningMessage(
+        `${title}? Scope: ${scope.label}. Host: ${this.hostLabel()}. APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
+        action === 'uninstall' ? 'Uninstall' : action === 'update' ? 'Update' : 'Install');
       if (!confirmation) return;
       if (descriptor.options.some(o => o.name === '--yes') && await client.supports(descriptor.command, ['--yes'])) argv = buildCommandArguments(descriptor, args, { ...options, '--yes': true });
     }
     const controller = context.controller ?? new AbortController();
     const command = `apm ${redact(argv.join(' '))}`;
-    context.extra.actionResult = { action, title, status: 'running', command };
+    if (preview) {
+      const applyOptions = { ...options };
+      delete applyOptions['--dry-run'];
+      context.preview = { id, args: { ...args }, options: applyOptions, title: `Apply preview for ${context.item?.name ?? title}`,
+        action: action === 'previewUpdate' ? 'update' : 'install' };
+    }
+    context.extra.actionResult = { action, title, status: 'running', command, preview };
     this.send(context);
     const execute = async () => {
       this.requireTrust();
       this.output.appendLine(`\n$ ${command}  (${scope.label})`);
       try {
-        const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title }, () =>
-          client.execute(argv, { signal: controller.signal, timeoutMs: mutating ? 30 * 60_000 : 5 * 60_000, onPrompt: mutating ? prompt => this.askVariable(prompt) : undefined }));
+        const ticket = id === 'audit' && options['--format'] === 'json' ? this.diagnostics.begin(scope.path) : undefined;
+        const result = await vscode.window.withProgress({ location: context.webview ? vscode.ProgressLocation.Window : vscode.ProgressLocation.Notification, title, cancellable: true }, async (_progress, cancellation) => {
+          const subscription = cancellation.onCancellationRequested(() => controller.abort());
+          try { return await client.execute(argv, { signal: controller.signal, timeoutMs: mutating ? 30 * 60_000 : 5 * 60_000, onPrompt: mutating ? prompt => this.askVariable(prompt) : undefined }); }
+          finally { subscription.dispose(); }
+        });
         const output = redact([result.stdout, result.stderr].filter(text => text.trim()).join('\n'));
-        const base: ActionResult = { action, title, command, status: result.exitCode === 0 ? 'success' : 'failed', output: tail(output),
-          summary: result.exitCode === 0 ? 'Completed successfully.' : `APM exited with code ${result.exitCode}.` };
+        const base: ActionResult = { action, title, command, preview, status: result.exitCode === 0 ? 'success' : 'failed', output: tail(output),
+          summary: result.exitCode === 0 ? preview ? 'Preview only. No package changes applied. Resolution may change before the real run; offline plans can be incomplete.' : 'Completed successfully.' : `APM exited with code ${result.exitCode}.` };
         context.extra.actionResult = { ...base, ...(interpret ? interpret(result.stdout) : {}) };
+        if (context.extra.actionResult.audit) {
+          await this.publishAudit(context, scope, context.extra.actionResult.audit, ticket);
+          if (context.extra.actionResult.audit.stale) {
+            context.extra.actionResult.status = 'failed';
+            context.extra.actionResult.summary = 'Files changed or a newer audit started during this scan. Run the audit again.';
+          }
+        }
+        if (result.exitCode !== 0 && !context.extra.actionResult.audit) context.extra.error = redact(result.stderr || `APM exited with code ${result.exitCode}. Review the output.`);
       } catch (error) {
         context.extra.actionResult = { action, title, command, status: controller.signal.aborted ? 'cancelled' : 'failed',
           summary: redact(error instanceof Error ? error.message : String(error)) };
-      } finally { this.send(context); }
+      } finally {
+        this.send(context);
+        if (context.extra.actionResult?.status === 'failed') this.report(new Error(context.extra.error || context.extra.actionResult.summary || `${title} failed. Review APM Output.`), context);
+      }
     };
     if (!mutating) { await execute(); return; }
     await this.serialize('apm-mutations', execute);
+    this.diagnostics.clear();
     if (context.extra.actionResult?.status === 'cancelled') return;
     const previousRequest = context.detailsRequest;
     if (this.refreshing) await this.refreshing;
     await this.refresh();
+    if (context.extra.actionResult) {
+      const result = verifyPackageUpdate(context.extra.actionResult, context.item, this.state.error ?? context.refreshError);
+      context.extra.actionResult = result;
+      if (action === 'update' && result.status === 'failed' && result.summary && !context.extra.error) this.report(new Error(result.summary), context);
+      else this.send(context);
+    }
     if (context.detailsRequest === previousRequest) await this.loadDetails(context);
   }
-  private async serialize(key: string, operation: () => Promise<void>) {
+  private async publishAudit(context: PanelContext, scope: Scope, audit: NonNullable<ActionResult['audit']>, ticket?: AuditTicket) {
+    const links = await this.diagnostics.publish(scope, audit, scope.path, ticket);
+    context.navigation = new Map([...(context.navigation ?? []), ...links]);
+  }
+  private async serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(key) ?? Promise.resolve();
     let resolve!: () => void;
     const current = new Promise<void>(r => { resolve = r; });
     this.queues.set(key, current);
     await previous;
-    try { await operation(); } finally { resolve(); if (this.queues.get(key) === current) this.queues.delete(key); }
+    try { return await operation(); } finally { resolve(); if (this.queues.get(key) === current) this.queues.delete(key); }
   }
-  private async runCommand(message: Extract<Message, { type: 'command' }>, context: PanelContext) {
+  private async runCommand(message: CommandRequest, context: PanelContext, inputLines?: readonly string[]) {
     this.requireTrust();
+    if (this.commandTasks.has(context)) throw new Error('An APM task is already running on this page. Stop it before running another command.');
+    if (context.controller) throw new Error('Another command is already running on this page.');
     const descriptor = descriptors.find(c => c.id === message.id);
     if (!descriptor) throw new Error('Unknown APM command.');
-    const scope = this.scope(context), client = this.client(scope);
+    const scope = { ...this.scope(context) }, client = this.client(scope);
+    context.scope = scope;
+    context.retry = () => {
+      context.scope = scope;
+      return this.runCommand({ ...message, args: { ...message.args }, options: { ...message.options } }, context, inputLines);
+    };
     const options = { ...message.options };
     if ([...Object.values(message.args), ...Object.values(options)].some(value => typeof value === 'string' && containsUrlCredentials(value))) {
       throw new Error('Do not put credentials in URLs. Remove them and use APM authentication.');
@@ -613,59 +1020,101 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
     const flags = descriptor.options.flatMap(o => options[o.name] === false && o.negative ? [o.negative] :
       options[o.name] !== undefined && options[o.name] !== '' && options[o.name] !== false ? [o.name] : []);
     if (!await client.supports(descriptor.command, flags)) throw new Error(`This APM CLI does not support ${descriptor.label} with the selected flags. Upgrade the CLI or change the options.`);
-    const display = `${descriptor.label}\nScope: ${scope.label} (${scope.path})\n${redact(JSON.stringify(args))}`;
-    const confirmation = await vscode.window.showWarningMessage(display, { modal: true, detail: 'APM may write manifests, deployed files, caches, global settings, or execute package scripts. Only proceed for sources you trust.' }, 'Run');
-    if (!confirmation) return;
-    if (descriptor.options.some(o => o.name === '--yes') && options['--yes'] === undefined && await client.supports(descriptor.command, ['--yes'])) {
+    const mutating = descriptor.mutates && !options['--dry-run'] && !options['--validate'] &&
+      (descriptor.id !== 'audit' || options['--strip'] === true || typeof options['--output'] === 'string');
+    if (mutating) {
+      const confirmation = await vscode.window.showWarningMessage(
+        `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`, 'Run');
+      if (!confirmation) return;
+    }
+    if (!inputLines && !requiresTerminal(descriptor, options) && descriptor.options.some(o => o.name === '--yes') && options['--yes'] === undefined && await client.supports(descriptor.command, ['--yes'])) {
       options['--yes'] = true; args = buildCommandArguments(descriptor, message.args, options);
     }
-    const interactive = requiresTerminal(descriptor, options);
+    const interactive = !inputLines && requiresTerminal(descriptor, options);
     if (interactive) {
+      this.requireTrust();
       const executable = vscode.workspace.getConfiguration('apm', scope.kind === 'workspace' ? vscode.Uri.file(scope.path) : undefined).get<string>('executablePath', 'apm');
       const taskScope = scope.kind === 'workspace' ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scope.path)) ?? vscode.TaskScope.Workspace : vscode.TaskScope.Global;
-      const task = new vscode.Task({ type: 'apm', command: descriptor.id }, taskScope, descriptor.label, 'APM',
-        new vscode.ProcessExecution(executable, args, { cwd: scope.kind === 'global' ? homedir() : scope.path }), []);
+      const env = await githubEnvironment();
+      this.requireTrust();
+      if (this.commandTasks.has(context)) throw new Error('An APM task is already running on this page. Stop it before running another command.');
+      const task = new vscode.Task({ type: 'apm-command', command: descriptor.id }, taskScope, descriptor.label, 'APM',
+        new vscode.ProcessExecution(executable, args, { cwd: scope.kind === 'global' ? homedir() : scope.path, env }), []);
       task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, panel: vscode.TaskPanelKind.Dedicated };
-      const execution = await vscode.tasks.executeTask(task);
-      context.extra.busy = true;
-      context.extra.result = 'Interactive APM task started. Review its terminal output. Use Tasks: Terminate Task to cancel.';
-      const processListener = vscode.tasks.onDidEndTaskProcess(event => {
-        if (event.execution !== execution) return;
+      const active: { execution?: vscode.TaskExecution; cancelled: boolean } = { cancelled: false };
+      this.commandTasks.set(context, active);
+      const pending: [vscode.TaskExecution, number | undefined][] = [];
+      const finish = (execution: vscode.TaskExecution, exitCode: number | undefined) => {
+        if (!active.execution) { pending.push([execution, exitCode]); return; }
+        if (execution !== active.execution || this.commandTasks.get(context) !== active) return;
+        this.commandTasks.delete(context);
         processListener.dispose(); endListener.dispose();
-        context.extra.busy = false;
-        context.extra.result = `Interactive APM task finished with exit code ${event.exitCode}. See its terminal for output.`;
-        if (event.exitCode !== 0) context.extra.error = 'APM task did not complete successfully. Review its terminal.';
+        context.extra.busy = false; context.extra.taskRunning = false;
+        context.extra.result = active.cancelled ? 'APM task cancelled. Partial changes may remain. See its terminal for output.' :
+          exitCode === undefined ? 'APM task ended without an exit code. Review the terminal; partial changes may remain.' :
+            `APM task finished with exit code ${exitCode}. See its terminal for output.`;
+        if (!active.cancelled && exitCode !== 0) context.extra.error = 'APM task did not complete successfully. Review its terminal.';
         this.send(context); this.scheduleRefresh();
-      });
-      const endListener = vscode.tasks.onDidEndTask(event => {
-        if (event.execution !== execution) return;
-        processListener.dispose(); endListener.dispose();
-        if (context.extra.busy) {
-          context.extra.busy = false; context.extra.error = 'APM task ended without an exit code. Review the terminal; partial changes may remain.';
-          this.send(context); this.scheduleRefresh();
-        }
-      });
+      };
+      const processListener = vscode.tasks.onDidEndTaskProcess(event => finish(event.execution, event.exitCode));
+      const endListener = vscode.tasks.onDidEndTask(event => finish(event.execution, undefined));
       this.subscriptions.push(processListener, endListener);
-      this.send(context); return;
+      context.extra.busy = true; context.extra.taskRunning = true;
+      context.extra.result = 'APM task started. Review its terminal output. Use Cancel or Tasks: Terminate Task to stop it.';
+      this.send(context);
+      try {
+        active.execution = await vscode.tasks.executeTask(task);
+        if (active.cancelled) active.execution.terminate();
+        for (const [execution, exitCode] of pending) finish(execution, exitCode);
+      } catch (error) {
+        this.commandTasks.delete(context);
+        processListener.dispose(); endListener.dispose();
+        context.extra.busy = false; context.extra.taskRunning = false;
+        context.extra.result = undefined;
+        this.send(context);
+        throw error;
+      }
+      return;
     }
+    if (context.controller) throw new Error('Another command is already running on this page.');
+    const controller = context.controller = new AbortController();
     try {
-      await this.serialize('apm-mutations', async () => {
+      const execute = async () => {
         this.requireTrust();
-        this.operation = new AbortController();
+        if (descriptor.id === 'init' && inputLines && await readOptional(join(scope.path, 'apm.yml')) !== undefined) throw new Error('apm.yml was created while initialization was being configured. Open it instead of overwriting it.');
+        this.operation = controller;
         context.extra.busy = true; context.extra.result = undefined; this.send(context);
         try {
-          const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: descriptor.label, cancellable: true }, async (_progress, cancellation) => {
-            const subscription = cancellation.onCancellationRequested(() => this.operation?.abort());
-            try { return await client.execute(args, { signal: this.operation?.signal, timeoutMs: 30 * 60_000, onPrompt: prompt => this.askVariable(prompt) }); }
+          const ticket = descriptor.id === 'audit' && options['--format'] === 'json' ? this.diagnostics.begin(scope.path) : undefined;
+          this.output.appendLine(`\n$ apm ${redact(args.join(' '))} (${scope.label})`);
+          const result = await vscode.window.withProgress({ location: context.webview ? vscode.ProgressLocation.Window : vscode.ProgressLocation.Notification, title: descriptor.label, cancellable: true }, async (_progress, cancellation) => {
+            const subscription = cancellation.onCancellationRequested(() => controller.abort());
+            try { return await client.execute(args, { signal: controller.signal, timeoutMs: 30 * 60_000,
+              ...(inputLines ? { inputLines } : { onPrompt: (prompt: VariablePrompt) => this.askVariable(prompt) }) }); }
             finally { subscription.dispose(); }
           });
           context.extra.result = redact(`Exit code: ${result.exitCode}\n${result.stdout}\n${result.stderr}`);
+          if (descriptor.id === 'audit' && options['--format'] === 'json') {
+            const audit = parseAudit(result.stdout);
+            if (!audit) throw new Error('Unrecognized APM JSON audit report. Review APM Output.');
+            await this.publishAudit(context, scope, audit, ticket);
+            context.extra.actionResult = { action: 'audit', title: 'Workspace audit', command: `apm ${redact(args.join(' '))}`,
+              status: audit.passed ? 'success' : 'failed', audit, summary: audit.stale ? 'Files changed or a newer audit started. Run the audit again.' : audit.coverage?.complete === false ? 'Audit coverage is incomplete.' : `${audit.findings.length} findings.` };
+          }
           if (result.exitCode !== 0) context.extra.error = `APM exited with code ${result.exitCode}. Review the result; diagnostic commands can report findings through a nonzero exit status.`;
         } finally {
           this.operation = undefined; context.extra.busy = false; this.send(context);
         }
-      });
-    } finally { await this.refresh(); }
+      };
+      if (mutating) await this.serialize('apm-mutations', execute);
+      else await execute();
+    } finally {
+      context.controller = undefined;
+      if (mutating) {
+        if (descriptor.id !== 'audit') this.diagnostics.clear();
+        await this.refresh();
+      }
+    }
   }
   async setup() {
     this.requireTrust();
@@ -705,7 +1154,7 @@ class ApmExtension implements vscode.WebviewViewProvider, vscode.Disposable {
       ? `Downloads and installs the latest APM release.${command[0] === 'sudo' ? ` APM is installed in ${installation.path ? dirname(installation.path) : 'a folder'} owned by an administrator account, so the update runs with sudo. Enter your password in the terminal when asked.` : ''}`
       : `Runs in a terminal on ${host}.${choice.method === 'pip' ? ' Requires Python 3.10 or later.' : ''}${recommended && choice !== recommended ? ` APM appears to be installed with ${how[installation.method]}; using another tool can leave two copies.` : ''}`;
     const shown = command[0] === 'sudo' ? 'sudo apm self-update' : command.join(' ');
-    const confirm = await vscode.window.showInformationMessage(`${verb} APM with "${shown}"?`, { modal: true, detail }, verb);
+    const confirm = await vscode.window.showInformationMessage(`${verb} APM with "${shown}"? ${detail}`, verb);
     if (!confirm) return;
     const task = new vscode.Task({ type: 'apm-install' }, vscode.TaskScope.Global, choice.label, 'APM', new vscode.ProcessExecution(command[0], command.slice(1)), []);
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, focus: true, panel: vscode.TaskPanelKind.Dedicated };
@@ -735,21 +1184,36 @@ function openSettings(query: string) {
 
 export function activate(context: vscode.ExtensionContext) {
   const extension = new ApmExtension(context);
-  context.subscriptions.push(extension, vscode.window.registerWebviewViewProvider('apm.browser', extension, { webviewOptions: { retainContextWhenHidden: true } }));
+  context.subscriptions.push(extension, vscode.window.registerWebviewViewProvider('apm.browser', {
+    resolveWebviewView: view => extension.resolveWebviewView(view)
+  }, { webviewOptions: { retainContextWhenHidden: true } }));
   for (const [command, callback] of [
+    ...Object.keys(workflowCommands).filter(workflow => workflow !== 'previewInstall' && workflow !== 'policy').map(workflow => [`apm.${workflow}`, (uri?: unknown) => extension.workflow(workflow as Workflow, uri instanceof vscode.Uri ? uri : undefined)] as const),
+    ['apm.targets', (uri?: unknown) => extension.showTargets(undefined, uri instanceof vscode.Uri ? uri : undefined)],
     ['apm.refresh', () => extension.refreshAll()],
-    ['apm.tools', (id?: unknown) => typeof id === 'string' && descriptors.some(d => d.id === id) ? extension.open(id) : extension.pickCommand()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
-    ['apm.install', () => extension.open('install')],
+    ...(['catalog', 'installed', 'updates'] as const).map(section => [`apm.views.${section}`, () => extension.toggleSection(section)] as const),
+    ['apm.signIn', () => extension.signIn()],
+    ['apm.install', () => extension.installPackage()],
     ['apm.setup', () => extension.setup()],
     ['apm.filter.installed', () => extension.toggleStatus('@installed')],
     ['apm.filter.updates', () => extension.toggleStatus('@updates')],
+    ['apm.filter.dependencies', () => extension.toggleStatus('@dependencies')],
     ['apm.filter.scope.workspace', () => extension.chooseScope('workspace')],
     ['apm.filter.scope.global', () => extension.chooseScope('global')],
     ['apm.filter.marketplace.all', () => extension.chooseMarketplace(true)],
     ['apm.filter.marketplace.choose', () => extension.chooseMarketplace()],
     ...(['name', 'name-desc', 'marketplace', 'version', 'version-desc'] as const).map(order => [`apm.filter.sort.${order}`, () => extension.sortBy(order)] as const),
-    ['apm.output', () => vscode.commands.executeCommand('workbench.action.output.toggleOutput')]
-  ] as const) context.subscriptions.push(vscode.commands.registerCommand(command, callback));
+    ['apm.output', () => extension.showOutput()]
+  ] as const) {
+    const handler = async (argument?: unknown) => {
+      try { await callback(argument); }
+      catch (error) { extension.report(error); }
+    };
+    context.subscriptions.push(vscode.commands.registerCommand(command, handler));
+    if (command.startsWith('apm.views.') || command.startsWith('apm.filter.')) {
+      context.subscriptions.push(vscode.commands.registerCommand(`${command}.checked`, handler));
+    }
+  }
 }

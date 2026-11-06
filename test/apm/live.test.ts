@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { isSeq, parseDocument } from 'yaml';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,6 +14,40 @@ import { addArguments, matches, parseEntry } from '../../src/config/marketplaces
 
 const executable = process.env.APM_TEST_EXECUTABLE;
 const git = promisify(execFile);
+test('real initialization preserves every native answer in the selected project', { skip: !executable, timeout: 30_000 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-init-native-'));
+  try {
+    const project = join(home, 'workspace'); await mkdir(project);
+    const client = new ApmClient({ executable: executable!, cwd: project, home });
+    const result = await client.execute(['init', '--target', 'copilot,claude', '.'], {
+      inputLines: ['custom-name', '2.3.4', 'Native initialization: all fields', 'Example Author', 'y']
+    });
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+    const manifest = parseDocument(await readFile(join(project, 'apm.yml'), 'utf8'));
+    assert.equal(manifest.get('name'), 'custom-name');
+    assert.equal(manifest.get('version'), '2.3.4');
+    assert.equal(manifest.get('description'), 'Native initialization: all fields');
+    assert.equal(manifest.get('author'), 'Example Author');
+    const targets = manifest.get('targets', true);
+    assert.ok(isSeq(targets));
+    assert.deepEqual(targets.toJSON(), ['claude', 'copilot']);
+    assert.ok(!(await readdir(project)).includes('custom-name'), 'Initialization must not create a nested project');
+  } finally { await rm(home, { recursive: true }); }
+});
+test('real initialization accepts blank optional metadata and uses CLI defaults', { skip: !executable, timeout: 30_000 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-init-optional-'));
+  try {
+    const project = join(home, 'workspace'); await mkdir(project);
+    const client = new ApmClient({ executable: executable!, cwd: project, home });
+    const result = await client.execute(['init', '.'], { inputLines: ['custom-name', '', '', '', 'y'] });
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+    const manifest = parseDocument(await readFile(join(project, 'apm.yml'), 'utf8'));
+    assert.equal(manifest.get('name'), 'custom-name');
+    assert.equal(manifest.get('version'), '1.0.0');
+    assert.equal(typeof manifest.get('description'), 'string');
+    assert.equal(typeof manifest.get('author'), 'string');
+  } finally { await rm(home, { recursive: true }); }
+});
 test('real baseline update checks parse ASCII tables', { skip: !executable, timeout: 180_000 }, async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-outdated-test-'));
   try {
@@ -55,6 +90,11 @@ test('real baseline CLI covers every descriptor and option', { skip: !executable
       const leafFlags = [...help.stdout.matchAll(/^\s{2}(--[\w-]+(?:\/--[\w-]+)?|-\w(?:,\s+--[\w-]+)?)/gm)].flatMap(match => match[0].match(/--[\w-]+/g) ?? []).filter(flag => flag !== '--help');
       const represented = new Set(descriptor.options.flatMap(o => [o.name, o.negative].filter(Boolean)));
       for (const flag of leafFlags) assert.ok(represented.has(flag), `${descriptor.id}: undocumented UI flag ${flag}`);
+      for (const match of help.stdout.matchAll(/^\s{2}(?:-\w,\s+)?(--[\w-]+)\s+\[([^\]]+)\]/gm)) {
+        const option = descriptor.options.find(o => o.name === match[1]);
+        if (option?.optionalValue && !match[2].includes('|')) continue;
+        assert.deepEqual(option?.choices, match[2].split('|'), `${descriptor.id}: missing or stale choices for ${match[1]}`);
+      }
     }
     const paths = new Set(['']);
     for (const descriptor of descriptors) {
@@ -62,10 +102,15 @@ test('real baseline CLI covers every descriptor and option', { skip: !executable
     }
     for (const path of paths) {
       const output = helpCache.get(path) ?? (await client.execute([...(path ? path.split(' ') : []), '--help'])).stdout;
-      const commands = output.split(/\nCommands:\s*\n/)[1];
-      if (!commands) continue;
-      const names = [...commands.matchAll(/^\s{2}([a-z][\w-]*)\s{2,}/gm)].map(match => match[1]);
-      assert.ok(names.length, `${path || 'root'}: cannot parse public command inventory`);
+      let section = false;
+      const names: string[] = [];
+      for (const line of output.split('\n')) {
+        if (/^(?:[\w -]+ )?commands:\s*$/i.test(line)) section = true;
+        else if (/^\S/.test(line)) section = false;
+        const match = section && /^ {2}([a-z][\w-]*)\s{2,}/.exec(line);
+        if (match) names.push(match[1]);
+      }
+      if (!names.length) continue;
       for (const name of names) {
         const key = [path, name].filter(Boolean).join(' ');
         assert.ok(paths.has(key) || ['info', 'discover'].includes(key), `Public CLI command missing from visual contract: ${key}`);

@@ -1,6 +1,19 @@
 import { record } from './adapters';
 import type { PackageItem, Scope, UpdateRow } from './types';
 
+export function getUpdateBadge(state: { trusted: boolean; version?: string; warning?: string; installed: readonly PackageItem[] }): { value: number; tooltip: string } | undefined {
+  if (!state.trusted || !state.version) return undefined;
+  const packages = state.installed.filter(item => item.updateStatus === 'outdated');
+  const cliUpdate = !!state.warning;
+  const value = packages.length + Number(cliUpdate);
+  if (!value) return undefined;
+  const parts: string[] = [];
+  if (packages.length) parts.push(`${packages.length} package update${packages.length === 1 ? '' : 's'}`);
+  if (cliUpdate) parts.push('1 APM CLI update');
+  const cached = packages.some(item => item.updateStale) ? ' (includes saved package update results)' : '';
+  return { value, tooltip: `${parts.join(' and ')} available${cached}` };
+}
+
 function samePackage(a: PackageItem, b: PackageItem): boolean {
   return a.id === b.id || (!!a.marketplace && a.marketplace === b.marketplace && a.name === b.name);
 }

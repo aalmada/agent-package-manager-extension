@@ -77,6 +77,77 @@ for mod, tree in trees.items():
             for entry in node.names:
                 imports[mod][entry.asname or entry.name] = f"{target}.{entry.name}"
 
+
+def static_value(node, mod, bindings=None, depth=0):
+    """Resolve only declarative constants and single-return choice helpers."""
+    if depth > 20:
+        raise ValueError("Choice expression exceeds resolution depth")
+    bindings = bindings or {}
+
+    def value(child, owner=mod, local=bindings):
+        return static_value(child, owner, local, depth + 1)
+
+    def definition(name):
+        symbol = resolve(mod, name)
+        owner, _, member = symbol.rpartition(".")
+        for entry in trees[owner].body:
+            if isinstance(entry, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == member for target in entry.targets
+            ):
+                return entry.value, owner
+            if isinstance(entry, ast.AnnAssign) and isinstance(entry.target, ast.Name) and entry.target.id == member:
+                return entry.value, owner
+            if isinstance(entry, (ast.FunctionDef, ast.ClassDef)) and entry.name == member:
+                return entry, owner
+        raise ValueError(f"Unresolved choice symbol: {symbol}")
+
+    if isinstance(node, ast.Name):
+        if node.id in bindings:
+            return bindings[node.id]
+        expression, owner = definition(node.id)
+        return value(expression, owner, {})
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [value(entry) for entry in node.elts]
+    if isinstance(node, ast.Attribute):
+        if node.attr == "value":
+            return value(node.value)
+        if isinstance(node.value, ast.Name):
+            cls, owner = definition(node.value.id)
+            if isinstance(cls, ast.ClassDef):
+                for entry in cls.body:
+                    if isinstance(entry, ast.Assign) and any(
+                        isinstance(target, ast.Name) and target.id == node.attr for target in entry.targets
+                    ):
+                        return value(entry.value, owner, {})
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords:
+        if node.func.id in {"list", "tuple"} and len(node.args) == 1:
+            return list(value(node.args[0]))
+        if not node.args:
+            fn, owner = definition(node.func.id)
+            if isinstance(fn, ast.FunctionDef) and not fn.decorator_list:
+                body = [entry for entry in fn.body if not (
+                    isinstance(entry, ast.Expr) and isinstance(entry.value, ast.Constant)
+                    and isinstance(entry.value.value, str)
+                )]
+                if len(body) == 1 and isinstance(body[0], ast.Return):
+                    return value(body[0].value, owner, {})
+    if isinstance(node, ast.GeneratorExp) and len(node.generators) == 1:
+        generator = node.generators[0]
+        if isinstance(generator.target, ast.Name) and not generator.is_async:
+            result = []
+            for entry in value(generator.iter):
+                local = {**bindings, generator.target.id: entry}
+                if all(value(condition, local=local) for condition in generator.ifs):
+                    result.append(value(node.elt, local=local))
+            return result
+    if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.NotEq):
+        return value(node.left) != value(node.comparators[0])
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, TypeError) as error:
+        raise ValueError(f"Unsupported choice expression in {mod}: {ast.dump(node)}") from error
+
+
 for mod, tree in trees.items():
     if not (mod.startswith("apm_cli.commands.") or mod == "apm_cli.cli"):
         continue
@@ -132,12 +203,11 @@ for mod, tree in trees.items():
             choices = None
             kind = "string"
             if isinstance(type_node, ast.Call) and isinstance(type_node.func, ast.Attribute) and type_node.func.attr == "Choice":
-                choices = literal(type_node.args[0]) if type_node.args else None
-                if isinstance(choices, (list, tuple, set)):
-                    kind = "choice"
-                    choices = list(choices)
-                else:
-                    choices = None
+                choices = static_value(type_node.args[0], mod)
+                if not isinstance(choices, (list, tuple)) or not choices or not all(isinstance(c, str) for c in choices):
+                    raise ValueError(f"Invalid choices for {symbol} {flag}: {choices}")
+                kind = "choice"
+                choices = list(choices)
             elif isinstance(type_node, ast.Name) and type_node.id in {"int", "float"}:
                 kind = "number"
             elif keyword(d, "is_flag", False) or negative or d.func.attr == "confirmation_option":
@@ -154,6 +224,8 @@ for mod, tree in trees.items():
             }
             if choices:
                 option["choices"] = choices
+                if not keyword(type_node, "case_sensitive", True):
+                    option["caseSensitive"] = False
             if negative:
                 option["negative"] = negative
             if isinstance(default, (str, int, float, bool)):
@@ -228,9 +300,12 @@ def visit(symbol, path, inherited_options=None, inherited_arguments=None):
         "options": options, "positionals": arguments,
         "global": any(o["name"] == "--global" for o in options),
         "mutates": root not in {"outdated", "view", "find", "list", "targets", "doctor", "search", "preview"},
-        "interactive": root in {"auth", "run"} or (root == "runtime" and path[1:2] not in (["list"], ["status"])),
-        "experimental": root in {"run", "runtime", "experimental"},
-        "deprecated": root == "unpack", "source": command["source"],
+        "interactive": root in {"auth", "run", "init"} or path == ["plugin", "init"] or
+            (root == "runtime" and path[1:2] not in (["list"], ["status"])),
+        "experimental": root in {"run", "runtime", "experimental", "publish"},
+        **({"experimentalFeature": "registries"} if root == "publish" else {}),
+        "deprecated": root == "unpack" or path == ["deps", "update"],
+        "source": command["source"],
     })
 
 

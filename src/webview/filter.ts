@@ -1,4 +1,16 @@
 import type { PackageItem } from '../apm/types';
+import type { BrowserSection, State } from '../protocol';
+
+export function sectionPackages(section: BrowserSection, state: Pick<State, 'catalog' | 'installed'>): PackageItem[] {
+  switch (section) {
+    case 'catalog': return state.catalog;
+    case 'installed': return state.installed;
+    case 'updates': return state.installed.filter(item => item.updateStatus === 'outdated');
+    case 'direct': return state.installed.filter(item => item.direct === true);
+    case 'transitive': return state.installed.filter(item => item.direct === false);
+    case 'unclassified': return state.installed.filter(item => item.direct === undefined);
+  }
+}
 
 export type Ordering = 'name' | 'name-desc' | 'marketplace' | 'version' | 'version-desc';
 export interface Filters { text: string; marketplace: string; status: string; sort: Ordering }
@@ -30,11 +42,12 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
     if (token.startsWith('@marketplace:')) marketplace = token.slice(13).replaceAll('"', '');
     else if (token === '@installed') status = 'installed';
     else if (token === '@updates') status = 'updates';
+    else if (token === '@dependencies') status = 'dependencies';
     else if (token.startsWith('@sort:') && ['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(token.slice(6))) sort = token.slice(6) as Ordering;
     else terms.push(token.replaceAll('"', '').toLowerCase());
   }
   return items.filter(item => (!marketplace || item.marketplace === marketplace) &&
-    (status !== 'installed' || item.installed) && (status !== 'updates' || item.updateStatus === 'outdated') &&
+    (!['installed', 'dependencies'].includes(status) || item.installed) && (status !== 'updates' || item.updateStatus === 'outdated') &&
     terms.every(term => `${item.name} ${item.description ?? ''} ${item.marketplace}`.toLowerCase().includes(term)))
     .sort((a, b) => {
       let order = 0;
@@ -48,21 +61,22 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
 }
 
 const tokenPattern = /(?:[^\s"]+|"[^"]*")+/g;
-export interface FilterTokens { marketplace: string; sort: Ordering; installed: boolean; updates: boolean }
+export interface FilterTokens { marketplace: string; sort: Ordering; installed: boolean; updates: boolean; dependencies: boolean }
 export function filterTokens(search: string): FilterTokens {
   const sort = search.match(/@sort:(\S+)/)?.[1] ?? 'name';
   return {
     marketplace: search.match(/@marketplace:("[^"]*"|\S+)/)?.[1]?.replaceAll('"', '') ?? '',
     sort: (['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(sort) ? sort : 'name') as Ordering,
     installed: /(?:^|\s)@installed(?=\s|$)/.test(search),
-    updates: /(?:^|\s)@updates(?=\s|$)/.test(search)
+    updates: /(?:^|\s)@updates(?=\s|$)/.test(search),
+    dependencies: /(?:^|\s)@dependencies(?=\s|$)/.test(search)
   };
 }
 export function withToken(search: string, prefix: string, value: string): string {
   const kept = (search.match(tokenPattern) ?? []).filter(token => !token.startsWith(prefix)).join(' ');
   return value ? `${kept} ${prefix}${value.includes(' ') ? `"${value}"` : value}`.trim() : kept;
 }
-export function withStatus(search: string, value: '' | '@installed' | '@updates'): string {
-  const kept = search.replace(/(?:^|\s)@(installed|updates)(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
+export function withStatus(search: string, value: '' | '@installed' | '@updates' | '@dependencies'): string {
+  const kept = search.replace(/(?:^|\s)@(installed|updates|dependencies)(?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
   return value ? `${kept} ${value}`.trim() : kept;
 }

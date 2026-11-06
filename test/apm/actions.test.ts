@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { packageIdentity, parseAudit, parseTargets, parseVersions, tail, versionSource, withRef } from '../../src/apm/actions';
+import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult } from '../../src/apm/actions';
 import type { PackageItem } from '../../src/apm/types';
 import { parseMessage } from '../../src/protocol';
 import { olderThan } from '../../src/apm/client';
@@ -27,6 +27,35 @@ test('version source resolves the repository behind a marketplace plugin', () =>
   assert.equal(versionSource({ ...catalog, metadata: { plugin: { source: { source: 'github', repo: 'org/plugin' } } } }, undefined, marketplaces), 'org/plugin');
   assert.equal(versionSource(catalog, installed, marketplaces), 'github/awesome-copilot/plugins/accessibility-kanban');
   assert.equal(versionSource(catalog, undefined, []), 'accessibility-kanban@awesome-copilot');
+});
+
+test('updating a tagged package installs the advertised release instead of refreshing its old pin', () => {
+  const tagged = { ...installed, latestVersion: 'dotnet-v0.8.0', metadata: {
+    cliIdentity: 'netfabric/intelligentium/plugins/dotnet', update: { source: 'git tags' }
+  } };
+  assert.deepEqual(packageUpdateCommand(tagged), { id: 'install', packages: 'netfabric/intelligentium/plugins/dotnet#dotnet-v0.8.0' });
+  assert.deepEqual(packageUpdateCommand(installed), { id: 'update', packages: 'github/awesome-copilot/plugins/accessibility-kanban' });
+  assert.throws(() => packageUpdateCommand({ ...tagged, latestVersion: '-' }), /usable latest tag/);
+  assert.throws(() => packageUpdateCommand({ ...tagged, latestVersion: 'dotnet-v0.…' }), /usable latest tag/);
+  assert.throws(() => packageUpdateCommand({ ...tagged, latestVersion: '--force' }), /begin with/);
+  assert.throws(() => packageUpdateCommand({ ...tagged, direct: false }), /parent dependency/);
+});
+
+test('a zero-exit update is successful only when the refreshed package is current', () => {
+  const result: ActionResult = { action: 'update', title: 'Update dotnet', status: 'success', command: 'apm update dotnet', output: 'All dependencies already at their latest matching refs.' };
+  assert.equal(verifyPackageUpdate(result, { ...installed, updateStatus: 'current' }).status, 'success');
+  const noop = verifyPackageUpdate(result, { ...installed, updateStatus: 'outdated', latestVersion: 'dotnet-v0.8.0' });
+  assert.equal(noop.status, 'failed');
+  assert.match(noop.summary ?? '', /still has an update available: dotnet-v0\.8\.0/);
+  assert.equal(noop.output, result.output);
+  for (const updateStatus of ['unknown', 'failed', 'unchecked'] as const) {
+    assert.equal(verifyPackageUpdate(result, { ...installed, updateStatus }).status, 'failed');
+  }
+  assert.equal(verifyPackageUpdate(result, { ...installed, updateStatus: 'current', updateStale: true }).status, 'failed');
+  assert.equal(verifyPackageUpdate(result, undefined).status, 'failed');
+  assert.match(verifyPackageUpdate(result, installed, 'Refresh failed').summary ?? '', /Refresh failed/);
+  const failed = { ...result, status: 'failed' as const };
+  assert.equal(verifyPackageUpdate(failed, installed), failed);
 });
 
 test('refs are appended safely', () => {
@@ -68,6 +97,31 @@ test('targets are parsed from install help without matching --runtime prose', ()
   --allow-insecure                Allow http`;
   assert.deepEqual(parseTargets(help), ['agent-skills', 'all', 'copilot-app', 'vscode']);
   assert.deepEqual(parseTargets('Usage: apm install'), []);
+});
+
+test('audit preserves incomplete coverage and physical versus decoded finding coordinates', () => {
+  const coverage = {
+    complete: false,
+    primitives: [{ file: '.github/hooks.json', target: 'copilot', kind: 'hooks', pointer: '/hooks/0', tracked: true, strippable: false, status: 'incomplete', diagnostic: 'Prompt format could not be inspected.' }]
+  };
+  const report = parseAudit(JSON.stringify({
+    passed: false, exit_code: 1, summary: { files_scanned: 0 }, coverage,
+    findings: [
+      { severity: 'critical', file: 'a.md', line: 2, column: 3, category: 'unicode', description: 'Hidden character', remediation: 'Review source.' },
+      { severity: 'warning', file: '.github/hooks.json', pointer: '/hooks/0', decoded_line: 4, decoded_column: 5, description: 'Decoded prompt warning' }
+    ]
+  }))!;
+  assert.equal(report.passed, false);
+  assert.equal(report.exitCode, 1);
+  assert.deepEqual(report.coverage, coverage);
+  assert.deepEqual(report.findings[0], { severity: 'critical', file: 'a.md', line: 2, column: 3, category: 'unicode', message: 'Hidden character', remediation: 'Review source.' });
+  assert.deepEqual(report.findings[1], { severity: 'warning', file: '.github/hooks.json', pointer: '/hooks/0', decodedLine: 4, decodedColumn: 5, message: 'Decoded prompt warning' });
+  assert.equal(parseAudit(JSON.stringify({ passed: true, coverage }))?.passed, false);
+  assert.equal(parseAudit(JSON.stringify({ passed: true, exit_code: 1 }))?.passed, false);
+  assert.equal(parseAudit(JSON.stringify({ passed: true, coverage: { ...coverage, complete: true } }))?.coverage?.complete, false);
+  assert.equal(parseAudit(JSON.stringify({ passed: true, coverage: { complete: true, primitives: [] } }))?.passed, true);
+  assert.throws(() => parseAudit('{"coverage":{"complete":false}}'), /Unrecognized APM audit coverage/);
+  assert.throws(() => parseAudit('{"coverage":{"complete":true,"primitives":[null]}}'), /Unrecognized APM audit coverage entry/);
 });
 
 test('long output keeps its tail', () => {

@@ -8,6 +8,7 @@ import { listContained, readBareFile, readContained, resolveContained } from './
 import type { Marketplace } from './types';
 
 export interface PackageMetadata {
+  localRoot?: string;
   pluginManifest?: Record<string, unknown>;
   manifest?: Record<string, unknown>;
   readme?: string;
@@ -255,7 +256,7 @@ export async function inspectLocalPackage(parent: string, path = '.', options: {
     exists: async file => { try { return !!(await resolveContained(parent, file)); } catch { return false; } },
     read: file => readContained(parent, file)
   } : undefined;
-  return { pluginManifest, manifest, readme, notices, notes,
+  return { localRoot: root, pluginManifest, manifest, readme, notices, notes,
     contents: await addRepositoryComposition(pluginManifest, contents, notices, notes, repository) };
 }
 

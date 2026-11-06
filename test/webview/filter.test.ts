@@ -12,6 +12,8 @@ test('shared filters match text, marketplace tokens and confirmed updates', () =
   assert.equal(filterPackages(packages, { ...base, text: 'CODE @marketplace:b @updates' })[0].id, 'b::sample');
   assert.equal(filterPackages(packages, { ...base, text: '@installed' }).length, 2);
   assert.equal(filterPackages(packages, { ...base, text: '@updates' }).length, 1);
+  assert.equal(filterPackages(packages, { ...base, text: '@dependencies' }).length, 2);
+  assert.deepEqual(filterPackages(packages, { ...base, text: 'review @dependencies @marketplace:b' }).map(p => p.id), ['b::sample']);
   assert.deepEqual(filterPackages(packages, { ...base, text: '@marketplace:a @sort:version-desc' }).map(p => p.id), ['a::sample', 'a::other']);
 });
 test('versions compare semantically, including prerelease precedence', () => {
@@ -23,10 +25,13 @@ test('versions compare semantically, including prerelease precedence', () => {
   assert.deepEqual(filterPackages(packages, base).filter(p => p.name === 'sample').map(p => p.id), ['a::sample', 'b::sample']);
 });
 test('filter token helpers back the native filter menu', () => {
-  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:version-desc'), { marketplace: 'my market', sort: 'version-desc', installed: false, updates: true });
+  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:version-desc'), { marketplace: 'my market', sort: 'version-desc', installed: false, updates: true, dependencies: false });
+  assert.equal(filterTokens('@dependencies').dependencies, true);
   assert.equal(withToken('kanban @sort:version', '@sort:', 'name-desc'), 'kanban @sort:name-desc');
   assert.equal(withToken('kanban @marketplace:one', '@marketplace:', ''), 'kanban');
   assert.equal(withToken('', '@marketplace:', 'my market'), '@marketplace:"my market"');
   assert.equal(withStatus('kanban @installed', '@updates'), 'kanban @updates');
   assert.equal(withStatus('@updates kanban', ''), 'kanban');
+  assert.equal(withStatus('kanban @updates', '@dependencies'), 'kanban @dependencies');
+  assert.equal(withStatus('kanban @dependencies', '@installed'), 'kanban @installed');
 });

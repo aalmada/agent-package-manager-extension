@@ -20,6 +20,8 @@ export interface ContentItem {
   name: string;
   path?: string;
   description?: string;
+  navigationId?: string;
+  locationKind?: 'source' | 'installed' | 'deployed';
 }
 export interface ContentGroup {
   kind: ContentKind;
@@ -77,6 +79,7 @@ export function mergeContents(...sources: readonly ContentGroup[][]): ContentGro
       const existing = items.get(key);
       items.set(key, existing ? {
         ...existing,
+        ...(item.navigationId ? { navigationId: item.navigationId, locationKind: item.locationKind } : {}),
         ...(!existing.description && item.description ? { description: item.description } : {})
       } : item);
     }

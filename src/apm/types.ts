@@ -27,6 +27,7 @@ export interface CommandOption {
   type: 'boolean' | 'string' | 'number' | 'choice';
   aliases?: string[];
   choices?: string[];
+  caseSensitive?: boolean;
   required?: boolean;
   repeatable?: boolean;
   nargs?: number;
@@ -50,6 +51,7 @@ export interface CommandDescriptor {
   mutates: boolean;
   interactive?: boolean;
   experimental?: boolean;
+  experimentalFeature?: string;
   deprecated?: boolean;
 }
 export interface ExecutionResult { stdout: string; stderr: string; exitCode: number }

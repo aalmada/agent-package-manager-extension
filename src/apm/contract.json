@@ -199,6 +199,7 @@
             "sarif",
             "markdown"
           ],
+          "caseSensitive": false,
           "default": "text",
           "at": 1
         },
@@ -1423,7 +1424,7 @@
       "mutates": true,
       "interactive": false,
       "experimental": false,
-      "deprecated": false,
+      "deprecated": true,
       "source": "apm_cli/commands/deps/cli.py"
     },
     {
@@ -2024,7 +2025,7 @@
       ],
       "global": true,
       "mutates": true,
-      "interactive": false,
+      "interactive": true,
       "experimental": false,
       "deprecated": false,
       "source": "apm_cli/commands/init.py"
@@ -2482,6 +2483,7 @@
             "warn",
             "block"
           ],
+          "caseSensitive": false,
           "at": 1
         },
         {
@@ -3049,7 +3051,7 @@
         {
           "name": "--format",
           "label": "format",
-          "type": "string",
+          "type": "choice",
           "aliases": [
             "--format",
             "-f"
@@ -3060,6 +3062,11 @@
           "description": "SBOM output format",
           "optionalValue": false,
           "hidden": false,
+          "choices": [
+            "cyclonedx",
+            "spdx"
+          ],
+          "caseSensitive": false,
           "at": 2
         },
         {
@@ -4424,7 +4431,7 @@
         {
           "name": "--format",
           "label": "format",
-          "type": "string",
+          "type": "choice",
           "aliases": [
             "--format"
           ],
@@ -4434,6 +4441,14 @@
           "description": "Bundle format selector. 'agent-plugin' emits portable Agent Plugins v1; 'plugin' is the compatibility alias for the legacy Claude plugin bundle; 'claude' / 'claude-plugin' also emit that bundle; and 'apm' emits the legacy APM bundle layout. The current no-flag default is 'claude-plugin'.",
           "optionalValue": false,
           "hidden": false,
+          "choices": [
+            "plugin",
+            "agent-plugin",
+            "claude",
+            "claude-plugin",
+            "apm"
+          ],
+          "caseSensitive": false,
           "at": 1
         },
         {
@@ -4749,7 +4764,7 @@
         {
           "name": "--format",
           "label": "format",
-          "type": "string",
+          "type": "choice",
           "aliases": [
             "--format"
           ],
@@ -4759,6 +4774,13 @@
           "description": "Plugin format. 'agent-plugin' selects portable Agent Plugins v1; 'plugin', 'claude', and 'claude-plugin' select the current Claude-compatible default.",
           "optionalValue": false,
           "hidden": false,
+          "choices": [
+            "plugin",
+            "agent-plugin",
+            "claude",
+            "claude-plugin"
+          ],
+          "caseSensitive": false,
           "at": 2
         },
         {
@@ -4804,7 +4826,7 @@
       ],
       "global": false,
       "mutates": true,
-      "interactive": false,
+      "interactive": true,
       "experimental": false,
       "deprecated": false,
       "source": "apm_cli/commands/plugin/init.py"
@@ -4916,6 +4938,7 @@
             "table",
             "json"
           ],
+          "caseSensitive": false,
           "default": "table",
           "at": 2
         },
@@ -5139,7 +5162,8 @@
       "global": false,
       "mutates": true,
       "interactive": false,
-      "experimental": false,
+      "experimental": true,
+      "experimentalFeature": "registries",
       "deprecated": false,
       "source": "apm_cli/commands/publish.py"
     },

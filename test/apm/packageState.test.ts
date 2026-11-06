@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyUpdateRows, findInstalledPackage, reconcileDetailContexts, retainUpdateResults } from '../../src/apm/packageState';
+import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults } from '../../src/apm/packageState';
 import type { PackageItem, Scope, UpdateRow } from '../../src/apm/types';
 
 const workspace: Scope = { kind: 'workspace', path: '/project', label: 'project' };
@@ -10,6 +10,30 @@ const installed: PackageItem = {
   ...catalog, version: '1.0', installed: true, updateStatus: 'outdated', latestVersion: '2.0',
   metadata: { cliIdentity: 'org/sample', lockIdentity: 'org/sample' }
 };
+
+test('activity badge counts package updates plus one CLI upgrade and clears at zero', () => {
+  const state = { trusted: true, version: '0.35.0', installed: [installed] };
+  assert.deepEqual(getUpdateBadge(state), { value: 1, tooltip: '1 package update available' });
+  const packages = [
+    installed, { ...installed, id: 'market::second' },
+    ...(['current', 'unchecked', 'unknown', 'failed', 'not-comparable'] as const).map(updateStatus => ({ ...installed, updateStatus }))
+  ];
+  assert.deepEqual(getUpdateBadge({ ...state, installed: packages }), { value: 2, tooltip: '2 package updates available' });
+  assert.deepEqual(getUpdateBadge({ ...state, installed: packages, warning: 'Update APM.' }), {
+    value: 3, tooltip: '2 package updates and 1 APM CLI update available'
+  });
+  assert.deepEqual(getUpdateBadge({ ...state, installed: [], warning: 'Update APM.' }), { value: 1, tooltip: '1 APM CLI update available' });
+  assert.equal(getUpdateBadge({ ...state, installed: [] }), undefined);
+  assert.equal(getUpdateBadge({ ...state, installed: [{ ...installed, updateStatus: 'current' }] }), undefined);
+  assert.equal(getUpdateBadge({ ...state, version: undefined, warning: 'Update APM.' }), undefined);
+  assert.equal(getUpdateBadge({ ...state, trusted: false, warning: 'Update APM.' }), undefined);
+});
+
+test('activity badge preserves saved update counts and identifies them in the tooltip', () => {
+  assert.deepEqual(getUpdateBadge({ trusted: true, version: '0.35.0', installed: [{ ...installed, updateStale: true }], warning: 'Update APM.' }), {
+    value: 2, tooltip: '1 package update and 1 APM CLI update available (includes saved package update results)'
+  });
+});
 
 test('refresh reconciles open tabs only for their own scope and reloads changed package metadata', () => {
   const projectTab = { scope: workspace, item: installed };

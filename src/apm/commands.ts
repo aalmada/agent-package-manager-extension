@@ -5,6 +5,10 @@ export const baseline = contract.version;
 export const descriptors: CommandDescriptor[] = contract.commands as CommandDescriptor[];
 
 export function requiresTerminal(descriptor: CommandDescriptor, options: Record<string, unknown>): boolean {
+  if (descriptor.id === 'compile' && options['--watch'] === true) return true;
+  if (descriptor.id === 'init' || descriptor.id === 'plugin init') {
+    return options['--yes'] !== true && options['--discover'] !== true && options['--apply'] !== true;
+  }
   return !!descriptor.interactive && (descriptor.id !== 'runtime remove' || options['--yes'] !== true);
 }
 
@@ -24,7 +28,9 @@ function optionValues(option: CommandOption, value: unknown): string[] {
   return values.flatMap(entry => {
     if (entry.includes('\0')) throw new Error(`Invalid NUL in ${option.name}.`);
     if (option.type === 'number' && !Number.isFinite(Number(entry))) throw new Error(`${option.name} must be a number.`);
-    if (option.choices && !option.choices.includes(entry)) throw new Error(`Unsupported ${option.name} value.`);
+    if (option.choices && !option.choices.some(choice => option.caseSensitive === false ? choice.toLowerCase() === entry.toLowerCase() : choice === entry)) {
+      throw new Error(`Unsupported ${option.name} value. Choose ${option.choices.join(', ')}.`);
+    }
     const parts = (option.nargs ?? 1) > 1 ? entry.split('\t') : [entry];
     if (parts.length !== (option.nargs ?? 1)) throw new Error(`${option.name} requires ${option.nargs} tab-separated values.`);
     return [option.name, ...parts];

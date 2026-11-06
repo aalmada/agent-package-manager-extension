@@ -109,7 +109,9 @@ function contentGroups(value: unknown): ContentGroup[] {
       items.push({
         name: item.name,
         ...(typeof item.path === 'string' ? { path: item.path } : {}),
-        ...(typeof item.description === 'string' ? { description: item.description } : {})
+        ...(typeof item.description === 'string' ? { description: item.description } : {}),
+        ...(typeof item.navigationId === 'string' ? { navigationId: item.navigationId } : {}),
+        ...(item.locationKind === 'source' || item.locationKind === 'installed' || item.locationKind === 'deployed' ? { locationKind: item.locationKind } : {})
       });
     }
     if (items.length) groups.push({ kind, items });
@@ -117,7 +119,7 @@ function contentGroups(value: unknown): ContentGroup[] {
   return groups;
 }
 
-function contentSection(groups: ContentGroup[], loading: boolean, available: boolean, notes: string[] = []): HTMLElement {
+function contentSection(groups: ContentGroup[], loading: boolean, available: boolean, notes: string[] = [], navigate?: (id: string) => void): HTMLElement {
   const section = el('section', 'details-section');
   section.append(el('h2', '', 'Contents'));
   for (const note of notes) {
@@ -142,6 +144,11 @@ function contentSection(groups: ContentGroup[], loading: boolean, available: boo
       const row = el('li', 'content-item');
       const body = el('div', 'content-item-body');
       body.append(el('strong', '', item.name));
+      if (item.navigationId && navigate) {
+        const open = el('button', 'secondary', `Open ${item.locationKind === 'installed' ? 'installed package source' : item.locationKind === 'deployed' ? 'deployed content' : 'source'}`);
+        open.id = `open-${item.navigationId}`;
+        open.type = 'button'; open.addEventListener('click', () => navigate(item.navigationId!)); body.append(open);
+      }
       body.append(el('p', item.description ? 'content-description' : 'content-description muted',
         item.description ?? 'Description not available.'));
       row.append(body);
@@ -153,7 +160,7 @@ function contentSection(groups: ContentGroup[], loading: boolean, available: boo
   return section;
 }
 
-export function renderDetailSections(item: PackageItem, details: Record<string, unknown> | undefined, loading: boolean): DocumentFragment {
+export function renderDetailSections(item: PackageItem, details: Record<string, unknown> | undefined, loading: boolean, navigate?: (id: string) => void): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const plugin = record(details?.plugin) ? details.plugin : record(item.metadata?.plugin) ? item.metadata.plugin : undefined;
   const pluginManifest = record(details?.packageManifest) ? details.packageManifest : undefined;
@@ -175,7 +182,7 @@ export function renderDetailSections(item: PackageItem, details: Record<string, 
   const notes = (Array.isArray(details?.contentsNotes) ? details.contentsNotes : [])
     .filter((note): note is string => typeof note === 'string' && !!note);
   fragment.append(contentSection(contents, loading, !!details && !details.contentsNotice && !details.metadataError &&
-    !(Array.isArray(details.contentsNotices) && details.contentsNotices.length), notes));
+    !(Array.isArray(details.contentsNotices) && details.contentsNotices.length), notes, navigate));
   for (const message of [details?.metadataNotice, details?.metadataError, details?.contentsNotice,
     ...(Array.isArray(details?.contentsNotices) ? details.contentsNotices : [])]) {
     if (typeof message === 'string' && message) fragment.append(el('p', 'notice', message));
@@ -200,7 +207,7 @@ export function renderDetailSections(item: PackageItem, details: Record<string, 
 }
 
 const statusText: Record<ActionResult['status'], string> = { running: 'Running', success: 'Succeeded', failed: 'Failed', cancelled: 'Cancelled' };
-export function renderActionResult(result: ActionResult, cancel: () => void): HTMLElement {
+export function renderActionResult(result: ActionResult, cancel: () => void, navigate?: (id: string) => void): HTMLElement {
   const section = el('section', `action-result ${result.status}`);
   section.setAttribute('aria-live', 'polite');
   section.setAttribute('aria-busy', String(result.status === 'running'));
@@ -212,10 +219,37 @@ export function renderActionResult(result: ActionResult, cancel: () => void): HT
   section.append(heading, el('code', 'action-command', result.command));
   if (result.status === 'running') section.append(el('p', 'muted', 'Running… live output is in the APM output channel.'));
   if (result.summary) section.append(el('p', 'action-summary', result.summary));
+  if (result.audit?.stale) section.append(el('p', 'notice warning', 'This audit is stale. Run it again before relying on its findings or scan coverage.'));
+  if (result.audit?.coverage) {
+    const coverage = result.audit.coverage;
+    const summary = el('div', 'audit-coverage');
+    summary.append(el('h3', '', 'Scan coverage'), el('p', coverage.complete ? 'muted' : 'notice warning',
+      coverage.complete ? 'Scan coverage is complete.' : 'Scan coverage is incomplete. This audit is not a clean result.'));
+    const diagnostics = coverage.primitives.filter(entry => entry.status === 'incomplete' || entry.diagnostic);
+    if (diagnostics.length) {
+      const list = el('ul', 'coverage-diagnostics');
+      for (const entry of diagnostics) {
+        const row = el('li');
+        row.append(el('strong', '', entry.file), el('span', 'muted', ` ${[entry.pointer, entry.target, entry.kind, entry.status].filter(Boolean).join(' - ')}`));
+        if (entry.diagnostic) row.append(el('p', '', entry.diagnostic));
+        list.append(row);
+      }
+      summary.append(list);
+    }
+    section.append(summary);
+  }
   if (result.audit?.findings.length) {
     const list = el('ul', 'findings');
     for (const finding of result.audit.findings) {
       const entry = el('li'); entry.append(el('span', `badge severity-${finding.severity.toLowerCase()}`, finding.severity), el('strong', '', ` ${finding.file}`), el('span', 'muted', ` — ${finding.message}`));
+      if (finding.navigationId && navigate) {
+        const open = el('button', 'secondary', 'Open finding'); open.type = 'button'; open.addEventListener('click', () => navigate(finding.navigationId!)); entry.append(open);
+      }
+      const line = finding.pointer ? finding.decodedLine : finding.line;
+      const column = finding.pointer ? finding.decodedColumn : finding.column;
+      const location = [finding.pointer, line !== undefined ? `${finding.pointer ? 'decoded ' : 'line '}${line}${column !== undefined ? `:${column}` : ''}` : undefined].filter(Boolean).join(' ');
+      if (location || finding.category) entry.append(el('p', 'muted', [location, finding.category].filter(Boolean).join(' - ')));
+      if (finding.remediation) entry.append(el('p', '', `Remediation: ${finding.remediation}`));
       list.append(entry);
     }
     section.append(list);

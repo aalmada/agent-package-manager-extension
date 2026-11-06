@@ -17,18 +17,23 @@ export class ApmError extends Error {
 
 export class ApmClient {
   readonly home: string;
-  constructor(private readonly config: { executable: string; cwd: string; home?: string; signal?: AbortSignal; onOutput?: (text: string) => void }) {
+  constructor(private readonly config: { executable: string; cwd: string; home?: string; signal?: AbortSignal; onOutput?: (text: string) => void;
+    environment?: () => Promise<Record<string, string>>; fetcher?: typeof fetch }) {
     this.home = config.home ?? homedir();
   }
-  async execute(args: string[], options: { cwd?: string; signal?: AbortSignal; timeoutMs?: number; onPrompt?: (prompt: VariablePrompt) => Promise<string | undefined> } = {}): Promise<ExecutionResult> {
+  async execute(args: string[], options: { cwd?: string; signal?: AbortSignal; timeoutMs?: number | null; captureOutput?: boolean; inputLines?: readonly string[]; onPrompt?: (prompt: VariablePrompt) => Promise<string | undefined> } = {}): Promise<ExecutionResult> {
     if (args.some(containsUrlCredentials)) throw new ApmError('Do not put credentials in URLs. Remove them and use APM authentication.');
+    if (options.inputLines?.some(line => /[\r\n\0]/.test(line))) throw new ApmError('APM input values cannot contain line breaks or NUL.');
+    if (options.inputLines && options.onPrompt) throw new ApmError('APM input cannot combine prepared answers with interactive prompts.');
     const signal = options.signal ?? this.config.signal;
+    if (signal?.aborted) throw new ApmError('APM operation cancelled.');
+    const environment = await this.config.environment?.() ?? {};
     if (signal?.aborted) throw new ApmError('APM operation cancelled.');
     return new Promise((resolve, reject) => {
       const child = spawn(this.config.executable, args, {
         cwd: options.cwd ?? this.config.cwd, shell: false,
         env: {
-          ...process.env, HOME: this.home, USERPROFILE: this.home,
+          ...process.env, ...environment, HOME: this.home, USERPROFILE: this.home,
           ...(this.config.home ? {
             APM_CACHE_DIR: join(this.home, '.cache', 'apm'), XDG_CACHE_HOME: join(this.home, '.cache'),
             XDG_CONFIG_HOME: join(this.home, '.config'), LOCALAPPDATA: join(this.home, 'AppData', 'Local'),
@@ -36,10 +41,12 @@ export class ApmClient {
           } : {}),
           NO_COLOR: '1', TERM: 'dumb', COLUMNS: '10000', PYTHONIOENCODING: 'utf-8'
         },
-        stdio: [options.onPrompt ? 'pipe' : 'ignore', 'pipe', 'pipe']
+        stdio: [options.onPrompt || options.inputLines ? 'pipe' : 'ignore', 'pipe', 'pipe']
       });
       let prompting = false;
-      const answers: string[] = [];
+      const answers: string[] = Object.entries(environment)
+        .filter(([name, value]) => /TOKEN|SECRET|PASSWORD|(?:^|_)PAT$/.test(name) && value)
+        .map(([, value]) => value);
       const protect = (text: string) => [...answers].sort((a, b) => b.length - a.length)
         .reduce((output, value) => output.split(value).join('[redacted]'), stripAnsi(text));
       const answer = (prompt: VariablePrompt) => {
@@ -53,6 +60,7 @@ export class ApmClient {
         }, () => child.stdin?.end()).finally(() => { prompting = false; });
       };
       child.stdin?.on('error', () => undefined);
+      if (options.inputLines) child.stdin?.end(`${options.inputLines.join('\n')}\n`);
       let stdout = '', stderr = '', failure: string | undefined;
       const pending = { stdout: '', stderr: '' };
       const flushOutput = (stream: 'stdout' | 'stderr') => {
@@ -62,7 +70,7 @@ export class ApmClient {
       const flushAll = () => { flushOutput('stdout'); flushOutput('stderr'); };
       const cancel = () => { failure = 'APM operation cancelled; partial changes may remain.'; stop(); };
       signal?.addEventListener('abort', cancel, { once: true });
-      const timeout = setTimeout(() => { failure = 'APM operation timed out; partial changes may remain.'; stop(); }, options.timeoutMs ?? 120_000);
+      const timeout = options.timeoutMs === null ? undefined : setTimeout(() => { failure = 'APM operation timed out; partial changes may remain.'; stop(); }, options.timeoutMs ?? 120_000);
       let force: ReturnType<typeof setTimeout> | undefined;
       const stop = () => {
         child.kill('SIGTERM');
@@ -70,11 +78,13 @@ export class ApmClient {
         force.unref();
       };
       const collect = (stream: 'stdout' | 'stderr', text: string) => {
-        if (stdout.length + stderr.length + text.length > 16 * 1024 * 1024) {
+        if (stdout.length + stderr.length + (options.captureOutput === false ? pending[stream].length : 0) + text.length > 16 * 1024 * 1024) {
           if (!failure) { failure = 'APM output exceeded the 16 MB safety limit.'; stop(); }
           return;
         }
-        if (stream === 'stdout') stdout += text; else stderr += text;
+        if (options.captureOutput !== false) {
+          if (stream === 'stdout') stdout += text; else stderr += text;
+        }
         pending[stream] += text;
         const end = pending[stream].lastIndexOf('\n');
         if (end >= 0) {
@@ -286,7 +296,7 @@ export class ApmClient {
               packageMetadata = await inspectBarePackage(snapshot.gitDir, snapshot.ref ?? 'main', plugin.source);
             } else {
               const source = githubSource(plugin.source, marketplace);
-              if (source) packageMetadata = await inspectGithubPackage(source);
+              if (source) packageMetadata = await inspectGithubPackage(source, this.config.fetcher);
               else metadata.contentsNotice = 'The package source is not available locally; its contents may be incomplete.';
             }
           }
@@ -322,6 +332,7 @@ export class ApmClient {
     if (packageMetadata?.notices.length) metadata.contentsNotices = packageMetadata.notices;
     if (packageMetadata?.notes?.length) metadata.contentsNotes = packageMetadata.notes;
     metadata.contents = mergeContents(declaredContents(plugin, packageMetadata?.pluginManifest, packageMetadata?.manifest), packageMetadata?.contents ?? []);
+    if (packageMetadata?.localRoot) metadata.localContentRoot = packageMetadata.localRoot;
     return metadata;
   }
 }

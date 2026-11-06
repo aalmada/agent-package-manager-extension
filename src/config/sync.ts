@@ -180,7 +180,7 @@ export class SettingsSync {
     } else if (pending.size) {
       const yes = await client.supports(['marketplace', 'remove'], ['--yes']);
       if (!yes) {
-        this.reportError('This APM CLI cannot remove marketplaces non-interactively. Upgrade it or use APM Tools.');
+        this.reportError('This APM CLI cannot remove marketplaces non-interactively. Upgrade APM before removing this marketplace from Settings.');
         for (const name of pending) preserve(name);
       } else for (const name of pending) {
         if (await savePartialIfChanged()) return;

@@ -1,4 +1,6 @@
 :root { color-scheme: light dark; }
+.scope-summary { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 * { box-sizing: border-box; }
 body { padding: 0; margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family, sans-serif); font-size: var(--vscode-font-size, 13px); }
 button, input, select, textarea { font: inherit; }
@@ -30,8 +32,27 @@ p { line-height: 1.5; }
 .notice p { margin-top: 0; }
 .notice.error { border-color: var(--vscode-errorForeground); }
 .notice.warning { border-color: var(--vscode-editorWarning-foreground); }
-.progress { border-top: 2px solid var(--vscode-progressBar-background); padding-top: 5px; }
-.sidebar { background: var(--vscode-sideBar-background); min-height: 100vh; padding-bottom: 12px; }
+.sidebar { background: var(--vscode-sideBar-background); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.browser-context { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.sections { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.package-section { display: flex; flex-direction: column; flex-basis: 28px; min-height: 28px; overflow: hidden; }
+.package-section.collapsed { flex: 0 0 28px !important; }
+.section-heading { flex: 0 0 28px; width: 100%; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground)); text-align: left; font-weight: 600; }
+.section-heading:hover { background: transparent; }
+.section-heading:focus-visible { outline-offset: -1px; }
+.section-title { flex: 1; }
+.twistie { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); margin: 0 5px 4px 2px; }
+.collapsed .twistie { transform: rotate(-45deg); margin-bottom: 0; }
+.count-badge { border-radius: 11px; min-width: 20px; padding: 2px 6px; font-size: 11px; line-height: 16px; text-align: center; font-weight: normal; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.section-sash { flex: 0 0 4px; cursor: row-resize; touch-action: none; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, transparent)); }
+.section-sash:hover, .section-sash:focus-visible { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); outline: 0; }
+.resizing, .resizing * { cursor: row-resize !important; user-select: none; }
+.sidebar-controls { flex: 0 0 auto; }
+.section-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; }
+.section-body[hidden] { display: none; }
+.sidebar-welcome { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.sidebar-welcome p { margin: 0; }
+.sidebar-welcome button { width: 100%; }
 .sidebar-controls { padding: 8px 12px 10px; position: sticky; top: 0; z-index: 3; background: var(--vscode-sideBar-background); }
 .sidebar-controls .field { margin: 0 0 8px; }
 .sidebar-controls .field > span { font-size: 11px; font-weight: normal; color: var(--vscode-descriptionForeground); }
@@ -46,12 +67,10 @@ p { line-height: 1.5; }
 .icon-button:disabled { opacity: .5; background: transparent; }
 .sidebar .notifications { padding: 0 12px; }
 .sidebar .notice { font-size: 12px; }
-.section-heading { background: transparent; color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground)); border: 0; border-top: 1px solid var(--vscode-sideBarSectionHeader-border, transparent); border-radius: 0; font-size: 12px; font-weight: 600; text-align: left; width: 100%; height: 22px; display: flex; align-items: center; gap: 0; padding: 0 12px 0 8px; }
-.section-heading .twistie { display: flex; width: 20px; justify-content: center; }
-.section-heading .twistie svg { width: 16px; height: 16px; }
-.section-heading .section-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.count-badge { min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; font-size: 11px; font-weight: 400; line-height: 18px; text-align: center; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-.section-heading:hover { background: var(--vscode-list-hoverBackground); }
+.dependency-summary { padding: 0 12px 12px; overflow-wrap: anywhere; flex: 0 0 auto; }
+.dependency-summary h2 { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
+.dependency-summary p { margin: 6px 0; }
+.dependency-summary button { margin-top: 4px; }
 .package-row { width: 100%; padding: 8px 12px 8px 22px; display: flex; gap: 10px; background: transparent; color: var(--vscode-foreground); border: 0; border-radius: 0; text-align: left; }
 .package-row:hover { background: var(--vscode-list-hoverBackground); }
 .package-row:focus-visible { background: var(--vscode-list-focusBackground); outline-offset: -1px; }
@@ -65,9 +84,7 @@ p { line-height: 1.5; }
 .badge { border-radius: 10px; padding: 2px 6px; font-size: 10px; display: inline-block; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .badge.warning { border: 1px solid var(--vscode-editorWarning-foreground); }
 .empty { padding: 8px 12px; color: var(--vscode-descriptionForeground); font-size: 12px; }
-.sidebar section > button:not(.section-heading) { margin: 0 12px 10px; }
-footer { border-top: 1px solid var(--vscode-widget-border, transparent); margin: 16px 12px 0; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
-footer button { align-self: flex-start; font-size: 11px; }
+.section-body > button { margin: 0 12px 10px; }
 .details-section { border-top: 1px solid var(--vscode-widget-border, var(--vscode-input-border, transparent)); margin-top: 24px; padding-top: 1px; }
 .details-section h2 { margin: 16px 0 12px; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
