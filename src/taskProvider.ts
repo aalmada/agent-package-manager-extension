@@ -109,11 +109,13 @@ export function registerApmTaskProvider(report: (message: string) => void,
   };
   const provider = vscode.tasks.registerTaskProvider('apm', {
     provideTasks: async () => {
+      console.log('[APM task discovery]', vscode.workspace.isTrusted, vscode.workspace.workspaceFolders?.map(folder => folder.uri.toString()));
       if (!vscode.workspace.isTrusted) return [];
       const tasks: vscode.Task[] = [];
       for (const folder of vscode.workspace.workspaceFolders ?? []) {
         if (folder.uri.scheme !== 'file') continue;
         const text = await readOptional(join(folder.uri.fsPath, 'apm.yml'));
+        console.log('[APM task manifest]', folder.uri.fsPath, text !== undefined);
         if (text === undefined) continue;
         for (const workflow of Object.keys(commands) as (keyof typeof commands)[]) tasks.push(create({ type: 'apm', workflow }, folder));
         if (vscode.workspace.getConfiguration('apm', folder.uri).get<boolean>('tasks.includeScripts', false)) {
@@ -126,6 +128,7 @@ export function registerApmTaskProvider(report: (message: string) => void,
           }
         }
       }
+      console.log('[APM discovered tasks]', tasks.length);
       return tasks;
     },
     resolveTask: task => {
