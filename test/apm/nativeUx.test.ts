@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -50,9 +50,16 @@ function harness(root: string, trusted = true, includeScripts = false) {
       isTrusted: trusted, workspaceFolders: [folder], textDocuments: [],
       getConfiguration: () => ({ get: (_name: string, fallback: unknown) => _name === 'tasks.includeScripts' ? includeScripts : fallback }),
       registerTextDocumentContentProvider: (_scheme: string, provider: object) => { providers.decoded = provider; return disposable(); },
-      createFileSystemWatcher: () => ({ ...disposable(), onDidChange: disposable, onDidDelete: disposable, onDidCreate: disposable }),
+      createFileSystemWatcher: () => ({
+        ...disposable(),
+        onDidChange: (listener: object) => { providers.fileChange = listener; return disposable(); },
+        onDidDelete: (listener: object) => { providers.fileDelete = listener; return disposable(); },
+        onDidCreate: (listener: object) => { providers.fileCreate = listener; return disposable(); }
+      }),
       onDidChangeTextDocument: (listener: object) => { providers.documentChange = listener; return disposable(); },
-      onDidDeleteFiles: disposable, onDidChangeWorkspaceFolders: disposable,
+      onDidDeleteFiles: disposable,
+      onDidChangeWorkspaceFolders: (listener: object) => { providers.foldersChange = listener; return disposable(); },
+      onDidChangeConfiguration: (listener: object) => { providers.configurationChange = listener; return disposable(); },
       onDidOpenTextDocument: disposable, onDidCloseTextDocument: disposable
     },
     languages: {
@@ -170,6 +177,19 @@ test('task discovery and resolution are local, folder-bound and scripts opt in',
     const tasks = await provider.provideTasks();
     assert.deepEqual(Array.from(tasks, task => task.definition.workflow), ['compile', 'watch', 'validate', 'audit']);
     assert.ok(tasks.every(task => task.scope === host.folder));
+    assert.equal(await provider.provideTasks(), tasks, 'Repeated requests reuse completed discovery');
+    for (const event of ['fileCreate', 'fileChange', 'fileDelete', 'foldersChange']) {
+      (host.providers[event] as () => void)();
+      const first = provider.provideTasks();
+      assert.equal(provider.provideTasks(), first, 'Concurrent requests share pending discovery');
+      assert.notEqual(await first, tasks, `${event} invalidates discovery`);
+    }
+    const beforeConfiguration = await provider.provideTasks();
+    const configurationChange = host.providers.configurationChange as (event: { affectsConfiguration(section: string): boolean }) => void;
+    configurationChange({ affectsConfiguration: () => false });
+    assert.equal(await provider.provideTasks(), beforeConfiguration, 'Unrelated settings retain discovery');
+    configurationChange({ affectsConfiguration: section => section === 'apm.tasks.includeScripts' });
+    assert.notEqual(await provider.provideTasks(), beforeConfiguration, 'Script settings invalidate discovery');
     assert.throws(() => provider.resolveTask({ definition: { type: 'apm', workflow: 'compile', executable: 'unsafe' }, scope: host.folder }), /Invalid/);
     assert.throws(() => provider.resolveTask({ definition: { type: 'apm', workflow: 'compile' }, scope: 1 }), /explicit/);
     assert.deepEqual(Array.from(host.api.taskArguments({ type: 'apm', workflow: 'watch' })), ['compile', '--watch']);
@@ -183,6 +203,38 @@ test('task discovery and resolution are local, folder-bound and scripts opt in',
     untrusted.api.registerApmTaskProvider(message => assert.fail(message));
     assert.equal((await (untrusted.providers.tasks as typeof provider).provideTasks()).length, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('task discovery refreshes cached manifests and retries failures', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-task-cache-'));
+  const host = harness(root, true, true);
+  const registration = host.api.registerApmTaskProvider(message => assert.fail(message));
+  const provider = host.providers.tasks as { provideTasks(): Promise<{ definition: { script?: string } }[]> };
+  const manifest = join(root, 'apm.yml');
+  try {
+    assert.equal((await provider.provideTasks()).length, 0);
+    await writeFile(manifest, 'name: test\nscripts:\n  first: echo first\n');
+    (host.providers.fileCreate as () => void)();
+    assert.equal((await provider.provideTasks())[4].definition.script, 'first');
+    await writeFile(manifest, 'name: test\nscripts:\n  second: echo second\n');
+    (host.providers.fileChange as () => void)();
+    assert.equal((await provider.provideTasks())[4].definition.script, 'second');
+    await unlink(manifest);
+    (host.providers.fileDelete as () => void)();
+    assert.equal((await provider.provideTasks()).length, 0);
+    await writeFile(manifest, 'scripts: [\n');
+    (host.providers.fileCreate as () => void)();
+    await assert.rejects(provider.provideTasks(), /Cannot discover APM scripts/);
+    await writeFile(manifest, 'name: recovered\n');
+    assert.equal((await provider.provideTasks()).length, 4, 'Failed discovery is not cached');
+    (host.providers.fileChange as () => void)();
+    const obsolete = provider.provideTasks();
+    (host.providers.fileChange as () => void)();
+    const current = provider.provideTasks();
+    assert.notEqual(current, obsolete, 'Changes invalidate even pending requests');
+    await Promise.all([obsolete, current]);
+    assert.equal(provider.provideTasks(), current, 'Obsolete completion does not replace newer discovery');
+  } finally { registration.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('manifest assistance uses YAML ranges and does not select a contract', () => {

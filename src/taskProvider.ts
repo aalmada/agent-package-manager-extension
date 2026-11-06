@@ -107,26 +107,47 @@ export function registerApmTaskProvider(report: (message: string) => void,
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, panel: vscode.TaskPanelKind.Dedicated };
     return task;
   };
-  const provider = vscode.tasks.registerTaskProvider('apm', {
-    provideTasks: async () => {
-      if (!vscode.workspace.isTrusted) return [];
-      const tasks: vscode.Task[] = [];
-      for (const folder of vscode.workspace.workspaceFolders ?? []) {
-        if (folder.uri.scheme !== 'file') continue;
-        const text = await readOptional(join(folder.uri.fsPath, 'apm.yml'));
-        if (text === undefined) continue;
-        for (const workflow of Object.keys(commands) as (keyof typeof commands)[]) tasks.push(create({ type: 'apm', workflow }, folder));
-        if (vscode.workspace.getConfiguration('apm', folder.uri).get<boolean>('tasks.includeScripts', false)) {
-          const document = parseDocument(text);
-          if (document.errors.length) throw new Error(`Cannot discover APM scripts: ${document.errors[0].message}`);
-          const manifest: unknown = document.toJS();
-          const scripts = record(manifest) ? manifest.scripts : undefined;
-          if (record(scripts)) for (const [script, value] of Object.entries(scripts)) {
-            if (typeof value === 'string') tasks.push(create({ type: 'apm', workflow: 'script', script }, folder));
-          }
+  let discovery: Promise<vscode.Task[]> | undefined;
+  const invalidate = () => { discovery = undefined; };
+  const watcher = vscode.workspace.createFileSystemWatcher('**/apm.yml');
+  const subscriptions = [
+    watcher, watcher.onDidCreate(invalidate), watcher.onDidChange(invalidate), watcher.onDidDelete(invalidate),
+    vscode.workspace.onDidChangeWorkspaceFolders(invalidate),
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('apm.tasks.includeScripts')) invalidate();
+    })
+  ];
+  const discover = async () => {
+    if (!vscode.workspace.isTrusted) return [];
+    const tasks: vscode.Task[] = [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      if (folder.uri.scheme !== 'file') continue;
+      const text = await readOptional(join(folder.uri.fsPath, 'apm.yml'));
+      if (text === undefined) continue;
+      for (const workflow of Object.keys(commands) as (keyof typeof commands)[]) tasks.push(create({ type: 'apm', workflow }, folder));
+      if (vscode.workspace.getConfiguration('apm', folder.uri).get<boolean>('tasks.includeScripts', false)) {
+        const document = parseDocument(text);
+        if (document.errors.length) throw new Error(`Cannot discover APM scripts: ${document.errors[0].message}`);
+        const manifest: unknown = document.toJS();
+        const scripts = record(manifest) ? manifest.scripts : undefined;
+        if (record(scripts)) for (const [script, value] of Object.entries(scripts)) {
+          if (typeof value === 'string') tasks.push(create({ type: 'apm', workflow: 'script', script }, folder));
         }
       }
-      return tasks;
+    }
+    return vscode.workspace.isTrusted ? tasks : [];
+  };
+  const provider = vscode.tasks.registerTaskProvider('apm', {
+    provideTasks: () => {
+      if (!vscode.workspace.isTrusted) return [];
+      if (!discovery) {
+        const pending = discover().catch(error => {
+          if (discovery === pending) invalidate();
+          throw error;
+        });
+        discovery = pending;
+      }
+      return discovery;
     },
     resolveTask: task => {
       if (!vscode.workspace.isTrusted) throw new Error('Trust the workspace before resolving APM tasks.');
@@ -136,5 +157,5 @@ export function registerApmTaskProvider(report: (message: string) => void,
       return create(definition as ApmTaskDefinition, task.scope);
     }
   });
-  return { dispose() { provider.dispose(); for (const controller of active) controller.abort(); active.clear(); } };
+  return { dispose() { provider.dispose(); for (const subscription of subscriptions) subscription.dispose(); for (const controller of active) controller.abort(); active.clear(); } };
 }

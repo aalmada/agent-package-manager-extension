@@ -1,6 +1,18 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { descriptors } from '../../src/apm/commands';
 import type { State } from '../../src/protocol';
+
+async function postMessage(page: Page, message: { type: 'state'; state: State } | { type: 'setSearch'; search: string }) {
+  await page.evaluate(value => new Promise<void>(resolve => {
+    const delivered = (event: MessageEvent) => {
+      if (event.source !== window || event.data?.type !== value.type) return;
+      window.removeEventListener('message', delivered);
+      resolve();
+    };
+    window.addEventListener('message', delivered);
+    window.postMessage(value, '*');
+  }), message);
+}
 
 for (const theme of ['dark', 'light', 'high-contrast']) {
   test(`sidebar is functional at a narrow width in ${theme}`, async ({ page }, testInfo) => {
@@ -44,7 +56,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       ],
       installed: [{ id: 'copilot-plugins::code-review', name: 'code-review', marketplace: 'copilot-plugins', description: 'Review code with focused agent workflows', version: '2.0.0', installed: true, updateStatus: 'outdated' }]
     };
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await expect(page.locator('.package-row')).toHaveCount(4);
     await expect(page.locator('#scope-selector')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /APM installation scope/ })).toHaveCount(0);
@@ -52,7 +64,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.getByRole('heading', { name: 'Deployment targets' })).toHaveCount(0);
     await page.keyboard.press('Tab');
     await expect(page.locator('#search')).toBeFocused();
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await expect(page.locator('#search')).toBeFocused();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(page.locator('#search')).toHaveCSS('animation-name', 'none');
@@ -65,14 +77,14 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`sidebar-${theme}.png`), fullPage: true });
     const crowded = { ...state, catalog: Array.from({ length: 60 }, (_, i) => ({ ...state.catalog[0], id: `catalog-${i}`, name: `Package ${i}` })) };
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), crowded);
+    await postMessage(page, { type: 'state', state: crowded });
     await expect(page.locator('#search')).toBeVisible();
     await expect(page.locator('.count-badge')).toHaveText(['60', '1', '1']);
     await expect(page.getByRole('separator')).toHaveCount(2);
     const catalogBody = page.locator('#section-body-catalog');
     expect(await catalogBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
     await catalogBody.evaluate(element => { element.scrollTop = 300; });
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), crowded);
+    await postMessage(page, { type: 'state', state: crowded });
     expect(await catalogBody.evaluate(element => element.scrollTop)).toBe(300);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
     const controlsBox = await page.locator('.sidebar-controls').boundingBox();
@@ -91,13 +103,13 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect((await page.locator('[data-section="updates"]').boundingBox())!.height).toBeCloseTo(updatesBox.height, 0);
     expect(await page.locator('.sidebar-controls').boundingBox()).toEqual(controlsBox);
     const resized = (await page.locator('[data-section="catalog"]').boundingBox())!.height;
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), crowded);
+    await postMessage(page, { type: 'state', state: crowded });
     expect((await page.locator('[data-section="catalog"]').boundingBox())!.height).toBeCloseTo(resized, 0);
     expect(await page.locator('html').getAttribute('data-saved')).toContain('"sizes"');
     const value = Number(await sash.getAttribute('aria-valuenow'));
     await sash.focus(); await page.keyboard.press('ArrowUp');
     expect(Number(await sash.getAttribute('aria-valuenow'))).toBeLessThan(value);
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), crowded);
+    await postMessage(page, { type: 'state', state: crowded });
     await expect(sash).toBeFocused();
     await page.keyboard.press('Home');
     expect((await catalogBody.boundingBox())!.height).toBeCloseTo(20, 0);
@@ -114,11 +126,11 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(await page.locator('.sidebar-controls').boundingBox()).toEqual(controlsBox);
     await page.keyboard.press('ArrowRight');
     await expect(heading).toHaveAttribute('aria-expanded', 'true');
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await page.evaluate(() => document.addEventListener('contextmenu', event => { document.documentElement.dataset.contextMenu = (event.target as HTMLElement).dataset.vscodeContext ?? ''; }));
     await page.getByLabel('Filter and sort packages').click();
     await expect(page.locator('html')).toHaveAttribute('data-context-menu', /"webviewSection":"filter"/);
-    await page.evaluate(() => window.postMessage({ type: 'setSearch', search: '@marketplace:team-skills' }, '*'));
+    await postMessage(page, { type: 'setSearch', search: '@marketplace:team-skills' });
     await expect(page.locator('#search')).toHaveValue('@marketplace:team-skills');
     await expect(page.locator('.package-row')).toHaveCount(1);
     await expect(page.locator('.count-badge')).toHaveText(['1', '0', '0']);
@@ -131,8 +143,8 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       { ...state.installed[0], direct: true },
       { id: 'team-skills::helper', name: 'helper', marketplace: 'team-skills', version: '1.0.0', installed: true, direct: false }
     ] };
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), dependencies);
-    await page.evaluate(() => window.postMessage({ type: 'setSearch', search: '@dependencies' }, '*'));
+    await postMessage(page, { type: 'state', state: dependencies });
+    await postMessage(page, { type: 'setSearch', search: '@dependencies' });
     await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })).toBeVisible();
     await expect(page.locator('.dependency-summary')).toContainText('Workspace: My agent project');
     await expect(page.locator('.package-row')).toHaveCount(2);
@@ -149,15 +161,15 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.locator('#search')).toHaveValue('helper');
     await page.getByRole('button', { name: 'Clear search and filters' }).click();
 
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), { ...state, browserSearch: '', hiddenSections: ['installed'] });
+    await postMessage(page, { type: 'state', state: { ...state, browserSearch: '', hiddenSections: ['installed'] } });
     await expect(page.locator('.section-title')).toHaveText(['Catalog', 'Updates']);
     await expect(page.getByRole('separator')).toHaveCount(1);
     await expect(page.locator('#search')).toBeVisible();
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), { ...state, browserSearch: '', hiddenSections: ['catalog', 'installed', 'updates'] });
+    await postMessage(page, { type: 'state', state: { ...state, browserSearch: '', hiddenSections: ['catalog', 'installed', 'updates'] } });
     await expect(page.locator('.section-heading')).toHaveCount(0);
     await expect(page.getByRole('separator')).toHaveCount(0);
     await expect(page.locator('#search')).toBeVisible();
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), { ...state, browserSearch: '' });
+    await postMessage(page, { type: 'state', state: { ...state, browserSearch: '' } });
     await expect(page.locator('.section-heading')).toHaveCount(3);
 
     await page.setViewportSize({ width: 340, height: 250 });
@@ -166,9 +178,9 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
     await page.setViewportSize({ width: 340, height: 900 });
 
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), {
+    await postMessage(page, { type: 'state', state: {
       ...state, version: undefined, error: 'Could not start APM: spawn apm ENOENT'
-    });
+    } });
     await expect(page.getByText('APM CLI is not available. Install it to browse and manage packages.')).toBeVisible();
     await expect(page.locator('.sidebar-controls, .package-section, footer, [role="alert"]')).toHaveCount(0);
     const install = page.getByRole('button', { name: 'Install APM CLI', exact: true });
@@ -186,7 +198,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await page.getByRole('button', { name: 'Show Output', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"output"}');
 
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), { ...state, projectPresent: false });
+    await postMessage(page, { type: 'state', state: { ...state, projectPresent: false } });
     await expect(page.getByText('Initialize this project to browse and manage APM packages.')).toBeVisible();
     await expect(page.locator('.sidebar-controls, .package-section, footer')).toHaveCount(0);
     const initialize = page.getByRole('button', { name: 'Initialize APM project', exact: true });
@@ -198,7 +210,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"workflow","workflow":"initialize"}');
     await page.screenshot({ path: testInfo.outputPath(`initialize-project-${theme}.png`), fullPage: true });
 
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await expect(page.locator('.sidebar-welcome')).toHaveCount(0);
     await expect(page.locator('#search')).toBeVisible();
     await expect(page.locator('.section-heading')).toHaveCount(3);
@@ -246,7 +258,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       },
       readmeHtml: '<h2>Overview</h2><p>Package documentation.</p>'
     };
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await expect(page.locator('.detail-tag')).toHaveCount(3);
     await expect(page.locator('.content-item')).toHaveCount(2);
     await expect(page.getByText('Review Azure costs and forecasts.')).toBeVisible();
@@ -268,7 +280,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
         findings: [{ severity: 'warning', file: '.github/hooks.json', pointer: '/hooks/0', decodedLine: 3, decodedColumn: 7, category: 'unicode', message: 'Hidden character in decoded prompt.', remediation: 'Review the source prompt.' }]
       }
     };
-    await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
+    await postMessage(page, { type: 'state', state });
     await expect(page.locator('.audit-coverage')).toContainText('not a clean result');
     await expect(page.locator('.coverage-diagnostics')).toContainText('could not be inspected');
     await expect(page.locator('.findings')).toContainText('decoded 3:7');
