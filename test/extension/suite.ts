@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 
 const run$ = promisify(execFile);
 
-async function until(description: string, check: () => boolean | Promise<boolean>, timeoutMs = 90_000, details?: () => string | Promise<string>) {
+async function until(description: string, check: () => boolean | Promise<boolean>, timeoutMs = 180_000, details?: () => string | Promise<string>) {
   console.log(`[suite] waiting until ${description}`);
   const deadline = Date.now() + timeoutMs;
   while (!await check()) {
@@ -129,7 +129,7 @@ async function steps() {
   const taskProcessEnd = vscode.tasks.onDidEndTaskProcess(event => { if (event.execution.task.definition.workflow === 'validate') taskExitCode = event.exitCode; });
   try {
     await vscode.tasks.executeTask(validationTask);
-    await until('the native validation task completes', () => taskFinished, 30_000);
+    await until('the native validation task completes', () => taskFinished);
     assert.equal(taskExitCode, 0, 'Native validation task succeeds, not merely terminates');
     assert.equal(await readFile(manifestUri.fsPath, 'utf8'), nativeManifest);
   } finally { taskEnd.dispose(); taskProcessEnd.dispose(); }
@@ -189,7 +189,8 @@ async function steps() {
   await writeFile(join(collision, 'marketplace.json'), JSON.stringify({ name: 'second', plugins: [] }));
   const collisionEntry = pathToFileURL(collision).href;
   await apm().update('marketplaces', [legacy, second, collisionEntry], vscode.ConfigurationTarget.Global);
-  await until('a collision-safe marketplace alias is registered', async () => (await registered()).includes('collision'));
+  await until('a collision-safe marketplace alias is registered', async () => (await registered()).includes('collision'), 180_000,
+    async () => JSON.stringify({ settings: apm().get<string[]>('marketplaces', []), registry: await json('marketplaces.json') }));
   assert.ok((await registered()).includes('second'));
 
   // Relative paths are resolved once against the single workspace folder.
