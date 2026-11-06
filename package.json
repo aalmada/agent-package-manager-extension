@@ -426,7 +426,7 @@
           "workflow": { "type": "string", "enum": ["compile", "watch", "validate", "audit", "script"], "description": "APM workflow to run in this task's workspace folder." },
           "script": { "type": "string", "description": "Manifest script name for workflow: script. Requires apm.tasks.includeScripts." }
         },
-        "when": "customExecutionSupported && isWorkspaceTrusted"
+        "when": "customExecutionSupported"
       }
     ],
     "submenus": [

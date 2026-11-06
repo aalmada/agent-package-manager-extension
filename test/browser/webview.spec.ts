@@ -55,7 +55,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await page.evaluate(value => window.postMessage({ type: 'state', state: value }, '*'), state);
     await expect(page.locator('#search')).toBeFocused();
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    expect(await page.locator('#search').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
+    await expect(page.locator('#search')).toHaveCSS('animation-name', 'none');
     await expect(page.locator('footer')).toHaveCount(0);
     await expect(page.locator('.section-heading')).toHaveCount(3);
     await expect(page.locator('.count-badge')).toHaveText(['2', '1', '1']);
