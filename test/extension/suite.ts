@@ -109,10 +109,17 @@ async function steps() {
   await writeFile(instructionPath, '---\ndescription: Test instruction\napplyTo: "**"\n---\nReview the code.\n');
   await run$(process.env.APM_TEST_EXECUTABLE!, ['compile', '--validate'], { cwd: nativeFolder.uri.fsPath });
   let nativeTasks: vscode.Task[] = [];
+  let discoveredTasks: vscode.Task[] = [];
   await until('APM tasks are discovered after the task system initializes', async () => {
-    nativeTasks = (await vscode.tasks.fetchTasks({ type: 'apm' })).filter(task => task.scope === nativeFolder || typeof task.scope !== 'number' && task.scope?.uri.toString() === nativeFolder.uri.toString());
+    discoveredTasks = await vscode.tasks.fetchTasks({ type: 'apm' });
+    nativeTasks = discoveredTasks.filter(task => task.scope === nativeFolder || typeof task.scope !== 'number' && task.scope?.uri.toString() === nativeFolder.uri.toString());
     return nativeTasks.length === 4;
-  }, 30_000, () => JSON.stringify({ trusted: vscode.workspace.isTrusted, autoDetect: vscode.workspace.getConfiguration('task').get('autoDetect'), tasks: nativeTasks.map(task => task.definition) }));
+  }, 30_000, async () => JSON.stringify({
+    trusted: vscode.workspace.isTrusted, autoDetect: vscode.workspace.getConfiguration('task').get('autoDetect'),
+    manifest: await readFile(manifestUri.fsPath, 'utf8'),
+    folder: nativeFolder.uri.toString(),
+    tasks: discoveredTasks.map(task => ({ definition: task.definition, scope: typeof task.scope === 'number' ? task.scope : task.scope?.uri.toString() }))
+  }));
   assert.deepEqual(nativeTasks.map(task => task.definition.workflow).sort(), ['audit', 'compile', 'validate', 'watch']);
   const validationTask = nativeTasks.find(task => task.definition.workflow === 'validate');
   assert.ok(validationTask);
