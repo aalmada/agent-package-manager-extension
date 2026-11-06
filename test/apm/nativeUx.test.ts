@@ -126,7 +126,7 @@ test('Problems separates physical and decoded locations, coverage and scope repl
     ], coverage: { complete: false, primitives: [{ file: 'source.md', status: 'incomplete', diagnostic: 'Could not scan fully' }] } };
     const links = await diagnostics.publish({ kind: 'workspace', label: 'project', path: root }, report);
     assert.equal(links.size, 2);
-    const physical = [...host.diagnostics.entries()].find(([uri]) => uri.endsWith('/source.md?'))![1];
+    const physical = [...host.diagnostics.entries()].find(([uri]) => uri.replaceAll('\\', '/').endsWith('/source.md?'))![1];
     assert.equal(physical[0].range.startLine, 1);
     assert.match(physical[0].message, /Remediation/);
     assert.match(physical[1].message, /Incomplete APM scan/);

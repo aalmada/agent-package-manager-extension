@@ -28,6 +28,7 @@ try {
   await writeFile(join(userData, 'User', 'settings.json'), JSON.stringify({
     'chat.disableAIFeatures': true, 'window.restoreWindows': 'none',
     'workbench.enableExperiments': false, 'telemetry.telemetryLevel': 'off',
+    'task.autoDetect': 'on',
     'apm.executablePath': process.env.APM_TEST_EXECUTABLE ?? 'apm',
     'apm.marketplaceEntries': [{ source: legacy, name: 'legacy-alias' }],
     'apm.config.preferSsh': true
