@@ -1,7 +1,7 @@
 import { runTests, downloadAndUnzipVSCode } from '@vscode/test-electron';
 import { resolve, dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 let vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH;
@@ -16,7 +16,7 @@ for (let attempt = 1; !vscodeExecutablePath; attempt++) {
 // Newer macOS builds use "Code" instead of the legacy Electron bundle executable.
 if (process.platform === 'darwin' && !existsSync(vscodeExecutablePath)) vscodeExecutablePath = join(dirname(vscodeExecutablePath), 'Code');
 
-const home = await mkdtemp(join(tmpdir(), 'apm-extension-host-'));
+const home = await realpath(await mkdtemp(join(tmpdir(), 'apm-test-')));
 const userData = join(home, 'user-data');
 try {
   // Pre-existing CLI state that the extension must import into settings on startup.
