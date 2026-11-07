@@ -4,7 +4,15 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
-let vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH ?? await downloadAndUnzipVSCode();
+let vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH;
+for (let attempt = 1; !vscodeExecutablePath; attempt++) {
+  try { vscodeExecutablePath = await downloadAndUnzipVSCode(); }
+  catch (error) {
+    if (attempt === 3) throw error;
+    console.error(`VS Code download attempt ${attempt} failed; retrying:`, error);
+    await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+  }
+}
 // Newer macOS builds use "Code" instead of the legacy Electron bundle executable.
 if (process.platform === 'darwin' && !existsSync(vscodeExecutablePath)) vscodeExecutablePath = join(dirname(vscodeExecutablePath), 'Code');
 

@@ -1,6 +1,6 @@
 import * as assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,12 @@ async function until(description: string, check: () => boolean | Promise<boolean
 }
 const apm = () => vscode.workspace.getConfiguration('apm');
 const json = async (name: string): Promise<Record<string, unknown>> => {
-  try { return JSON.parse(await readFile(join(homedir(), '.apm', name), 'utf8')) as Record<string, unknown>; } catch { return {}; }
+  // Close these tiny fixture files within one turn so polling cannot hold a Windows rename open.
+  try { return JSON.parse(readFileSync(join(homedir(), '.apm', name), 'utf8')) as Record<string, unknown>; }
+  catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return {};
+    throw error;
+  }
 };
 const registered = async () => ((await json('marketplaces.json')).marketplaces as { name: string }[] | undefined ?? []).map(m => m.name);
 async function marketplace(name: string) {
