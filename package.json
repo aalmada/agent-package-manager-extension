@@ -2,7 +2,7 @@
   "name": "apm-package-manager",
   "displayName": "APM - Agent Package Manager",
   "description": "Visual package, marketplace, and workflow management for Microsoft's Agent Package Manager.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "antao-almada",
   "license": "MIT",
   "repository": {
@@ -327,7 +327,7 @@
         "properties": {
           "apm.marketplaces": {
             "type": "array",
-            "default": [],
+            "default": ["netfabric/intelligentium"],
             "scope": "machine",
             "uniqueItems": true,
             "items": {

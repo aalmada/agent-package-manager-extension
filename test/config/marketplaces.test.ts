@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,6 +11,15 @@ import type { Marketplace } from '../../src/apm/types';
 
 const gh = (owner: string, repo: string, extra: Partial<Marketplace> = {}): Marketplace =>
   ({ name: repo, source: `https://github.com/${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, owner, repo, host: 'github.com', ref: 'main', ...extra });
+
+test('marketplace settings default to the NetFabric Intelligentium marketplace only', () => {
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
+    contributes: { configuration: { properties: Record<string, { default?: unknown }> }[] };
+  };
+  const marketplaces = manifest.contributes.configuration
+    .find(section => 'apm.marketplaces' in section.properties)?.properties['apm.marketplaces'];
+  assert.deepEqual(marketplaces?.default, ['netfabric/intelligentium']);
+});
 
 test('marketplace entries accept the chat marketplace syntax plus APM name and marketplace.json forms', () => {
   assert.deepEqual(addArguments(parseEntry('github/awesome-copilot')), ['marketplace', 'add', 'github/awesome-copilot']);

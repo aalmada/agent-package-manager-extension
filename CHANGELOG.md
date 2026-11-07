@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Default marketplace settings to NetFabric Intelligentium.
+
 ## 0.2.0
 
 - Add native project initialization, compilation previews, manifest validation, diagnostics, and APM tasks.
