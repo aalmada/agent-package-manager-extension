@@ -115,7 +115,8 @@ class ApmExtension implements vscode.Disposable {
       this.subscriptions.push(watcher, watcher.onDidChange(() => this.scheduleRefresh()), watcher.onDidCreate(() => this.scheduleRefresh()), watcher.onDidDelete(() => this.scheduleRefresh()));
     }
     const registry = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), 'marketplaces.json'));
-    this.subscriptions.push(registry, registry.onDidChange(() => this.scheduleRefresh()), registry.onDidCreate(() => this.scheduleRefresh()), registry.onDidDelete(() => this.scheduleRefresh()));
+    const syncRegistry = () => { void this.settingsSync.sync().then(() => this.scheduleRefresh()); };
+    this.subscriptions.push(registry, registry.onDidChange(syncRegistry), registry.onDidCreate(syncRegistry), registry.onDidDelete(syncRegistry));
     const cliConfig = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), 'config.json'));
     const syncConfig = () => void this.settingsSync.sync();
     this.subscriptions.push(cliConfig, cliConfig.onDidChange(syncConfig), cliConfig.onDidCreate(syncConfig), cliConfig.onDidDelete(syncConfig));

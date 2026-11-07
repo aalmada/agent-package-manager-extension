@@ -51,15 +51,15 @@ try {
       XDG_CACHE_HOME: join(home, '.cache'), XDG_CONFIG_HOME: join(home, '.config'),
       LOCALAPPDATA: join(home, 'AppData', 'Local'), COPILOT_HOME: join(home, '.copilot')
     },
-    launchArgs: ['--use-inmemory-secretstorage', '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust',
+    launchArgs: ['--use-inmemory-secretstorage', '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--log', 'trace',
       '--user-data-dir', userData, '--extensions-dir', join(home, 'extensions'), project]
   });
 } catch (error) {
   try {
     const logs = join(userData, 'logs');
     for (const file of await readdir(logs, { recursive: true, withFileTypes: true })) {
-      if (file.isFile() && /(?:^|-)APM\.log$/.test(file.name)) {
-        console.error(`[APM output: ${file.name}]\n${(await readFile(join(file.parentPath, file.name), 'utf8')).slice(-16_000)}`);
+      if (file.isFile() && /(?:(?:^|-)APM|fileWatcher)\.log$/.test(file.name)) {
+        console.error(`[Isolated host log: ${file.name}]\n${(await readFile(join(file.parentPath, file.name), 'utf8')).slice(-24_000)}`);
       }
     }
   } catch (diagnosticError) { console.error('Could not read isolated APM output logs:', diagnosticError); }
