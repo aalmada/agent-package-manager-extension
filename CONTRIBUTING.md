@@ -33,7 +33,7 @@ APM_TEST_EXECUTABLE=/path/to/apm-0.35.0 npm test
 
 An optional legacy CLI executable can be provided with `APM_LEGACY_EXECUTABLE` for compatibility tests.
 
-The repository keeps the APM manifest and lockfile, but not the generated `.agents/skills/` directory. Run `apm install` in a trusted clone to restore those skills.
+Commit `apm.yml`, `apm.lock.yaml`, and APM-deployed agent files, including `.agents/skills/`, so dependency changes are reviewable and skills are available immediately after cloning. Keep the `apm_modules/` dependency cache gitignored. Update deployed files through APM, not by hand; review and commit them alongside manifest and lockfile changes. See [APM's commit guidance](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/consumer/install-packages.md#what-to-commit).
 
 ## Publishing
 
