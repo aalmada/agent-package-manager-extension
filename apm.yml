@@ -10,7 +10,7 @@ targets:
 dependencies:
   apm:
     - netfabric/intelligentium/plugins/agent-authoring
-    - github/awesome-copilot/plugins/accessibility-kanban
+    - netfabric/intelligentium/plugins/vscode
   mcp: []
 includes: auto
 scripts: {}
