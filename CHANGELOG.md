@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Show global and current-workspace installations and updates together, including global packages without a workspace manifest. Distinguish both catalog installation tags and scope-bound entries, and ask for an installation destination before package/version selection or previews.
 - Debounce command/file-watcher refreshes and reuse automatic remote marketplace and update checks for five minutes, including failures, to reduce API rate-limit pressure. Explicit refresh and post-mutation update verification remain immediate.

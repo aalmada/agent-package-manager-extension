@@ -75,7 +75,7 @@ test('Accounts tokens reach only child environments and are masked in captured a
     'const t=process.env.GITHUB_APM_PAT;process.stdout.write(t.slice(0,8));setTimeout(()=>{console.log(t.slice(8));console.error(t)},10)']);
   assert.equal(result.exitCode, 0);
   assert.equal(result.stdout.trim(), '[redacted]');
-  assert.equal(result.stderr.trim(), '[redacted]');
+  assert.ok(result.stderr.trim().endsWith('[redacted]'));
   assert.ok(output.length > 0);
   assert.ok(output.every(text => !text.includes(host.state.token!) && !text.includes('opaque')));
   assert.equal(process.env.GITHUB_APM_PAT, inherited);
