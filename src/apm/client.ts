@@ -6,9 +6,10 @@ import { parse as parseYaml } from 'yaml';
 import { parseCatalog, parseInstalled, parseOutdated, parseVariablePrompt, record, stripAnsi, type VariablePrompt } from './adapters';
 import { baseline, descriptors } from './commands';
 import { declaredContents, mergeContents } from './contents';
-import { marketplaceManifest, resolveContained } from './manifest';
-import { githubSource, inspectBarePackage, inspectGithubPackage, inspectLocalPackage, type PackageMetadata } from './packageMetadata';
+import { marketplaceManifest, readMarketplaces, resolveContained } from './manifest';
+import { remoteSource, inspectBarePackage, inspectRemotePackage, inspectLocalPackage, type PackageMetadata } from './packageMetadata';
 import { containsUrlCredentials } from './redact';
+import type { RepositoryHost } from '../auth/repositories';
 import type { ExecutionResult, Marketplace, PackageItem, Probe, Scope, UpdateRow } from './types';
 
 export class ApmError extends Error {
@@ -18,7 +19,8 @@ export class ApmError extends Error {
 export class ApmClient {
   readonly home: string;
   constructor(private readonly config: { executable: string; cwd: string; home?: string; signal?: AbortSignal; onOutput?: (text: string) => void;
-    environment?: () => Promise<Record<string, string>>; fetcher?: typeof fetch }) {
+    environment?: (args: readonly string[], cwd: string, signal?: AbortSignal) => Promise<Record<string, string>>; fetcher?: typeof fetch;
+    repositoryHosts?: () => readonly RepositoryHost[] }) {
     this.home = config.home ?? homedir();
   }
   async execute(args: string[], options: { cwd?: string; signal?: AbortSignal; timeoutMs?: number | null; captureOutput?: boolean; inputLines?: readonly string[]; onPrompt?: (prompt: VariablePrompt) => Promise<string | undefined> } = {}): Promise<ExecutionResult> {
@@ -27,7 +29,7 @@ export class ApmClient {
     if (options.inputLines && options.onPrompt) throw new ApmError('APM input cannot combine prepared answers with interactive prompts.');
     const signal = options.signal ?? this.config.signal;
     if (signal?.aborted) throw new ApmError('APM operation cancelled.');
-    const environment = await this.config.environment?.() ?? {};
+    const environment = await this.config.environment?.(args, options.cwd ?? this.config.cwd, signal) ?? {};
     if (signal?.aborted) throw new ApmError('APM operation cancelled.');
     return new Promise((resolve, reject) => {
       const child = spawn(this.config.executable, args, {
@@ -148,23 +150,7 @@ export class ApmClient {
     }
     return true;
   }
-  async getMarketplaces(): Promise<Marketplace[]> {
-    const path = join(this.home, '.apm', 'marketplaces.json');
-    let text: string;
-    try { text = await readFile(path, 'utf8'); }
-    catch (error) { if (isMissing(error)) return []; throw error; }
-    const data: unknown = JSON.parse(text);
-    if (!record(data) || !Array.isArray(data.marketplaces)) throw new ApmError('Invalid APM marketplace registry.');
-    return data.marketplaces.map((entry: unknown) => {
-      if (!record(entry) || typeof entry.name !== 'string') throw new ApmError('Invalid marketplace registration.');
-      const host = typeof entry.host === 'string' ? entry.host : 'github.com';
-      const source = typeof entry.url === 'string' && entry.url ? entry.url :
-        typeof entry.owner === 'string' && typeof entry.repo === 'string' ?
-          `${host === 'github.com' ? '' : `${host}/`}${entry.owner}/${entry.repo}` : '';
-      if (!source) throw new ApmError(`Marketplace ${entry.name} has no readable source.`);
-      return { ...entry, name: entry.name, source, ref: typeof entry.ref === 'string' ? entry.ref : typeof entry.branch === 'string' ? entry.branch : 'main', host };
-    });
-  }
+  getMarketplaces(): Promise<Marketplace[]> { return readMarketplaces(this.home); }
   async getCatalog(marketplaces: Marketplace[]): Promise<{ items: PackageItem[]; errors: string[] }> {
     const items: PackageItem[] = [], errors: string[] = [];
     // Keep requests bounded; CLI fetching also owns transport authentication.
@@ -273,7 +259,8 @@ export class ApmClient {
   async getDetails(item: PackageItem, scope: Scope): Promise<Record<string, unknown>> {
     const identity = item.installed ? String(item.metadata?.cliIdentity ?? item.name) : item.marketplace ? `${item.name}@${item.marketplace}` : item.name;
     const deployedSkillPath = item.installed && typeof item.metadata?.deployedSkillPath === 'string' ? item.metadata.deployedSkillPath : undefined;
-    const result = deployedSkillPath ? undefined : await this.checked(['view', identity, ...(scope.kind === 'global' ? ['--global'] : [])], scope.kind === 'global' ? this.home : scope.path);
+    const result = deployedSkillPath || (!item.installed && item.marketplace) ? undefined :
+      await this.checked(['view', identity, ...(scope.kind === 'global' ? ['--global'] : [])], scope.kind === 'global' ? this.home : scope.path);
     const metadata: Record<string, unknown> = { ...item.metadata, identity, ...(result ? { rawOutput: result.stdout } : {}) };
     let plugin = record(item.metadata?.plugin) ? item.metadata.plugin : undefined;
     let packageMetadata: PackageMetadata | undefined;
@@ -295,8 +282,8 @@ export class ApmClient {
             } else if (snapshot.gitDir && typeof plugin.source === 'string') {
               packageMetadata = await inspectBarePackage(snapshot.gitDir, snapshot.ref ?? 'main', plugin.source);
             } else {
-              const source = githubSource(plugin.source, marketplace);
-              if (source) packageMetadata = await inspectGithubPackage(source, this.config.fetcher);
+              const source = remoteSource(plugin.source, marketplace, this.config.repositoryHosts?.());
+              if (source) packageMetadata = await inspectRemotePackage(source, this.config.fetcher);
               else metadata.contentsNotice = 'The package source is not available locally; its contents may be incomplete.';
             }
           }

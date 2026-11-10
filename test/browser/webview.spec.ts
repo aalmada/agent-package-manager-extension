@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { descriptors } from '../../src/apm/commands';
 import type { State } from '../../src/protocol';
+import { withInstallations } from '../../src/apm/packageState';
 
 async function postMessage(page: Page, message: { type: 'state'; state: State } | { type: 'setSearch'; search: string }) {
   await page.evaluate(value => new Promise<void>(resolve => {
@@ -58,6 +59,10 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     };
     await postMessage(page, { type: 'state', state });
     await expect(page.locator('.package-row')).toHaveCount(4);
+    await expect(page.getByRole('button', { name: 'Initialize APM project', exact: true })).toHaveCount(0);
+    const initialControls = (await page.locator('.sidebar-controls').boundingBox())!;
+    const initialSearchbar = (await page.locator('.searchbar').boundingBox())!;
+    expect(initialSearchbar.y - initialControls.y).toBe(8);
     await expect(page.locator('#scope-selector')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /APM installation scope/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Getting started', exact: true })).toHaveCount(0);
@@ -76,6 +81,41 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(await page.locator('.count-badge').first().evaluate(element => getComputedStyle(element).borderRadius)).toBe('11px');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`sidebar-${theme}.png`), fullPage: true });
+    const workspace = { ...state.installed[0], scope: state.scopes[0] };
+    const global = { ...state.installed[0], scope: state.scopes[1], version: '1.0.0' };
+    const mixed = { ...state, installed: [global, workspace], catalog: withInstallations(state.catalog, [global, workspace]) };
+    await postMessage(page, { type: 'state', state: mixed });
+    await expect(page.locator('.count-badge')).toHaveText(['2', '2', '2']);
+    await expect(page.locator('#section-body-catalog').getByText('Installed globally', { exact: true })).toBeVisible();
+    await expect(page.locator('#section-body-catalog').getByText('Installed in workspace', { exact: true })).toBeVisible();
+    const installedRows = page.locator('#section-body-installed .package-row');
+    const updateRows = page.locator('#section-body-updates .package-row');
+    await expect(installedRows.nth(0).locator('.badge')).toHaveText(['Update available', 'Global']);
+    await expect(installedRows.nth(1).locator('.badge')).toHaveText(['Update available', 'Workspace']);
+    await expect(updateRows.locator('.badge')).toHaveText(['Global', 'Workspace']);
+    await page.screenshot({ path: testInfo.outputPath(`dual-scope-${theme}.png`), fullPage: true });
+    await installedRows.first().click();
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', JSON.stringify({
+      type: 'details', id: global.id, scopeKey: 'global:/home/user/.apm'
+    }));
+    await installedRows.nth(1).click();
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', JSON.stringify({
+      type: 'details', id: workspace.id, scopeKey: 'workspace:/project'
+    }));
+    await updateRows.nth(1).click();
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', JSON.stringify({
+      type: 'details', id: workspace.id, scopeKey: 'workspace:/project'
+    }));
+    await page.locator('#search').fill('@scope:global');
+    await expect(page.locator('.count-badge')).toHaveText(['1', '1', '1']);
+    await page.locator('#search').fill('');
+    await postMessage(page, { type: 'state', state: { ...mixed, projectPresent: false, installed: [global],
+      catalog: withInstallations(state.catalog, [global]) } });
+    await expect(page.locator('#search')).toBeVisible();
+    await expect(page.locator('.count-badge')).toHaveText(['2', '1', '1']);
+    await expect(page.locator('#section-body-installed').getByText('Global', { exact: true })).toBeVisible();
+    await expect(page.locator('#section-body-catalog').getByText('Installed in workspace', { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const crowded = { ...state, catalog: Array.from({ length: 60 }, (_, i) => ({ ...state.catalog[0], id: `catalog-${i}`, name: `Package ${i}` })) };
     await postMessage(page, { type: 'state', state: crowded });
     await expect(page.locator('#search')).toBeVisible();
@@ -199,13 +239,19 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"output"}');
 
     await postMessage(page, { type: 'state', state: { ...state, projectPresent: false } });
-    await expect(page.getByText('Initialize this project to browse and manage APM packages.')).toBeVisible();
-    await expect(page.locator('.sidebar-controls, .package-section, footer')).toHaveCount(0);
+    await expect(page.locator('#search')).toBeVisible();
+    await expect(page.locator('.package-section')).toHaveCount(3);
     const initialize = page.getByRole('button', { name: 'Initialize APM project', exact: true });
     await expect(initialize).toBeVisible();
-    expect((await initialize.boundingBox())?.width).toBe(300);
-    await page.keyboard.press('Tab');
-    await expect(initialize).toBeFocused();
+    for (const width of [340, 220]) {
+      await page.setViewportSize({ width, height: 900 });
+      const initializeBox = (await initialize.boundingBox())!;
+      const searchbarBox = (await page.locator('.searchbar').boundingBox())!;
+      expect(searchbarBox.y - (initializeBox.y + initializeBox.height)).toBeGreaterThanOrEqual(8);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
+    await page.setViewportSize({ width: 340, height: 900 });
+    await initialize.focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"workflow","workflow":"initialize"}');
     await page.screenshot({ path: testInfo.outputPath(`initialize-project-${theme}.png`), fullPage: true });

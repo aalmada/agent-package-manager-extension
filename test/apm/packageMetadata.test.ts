@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declaredContents, mergeContents, repositoryComposition } from '../../src/apm/contents';
-import { githubSource, inspectBarePackage, inspectGithubPackage, inspectLocalPackage } from '../../src/apm/packageMetadata';
+import { inspectBarePackage, inspectLocalPackage, inspectRemotePackage, remoteSource } from '../../src/apm/packageMetadata';
 import { execFileSync } from 'node:child_process';
 
 test('declared component paths and named maps become grouped contents', () => {
@@ -24,7 +23,7 @@ test('declared component paths and named maps become grouped contents', () => {
 });
 
 test('local packages expose real skills, agents and prompts without following escaping symlinks', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'apm-package-metadata-'));
+  const home = await mkdtemp(join(process.cwd(), '.test-package-metadata-'));
   try {
     const root = join(home, 'package');
     await mkdir(join(root, '.github', 'plugin'), { recursive: true });
@@ -61,37 +60,39 @@ test('local packages expose real skills, agents and prompts without following es
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('public GitHub package metadata includes declared and discovered contents at the pinned commit', async () => {
-  const source = githubSource({
+test('GitHub package metadata includes declared and discovered contents at the pinned commit', async () => {
+  const source = remoteSource({
     source: 'github', repo: 'microsoft/azure-dev-tools', path: 'canvases/azure-cost-health-check',
     sha: '40f89b5b3f0f01e9262cfec3ad361cf4ebb22905'
   }, { name: 'awesome-copilot', source: 'https://github.com/github/awesome-copilot', host: 'github.com' });
   assert.ok(source);
   const requests: string[] = [];
   const fakeFetch: typeof fetch = async (input, init) => {
-    const url = String(input); requests.push(url);
+    const url = new URL(String(input)); requests.push(url.toString());
+    const path = url.pathname;
     assert.equal(init?.credentials, 'omit');
     assert.equal(init?.redirect, 'error');
-    if (url.startsWith('https://api.github.com/')) return new Response(JSON.stringify({
+    if (path.includes('/git/trees/')) return new Response(JSON.stringify({
       truncated: false, tree: [
         { type: 'blob', path: 'canvases/azure-cost-health-check/skills/azure-cost-health-check/SKILL.md' },
         { type: 'blob', path: 'canvases/azure-cost-health-check/.github/agents/review.agent.md' },
         { type: 'blob', path: 'another-plugin/skills/secret/SKILL.md' }
       ]
     }), { status: 200 });
-    if (url.endsWith('/.github/plugin/plugin.json')) return new Response(JSON.stringify({
+    assert.equal(new Headers(init?.headers).get('accept'), 'application/vnd.github.raw+json');
+    if (path.endsWith('/.github/plugin/plugin.json')) return new Response(JSON.stringify({
       name: 'azure-cost-health-check', skills: ['./skills/azure-cost-health-check/']
     }), { status: 200 });
-    if (url.endsWith('/README.md')) return new Response('# Read me', { status: 200 });
-    if (url.endsWith('/skills/azure-cost-health-check/SKILL.md')) return new Response(
+    if (path.endsWith('/README.md')) return new Response('# Read me', { status: 200 });
+    if (path.endsWith('/skills/azure-cost-health-check/SKILL.md')) return new Response(
       '---\nname: azure-cost-health-check\ndescription: Check cloud spend and forecasts.\n---\nSkill body is not needed here.', { status: 200 }
     );
-    if (url.endsWith('/.github/agents/review.agent.md')) return new Response(
+    if (path.endsWith('/.github/agents/review.agent.md')) return new Response(
       '---\nname: reviewer\ndescription: Review changes for correctness.\n---\nAgent body is not needed here.', { status: 200 }
     );
     return new Response(null, { status: 404 });
   };
-  const details = await inspectGithubPackage(source, fakeFetch);
+  const details = await inspectRemotePackage(source, fakeFetch);
   assert.equal(requests.length, 8);
   assert.ok(requests.every(url => url.includes('40f89b5b3f0f01e9262cfec3ad361cf4ebb22905')));
   assert.equal(details.pluginManifest?.name, 'azure-cost-health-check');
@@ -106,16 +107,16 @@ test('public GitHub package metadata includes declared and discovered contents a
 
 test('unavailable or unsafe GitHub metadata is explicit and never sent to another host', async () => {
   const marketplace = { name: 'example', source: 'https://github.com/example/repo', host: 'github.com' };
-  assert.throws(() => githubSource({ source: 'github', repo: 'example/repo', path: '../secret' }, marketplace), /unsafe/);
-  assert.equal(githubSource({ source: 'github', repo: 'example/repo' }, { ...marketplace, host: 'private.example.com' }), undefined);
-  const source = githubSource({ source: 'github', repo: 'example/repo', ref: 'branch/name' }, marketplace);
+  assert.throws(() => remoteSource({ source: 'github', repo: 'example/repo', path: '../secret' }, marketplace), /unsafe/);
+  assert.equal(remoteSource({ source: 'git', url: 'https://private.example.com/example/repo' }, marketplace), undefined);
+  const source = remoteSource({ source: 'github', repo: 'example/repo', ref: 'branch/name' }, marketplace);
   assert.ok(source);
   const fakeFetch: typeof fetch = async input => {
-    assert.match(String(input), /^https:\/\/(?:api\.github\.com|raw\.githubusercontent\.com)\//);
+    assert.match(String(input), /^https:\/\/api\.github\.com\//);
     assert.match(String(input), /branch%2Fname/);
     return new Response(null, { status: 403 });
   };
-  const details = await inspectGithubPackage(source, fakeFetch);
+  const details = await inspectRemotePackage(source, fakeFetch);
   assert.deepEqual(details.contents, []);
   assert.match(details.notices.join('\n'), /HTTP 403/);
 });
@@ -143,12 +144,13 @@ test('awesome-copilot composition maps plugin-relative entries to repository-roo
 });
 
 test('GitHub source manifests resolve awesome-copilot contents from the repository root with descriptions', async () => {
-  const source = githubSource('plugins/cockpit', { name: 'awesome-copilot', source: 'github/awesome-copilot', host: 'github.com' });
+  const source = remoteSource('plugins/cockpit', { name: 'awesome-copilot', source: 'github/awesome-copilot', host: 'github.com' });
   assert.ok(source);
   const requests: string[] = [];
   const fakeFetch: typeof fetch = async input => {
-    const url = String(input); requests.push(url);
-    if (url.startsWith('https://api.github.com/')) return new Response(JSON.stringify({
+    const url = new URL(String(input)); requests.push(url.toString());
+    const path = url.pathname;
+    if (path.includes('/git/trees/')) return new Response(JSON.stringify({
       truncated: false, tree: [
         { type: 'blob', path: 'plugins/cockpit/plugin.json' },
         { type: 'blob', path: 'skills/assess/SKILL.md' },
@@ -158,13 +160,14 @@ test('GitHub source manifests resolve awesome-copilot contents from the reposito
         { type: 'blob', path: 'extensions/cockpit/extension.mjs' }
       ]
     }), { status: 200 });
-    if (url.endsWith('/HEAD/plugins/cockpit/plugin.json')) return new Response(JSON.stringify(awesomeManifest), { status: 200 });
-    if (url.endsWith('/HEAD/skills/assess/SKILL.md')) return new Response('---\ndescription: Assess readiness.\n---\nBody', { status: 200 });
-    if (url.endsWith('/HEAD/agents/reporter.agent.md')) return new Response('---\nname: AI Reporter\ndescription: Writes the report.\n---\n', { status: 200 });
-    if (url.endsWith('/HEAD/extensions/board/package.json')) return new Response(JSON.stringify({ name: 'pkg', description: 'Kanban board.' }), { status: 200 });
+    assert.equal(url.searchParams.get('ref'), 'HEAD');
+    if (path.endsWith('/contents/plugins/cockpit/plugin.json')) return new Response(JSON.stringify(awesomeManifest), { status: 200 });
+    if (path.endsWith('/contents/skills/assess/SKILL.md')) return new Response('---\ndescription: Assess readiness.\n---\nBody', { status: 200 });
+    if (path.endsWith('/contents/agents/reporter.agent.md')) return new Response('---\nname: AI Reporter\ndescription: Writes the report.\n---\n', { status: 200 });
+    if (path.endsWith('/contents/extensions/board/package.json')) return new Response(JSON.stringify({ name: 'pkg', description: 'Kanban board.' }), { status: 200 });
     return new Response(null, { status: 404 });
   };
-  const details = await inspectGithubPackage(source, fakeFetch);
+  const details = await inspectRemotePackage(source, fakeFetch);
   assert.deepEqual(details.contents.map(group => [group.kind, group.items.map(item => [item.name, item.description])]), [
     ['skills', [['assess', 'Assess readiness.']]],
     ['agents', [['AI Reporter', 'Writes the report.']]],
@@ -176,11 +179,11 @@ test('GitHub source manifests resolve awesome-copilot contents from the reposito
 });
 
 test('published plugin folders expose com.github.copilot agents and extensions without a composition note', async () => {
-  const source = githubSource('plugins/cockpit', { name: 'awesome-copilot', source: 'github/awesome-copilot', host: 'github.com', ref: 'marketplace' });
+  const source = remoteSource('plugins/cockpit', { name: 'awesome-copilot', source: 'github/awesome-copilot', host: 'github.com', ref: 'marketplace' });
   assert.ok(source);
   const fakeFetch: typeof fetch = async input => {
-    const url = String(input);
-    if (url.startsWith('https://api.github.com/')) return new Response(JSON.stringify({
+    const path = new URL(String(input)).pathname;
+    if (path.includes('/git/trees/')) return new Response(JSON.stringify({
       truncated: false, tree: [
         { type: 'blob', path: 'plugins/cockpit/skills/assess/SKILL.md' },
         { type: 'blob', path: 'plugins/cockpit/com.github.copilot/agents/reporter.md' },
@@ -188,10 +191,10 @@ test('published plugin folders expose com.github.copilot agents and extensions w
         { type: 'blob', path: 'plugins/cockpit/com.github.copilot/extensions/board/public/index.html' }
       ]
     }), { status: 200 });
-    if (url.endsWith('/com.github.copilot/extensions/board/package.json')) return new Response('{"description":"Board UI."}', { status: 200 });
+    if (path.endsWith('/com.github.copilot/extensions/board/package.json')) return new Response('{"description":"Board UI."}', { status: 200 });
     return new Response(null, { status: 404 });
   };
-  const details = await inspectGithubPackage(source, fakeFetch);
+  const details = await inspectRemotePackage(source, fakeFetch);
   assert.deepEqual(details.contents.map(group => [group.kind, group.items.map(item => item.name)]), [
     ['skills', ['assess']], ['agents', ['reporter']], ['extensions', ['board']]
   ]);
@@ -200,7 +203,7 @@ test('published plugin folders expose com.github.copilot agents and extensions w
 });
 
 test('local marketplace clones resolve composition from the repository; installed copies list names only', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'apm-composition-'));
+  const home = await mkdtemp(join(process.cwd(), '.test-composition-'));
   try {
     await mkdir(join(home, 'plugins', 'cockpit'), { recursive: true });
     await mkdir(join(home, 'skills', 'assess'), { recursive: true });
@@ -225,7 +228,7 @@ test('local marketplace clones resolve composition from the repository; installe
 });
 
 test('bare marketplace caches resolve awesome-copilot composition with git', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'apm-bare-composition-'));
+  const home = await mkdtemp(join(process.cwd(), '.test-bare-composition-'));
   try {
     const work = join(home, 'work');
     await mkdir(join(work, 'plugins', 'cockpit'), { recursive: true });

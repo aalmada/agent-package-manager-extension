@@ -20,6 +20,7 @@ function harness() {
   runInNewContext(source, {
     module, exports: module.exports, URL, Headers,
     require: (id: string) => id === 'vscode' ? {
+      EventEmitter: class { event = () => ({ dispose() {} }); fire() {} dispose() {} },
       workspace: { get isTrusted() { return state.trusted; } },
       authentication: {
         getSession: async (provider: string, scopes: string[], options: { silent?: boolean; createIfNone?: boolean }) => {
@@ -87,13 +88,13 @@ test('cancellation while retrieving account credentials prevents process startup
   await assert.rejects(client.execute([], { signal: controller.signal }), /cancelled/);
 });
 
-test('GitHub metadata uses Accounts authorization only on approved HTTPS hosts and refuses redirects', async () => {
+test('public GitHub metadata stays anonymous on approved repository HTTPS routes and refuses redirects', async () => {
   const host = harness();
   host.state.token = 'opaque-account-credential';
   await host.api.githubFetch('https://raw.githubusercontent.com/owner/private/main/README.md', { headers: { Accept: 'text/plain' } });
   const init = host.requests[0].init!;
   const headers = new Headers(init.headers);
-  assert.equal(headers.get('Authorization'), 'Bearer opaque-account-credential');
+  assert.equal(headers.get('Authorization'), null);
   assert.equal(headers.get('Accept'), 'text/plain');
   assert.equal(init.redirect, 'error');
   assert.equal(init.credentials, 'omit');
@@ -103,7 +104,7 @@ test('GitHub metadata uses Accounts authorization only on approved HTTPS hosts a
   assert.equal(new Headers(host.requests[2].init?.headers).get('Authorization'), null);
   for (const url of ['http://api.github.com/repos/owner/private', 'https://github.com.evil.test/file',
     'https://example.test/marketplace.json', 'https://user@api.github.com/repos/owner/private']) {
-    await assert.rejects(host.api.githubFetch(url), /approved GitHub HTTPS host/);
+    await assert.rejects(host.api.githubFetch(url), /approved repository HTTPS URL/);
   }
   assert.equal(host.requests.length, 3);
 });

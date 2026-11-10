@@ -71,6 +71,7 @@
       { "command": "apm.auditWorkspace", "title": "APM: Audit Workspace" },
       { "command": "apm.doctor", "title": "APM: Run Doctor" },
       { "command": "apm.signIn", "title": "APM: Sign in to GitHub" },
+      { "command": "apm.manageAccounts", "title": "APM: Manage Repository Accounts" },
       { "command": "apm.targets", "title": "APM: Explain Deployment Targets" },
       { "command": "apm.runScript", "title": "APM: Run Script" },
       {

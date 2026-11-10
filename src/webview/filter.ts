@@ -37,17 +37,23 @@ export function compareVersions(a: string, b: string): number {
 
 export function filterPackages(items: PackageItem[], filters: Filters): PackageItem[] {
   let marketplace = filters.marketplace, status = filters.status, sort = filters.sort;
+  let scope = '';
   const terms: string[] = [];
   for (const token of filters.text.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []) {
     if (token.startsWith('@marketplace:')) marketplace = token.slice(13).replaceAll('"', '');
     else if (token === '@installed') status = 'installed';
     else if (token === '@updates') status = 'updates';
     else if (token === '@dependencies') status = 'dependencies';
+    else if (/^@scope:(workspace|global)$/.test(token)) scope = token.slice(7);
     else if (token.startsWith('@sort:') && ['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(token.slice(6))) sort = token.slice(6) as Ordering;
     else terms.push(token.replaceAll('"', '').toLowerCase());
   }
   return items.filter(item => (!marketplace || item.marketplace === marketplace) &&
-    (!['installed', 'dependencies'].includes(status) || item.installed) && (status !== 'updates' || item.updateStatus === 'outdated') &&
+    (!scope || item.scope?.kind === scope || item.installations?.some(installation => installation.scope?.kind === scope)) &&
+    (!['installed', 'dependencies'].includes(status) || item.installed) &&
+    (status !== 'updates' || (scope && item.installations
+      ? item.installations.some(installation => installation.scope?.kind === scope && installation.updateStatus === 'outdated')
+      : item.updateStatus === 'outdated')) &&
     terms.every(term => `${item.name} ${item.description ?? ''} ${item.marketplace}`.toLowerCase().includes(term)))
     .sort((a, b) => {
       let order = 0;
@@ -61,11 +67,12 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
 }
 
 const tokenPattern = /(?:[^\s"]+|"[^"]*")+/g;
-export interface FilterTokens { marketplace: string; sort: Ordering; installed: boolean; updates: boolean; dependencies: boolean }
+export interface FilterTokens { marketplace: string; scope: string; sort: Ordering; installed: boolean; updates: boolean; dependencies: boolean }
 export function filterTokens(search: string): FilterTokens {
   const sort = search.match(/@sort:(\S+)/)?.[1] ?? 'name';
   return {
     marketplace: search.match(/@marketplace:("[^"]*"|\S+)/)?.[1]?.replaceAll('"', '') ?? '',
+    scope: search.match(/(?:^|\s)@scope:(workspace|global)(?=\s|$)/)?.[1] ?? '',
     sort: (['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(sort) ? sort : 'name') as Ordering,
     installed: /(?:^|\s)@installed(?=\s|$)/.test(search),
     updates: /(?:^|\s)@updates(?=\s|$)/.test(search),

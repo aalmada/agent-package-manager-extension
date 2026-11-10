@@ -28,7 +28,8 @@ export interface ContentGroup {
   items: ContentItem[];
 }
 
-function nameFromPath(path: string): string {
+/** Display name derived from a content path, e.g. skills/foo/SKILL.md -> foo. */
+export function nameFromPath(path: string): string {
   const parts = path.replace(/\\/g, '/').replace(/\/+$/, '').split('/');
   let name = parts.pop() ?? '';
   if (/^SKILL\.md$/i.test(name)) name = parts.pop() ?? name;

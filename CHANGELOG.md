@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Show global and current-workspace installations and updates together, including global packages without a workspace manifest. Distinguish both catalog installation tags and scope-bound entries, and ask for an installation destination before package/version selection or previews.
+- Debounce command/file-watcher refreshes and reuse automatic remote marketplace and update checks for five minutes, including failures, to reduce API rate-limit pressure. Explicit refresh and post-mutation update verification remain immediate.
+- Reuse read-only repository access probes and authenticate known private metadata requests directly, avoiding repeated anonymous requests while preserving fresh CLI access checks.
+- Use verified existing accounts when anonymous repository requests are rate-limited, and show actionable retry guidance when no account can be verified.
+- Add repository-specific GitHub account selection and secure token management through **APM: Manage Repository Accounts**.
+- Load private package contents and README from GitHub, GitHub Enterprise, GitLab, and Azure DevOps using repository-scoped credentials.
+- Route separate marketplace operations to their selected credentials and reject mixed-account resolver operations that require unsupported upstream APM credential routing before starting the CLI.
+
 ## 0.2.1
 
 - Default marketplace settings to NetFabric Intelligentium.

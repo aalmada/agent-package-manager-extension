@@ -2,10 +2,11 @@ import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { record } from './adapters';
-import { awesomeCopilotNamespace, declaredContents, mergeContents, repositoryComposition, repositoryCompositionNote, safeRepositoryPath,
+import { awesomeCopilotNamespace, declaredContents, mergeContents, nameFromPath, repositoryComposition, repositoryCompositionNote, safeRepositoryPath,
   type ContentGroup, type ContentItem, type ContentKind } from './contents';
 import { listContained, readBareFile, readContained, resolveContained } from './manifest';
-import type { Marketplace } from './types';
+import { remoteReader, repositoryPath, type RemoteSource, type RemoteTree } from './remoteMetadata';
+export { remoteSource, type RemoteSource } from './remoteMetadata';
 
 export interface PackageMetadata {
   localRoot?: string;
@@ -17,8 +18,6 @@ export interface PackageMetadata {
   /** Informational context about the listed contents (not a loading problem). */
   notes?: string[];
 }
-
-interface GithubSource { owner: string; repo: string; path: string; ref: string }
 
 const manifestPaths = ['.github/plugin/plugin.json', '.claude-plugin/plugin.json', 'plugin.json'];
 const readmePaths = ['README.md', 'readme.md', 'Readme.md'];
@@ -67,13 +66,6 @@ function parseObject(text: string, path: string, yaml = false): Record<string, u
   return value;
 }
 
-function itemName(path: string): string {
-  const parts = path.replace(/\\/g, '/').split('/');
-  let name = parts.pop() ?? '';
-  if (/^SKILL\.md$/i.test(name)) name = parts.pop() ?? name;
-  return name.replace(/\.(?:agent|instructions|prompt|skill)\.md$/i, '').replace(/\.(?:md|json|ya?ml)$/i, '');
-}
-
 function frontmatter(text: string, path: string, notices: string[]): Partial<ContentItem> {
   const match = text.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n|$)/);
   if (!match) return {};
@@ -115,7 +107,7 @@ function looseFrontmatter(text: string): Record<string, string> {
 async function localItem(root: string, path: string, notices: string[]): Promise<ContentItem | undefined> {
   const text = await readContained(root, path);
   if (text === undefined) return undefined;
-  return { name: itemName(path), path: path.replace(/\\/g, '/'), ...frontmatter(text, path, notices) };
+  return { name: nameFromPath(path), path: path.replace(/\\/g, '/'), ...frontmatter(text, path, notices) };
 }
 
 async function localContents(root: string, notices: string[]): Promise<ContentGroup[]> {
@@ -261,7 +253,7 @@ export async function inspectLocalPackage(parent: string, path = '.', options: {
 }
 
 export async function inspectBarePackage(gitDir: string, ref: string, path: string): Promise<PackageMetadata> {
-  const prefix = githubPath(path);
+  const prefix = repositoryPath(path);
   const paths = [...manifestPaths, 'apm.yml', 'README.md'];
   const texts = await Promise.all(paths.map(name => readBareFile(gitDir, ref, [prefix, name].filter(Boolean).join('/'))));
   const manifestIndex = texts.slice(0, manifestPaths.length).findIndex(text => text !== undefined);
@@ -276,105 +268,6 @@ export async function inspectBarePackage(gitDir: string, ref: string, path: stri
   };
   const contents = await addRepositoryComposition(pluginManifest, declaredContents(pluginManifest, manifest), notices, notes, repository);
   return { pluginManifest, manifest, readme: texts[4], contents, notices, notes };
-}
-
-function githubRepository(source: string): { owner: string; repo: string } | undefined {
-  const match = source.match(/^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:|github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
-  if (!match || ['.', '..'].includes(match[1]) || ['.', '..'].includes(match[2])) return undefined;
-  return { owner: match[1], repo: match[2] };
-}
-
-function githubPath(path: string): string {
-  const normalized = path.replace(/^\.\//, '').replace(/\/+$/, '');
-  if (!normalized || normalized === '.') return '';
-  if (normalized.startsWith('/') || normalized.includes('\\') || [...normalized].some(character => character.charCodeAt(0) < 32) ||
-      normalized.split('/').some(part => !part || part === '.' || part === '..')) {
-    throw new Error('The plugin source contains an unsafe repository path.');
-  }
-  return normalized;
-}
-
-export function githubSource(source: unknown, marketplace: Marketplace): GithubSource | undefined {
-  if (marketplace.host && marketplace.host.toLowerCase() !== 'github.com') return undefined;
-  if (typeof source === 'string') {
-    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(source) || source.includes('@')) return undefined;
-    const repo = githubRepository(marketplace.source);
-    return repo ? { ...repo, path: githubPath(source), ref: marketplace.ref || 'HEAD' } : undefined;
-  }
-  if (!record(source)) return undefined;
-  const kind = source.source ?? source.type ?? source.kind;
-  if (typeof kind !== 'string' || !['github', 'git-subdir'].includes(kind.toLowerCase())) return undefined;
-  const repository = typeof source.repo === 'string' ? source.repo : typeof source.repository === 'string' ? source.repository : '';
-  const repo = githubRepository(repository);
-  if (!repo) return undefined;
-  const path = typeof source.path === 'string' ? source.path : typeof source.subdir === 'string' ? source.subdir : '';
-  const ref = typeof source.sha === 'string' && /^[a-f0-9]{40}$/i.test(source.sha) ? source.sha :
-    typeof source.ref === 'string' && source.ref ? source.ref : 'HEAD';
-  return { ...repo, path: githubPath(path), ref };
-}
-
-async function remoteText(url: string, name: string, limit: number, fetcher: typeof fetch): Promise<string | undefined> {
-  const response = await fetcher(url, { signal: AbortSignal.timeout(10_000), redirect: 'error', credentials: 'omit' });
-  if (response.status === 404) return undefined;
-  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status} for ${name}.`);
-  const declared = Number(response.headers.get('content-length'));
-  if (declared > limit) throw new Error(`${name} exceeds the display size limit.`);
-  if (!response.body) return '';
-  const reader = response.body.getReader(), decoder = new TextDecoder();
-  let size = 0, text = '';
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) { await reader.cancel(); throw new Error(`${name} exceeds the display size limit.`); }
-      text += decoder.decode(value, { stream: true });
-    }
-    return text + decoder.decode();
-  } finally { reader.releaseLock(); }
-}
-
-async function remoteFile(source: GithubSource, path: string, fetcher: typeof fetch): Promise<string | undefined> {
-  const url = githubRawUrl(source, path);
-  const limit = path.toLowerCase().endsWith('readme.md') ? maxReadmeBytes : 1024 * 1024;
-  return remoteText(url, path, limit, fetcher);
-}
-
-function githubRawUrl(source: GithubSource, path: string): string {
-  const parts = [source.owner, source.repo, source.ref, ...[source.path, path].filter(Boolean).join('/').split('/')];
-  return `https://raw.githubusercontent.com/${parts.map(encodeURIComponent).join('/')}`;
-}
-
-async function remoteFrontmatter(source: GithubSource, path: string, fetcher: typeof fetch): Promise<string | undefined> {
-  const response = await fetcher(githubRawUrl(source, path), {
-    signal: AbortSignal.timeout(10_000), redirect: 'error', credentials: 'omit'
-  });
-  if (response.status === 404) return undefined;
-  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status} for ${path}.`);
-  if (!response.body) return undefined;
-  const reader = response.body.getReader(), decoder = new TextDecoder();
-  let text = '', size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return text + decoder.decode();
-      size += value.byteLength;
-      if (size > maxFrontmatterBytes) {
-        await reader.cancel();
-        throw new Error(`Frontmatter in ${path} exceeds the 64 KB display limit.`);
-      }
-      text += decoder.decode(value, { stream: true });
-      if (text.length >= 5 && !/^---\r?\n/.test(text)) {
-        await reader.cancel();
-        return undefined;
-      }
-      const match = text.match(/^---\s*\r?\n[\s\S]*?\r?\n---(?:\s*\r?\n|$)/);
-      if (match) {
-        await reader.cancel();
-        return match[0];
-      }
-    }
-  } finally { reader.releaseLock(); }
 }
 
 /** The file that carries an item's description: frontmatter for Markdown, package.json for extensions. */
@@ -427,26 +320,21 @@ async function describeContents(groups: ContentGroup[], read: (file: string) => 
   return groups;
 }
 
-function remoteDescriptionReader(source: GithubSource, fetcher: typeof fetch): (file: string) => Promise<string | undefined> {
-  return file => /package\.json$/i.test(file)
-    ? remoteText(githubRawUrl(source, file), file, maxFrontmatterBytes, fetcher)
-    : remoteFrontmatter(source, file, fetcher);
+function remoteDescriptionReader(reader: Pick<ReturnType<typeof remoteReader>, 'read'>): (file: string) => Promise<string | undefined> {
+  return file => reader.read(file, maxFrontmatterBytes, !/package\.json$/i.test(file));
 }
 
-function githubTreeContents(text: string, source: GithubSource): { contents: ContentGroup[]; truncated: boolean; blobs: Set<string> } {
-  const tree = parseObject(text, 'GitHub repository listing');
-  if (!Array.isArray(tree.tree)) throw new Error('GitHub returned an invalid repository listing.');
+function remoteTreeContents(tree: RemoteTree, source: RemoteSource): { contents: ContentGroup[]; truncated: boolean; blobs: Set<string> } {
   const groups: ContentGroup[] = [];
   const add = (kind: ContentKind, item: ContentItem) => groups.push({ kind, items: [item] });
   const blobs = new Set<string>();
   const prefix = source.path ? `${source.path}/` : '';
-  for (const entry of tree.tree) {
-    if (!record(entry) || entry.type !== 'blob' || typeof entry.path !== 'string') continue;
-    blobs.add(entry.path);
-    if (!entry.path.startsWith(prefix)) continue;
-    const path = entry.path.slice(prefix.length);
-    if (path === 'SKILL.md') add('skills', { name: source.path.split('/').pop() || source.repo, path });
-    else if (!path.includes('/') && /\.prompt\.md$/i.test(path)) add('prompts', { name: itemName(path), path });
+  for (const file of tree.paths) {
+    blobs.add(file);
+    if (!file.startsWith(prefix)) continue;
+    const path = file.slice(prefix.length);
+    if (path === 'SKILL.md') add('skills', { name: source.path.split('/').pop() || source.repository.path.split('/').pop()!, path });
+    else if (!path.includes('/') && /\.prompt\.md$/i.test(path)) add('prompts', { name: nameFromPath(path), path });
     else for (const folder of contentFolders) {
       const folderPrefix = `${folder.path}/`;
       if (!path.startsWith(folderPrefix)) continue;
@@ -455,30 +343,35 @@ function githubTreeContents(text: string, source: GithubSource): { contents: Con
         const match = relative.match(/^([^/]+)\/([^/]+)$/);
         if (match && folder.marker.test(match[2])) {
           const itemPath = markerItemPath(folder.kind, `${folder.path}/${match[1]}`, match[2]);
-          add(folder.kind, { name: itemName(itemPath), path: itemPath });
+          add(folder.kind, { name: nameFromPath(itemPath), path: itemPath });
         }
-      } else if (!relative.includes('/') && folder.extension.test(relative)) add(folder.kind, { name: itemName(path), path });
+      } else if (!relative.includes('/') && folder.extension.test(relative)) add(folder.kind, { name: nameFromPath(path), path });
       break;
     }
   }
   return { contents: mergeContents(groups), truncated: tree.truncated === true, blobs };
 }
 
-export async function inspectGithubPackage(source: GithubSource, fetcher: typeof fetch = fetch): Promise<PackageMetadata> {
+export async function inspectRemotePackage(source: RemoteSource, fetcher: typeof fetch = fetch): Promise<PackageMetadata> {
   const paths = [...manifestPaths, 'apm.yml', 'README.md'];
-  const treeUrl = `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/git/trees/${encodeURIComponent(source.ref)}?recursive=1`;
+  const repositoryReader = remoteReader({ ...source, path: '' }, fetcher);
+  const reader = {
+    read: (file: string, limit?: number, frontmatter?: boolean) =>
+      repositoryReader.read([repositoryPath(source.path), repositoryPath(file)].filter(Boolean).join('/'), limit, frontmatter),
+    tree: repositoryReader.tree
+  };
   const results = await Promise.allSettled([
-    ...paths.map(path => remoteFile(source, path, fetcher)),
-    remoteText(treeUrl, 'repository listing', 5 * 1024 * 1024, fetcher)
+    ...paths.map(path => reader.read(path, path === 'README.md' ? maxReadmeBytes : undefined)),
+    reader.tree()
   ]);
   const notices: string[] = [];
   const allFailed = results.every(result => result.status === 'rejected');
   if (allFailed) {
     const first = results[0];
-    if (first.status === 'rejected') notices.push(`Could not load package details from GitHub: ${first.reason instanceof Error ? first.reason.message : String(first.reason)}`);
+    if (first.status === 'rejected') notices.push(`Could not load package details from the repository host: ${first.reason instanceof Error ? first.reason.message : String(first.reason)}`);
   }
-  const values = results.map((result, index) => {
-    if (result.status === 'fulfilled') return result.value;
+  const values = results.slice(0, paths.length).map((result, index) => {
+    if (result.status === 'fulfilled') return result.value as string | undefined;
     if (!allFailed) notices.push(`Could not load ${paths[index] ?? 'repository listing'}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
     return undefined;
   });
@@ -492,25 +385,35 @@ export async function inspectGithubPackage(source: GithubSource, fetcher: typeof
   catch (error) { notices.push(error instanceof Error ? error.message : String(error)); }
   let blobs: Set<string> | undefined;
   try {
-    if (values[5] !== undefined) {
-      const tree = githubTreeContents(values[5], source);
+    const listing = results[5];
+    if (listing.status === 'fulfilled' && listing.value !== undefined) {
+      const tree = remoteTreeContents(listing.value as RemoteTree, source);
       discovered = tree.contents;
-      if (tree.truncated) notices.push('GitHub truncated the repository listing; package contents may be incomplete.');
+      if (tree.truncated) notices.push('The repository listing reached its display limit or was truncated; package contents may be incomplete.');
       else blobs = tree.blobs;
-    } else if (results[5].status === 'fulfilled') {
-      notices.push('The public repository listing is unavailable; package contents may require authentication.');
+    } else if (listing.status === 'fulfilled') {
+      notices.push('The repository listing is unavailable (HTTP 404). Check the repository, ref, and your account access.');
+    } else if (!allFailed) {
+      notices.push(`Could not load repository listing: ${listing.reason instanceof Error ? listing.reason.message : String(listing.reason)}`);
     }
   } catch (error) { notices.push(error instanceof Error ? error.message : String(error)); }
-  if (!pluginManifest && !manifest && !discovered.length && !allFailed) notices.push('No public package manifest or contents were found; the source may require authentication.');
+  let readme = values[4];
+  if (readme === undefined && blobs) {
+    const alternate = readmePaths.slice(1).find(path => blobs.has([source.path, path].filter(Boolean).join('/')));
+    if (alternate) {
+      try { readme = await reader.read(alternate, maxReadmeBytes); }
+      catch (error) { notices.push(`Could not load ${alternate}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+  }
+  if (!pluginManifest && !manifest && !discovered.length && !allFailed) notices.push('No package manifest or contents were found. Check the source path, ref, and your account access to the repository.');
   const contents = mergeContents(declaredContents(pluginManifest, manifest), discovered);
-  await describeContents(contents, remoteDescriptionReader(source, fetcher), 'GitHub', notices);
-  const repositoryRoot: GithubSource = { ...source, path: '' };
+  await describeContents(contents, remoteDescriptionReader(reader), 'the repository host', notices);
   const notes: string[] = [];
   const withComposition = await addRepositoryComposition(pluginManifest, contents, notices, notes, {
-    origin: 'GitHub',
+    origin: 'the repository host',
     // An incomplete or unavailable listing cannot disprove existence; missing files then simply have no description.
     exists: async file => !blobs || blobs.has(file) || [...blobs].some(blob => blob.startsWith(`${file}/`)),
-    read: remoteDescriptionReader(repositoryRoot, fetcher)
+    read: remoteDescriptionReader(repositoryReader)
   });
-  return { pluginManifest, manifest, readme: values[4], contents: withComposition, notices, notes };
+  return { pluginManifest, manifest, readme, contents: withComposition, notices, notes };
 }

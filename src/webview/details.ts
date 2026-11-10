@@ -2,13 +2,7 @@ import { record } from '../apm/adapters';
 import { contentTypes, declaredContents, mergeContents, type ContentGroup, type ContentItem } from '../apm/contents';
 import type { PackageItem } from '../apm/types';
 import type { ActionResult } from '../apm/actions';
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom';
 
 function label(key: string): string {
   const known: Record<string, string> = {

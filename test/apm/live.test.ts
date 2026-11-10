@@ -14,6 +14,17 @@ import { addArguments, matches, parseEntry } from '../../src/config/marketplaces
 
 const executable = process.env.APM_TEST_EXECUTABLE;
 const git = promisify(execFile);
+test('real global listing works without a workspace or global manifest', { skip: !executable, timeout: 30_000 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-global-list-'));
+  try {
+    const scope = { kind: 'global' as const, label: 'Global (user)', path: join(home, '.apm') };
+    const client = new ApmClient({ executable: executable!, cwd: home, home });
+    assert.deepEqual(await client.getInstalled(scope), []);
+    await mkdir(scope.path);
+    assert.deepEqual(await client.getInstalled(scope), []);
+  } finally { await rm(home, { recursive: true }); }
+});
+
 test('real initialization preserves every native answer in the selected project', { skip: !executable, timeout: 30_000 }, async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-init-native-'));
   try {

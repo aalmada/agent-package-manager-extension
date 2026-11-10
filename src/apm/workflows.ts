@@ -46,7 +46,7 @@ export function isWorkflow(value: string): value is Workflow { return Object.has
 export type Recovery = 'doctor' | 'authentication' | 'policy' | 'targets' | 'retry' | 'output';
 export function recoveryActions(message: string): Recovery[] {
   const actions: Recovery[] = ['output', 'doctor'];
-  if (/\b(?:401|403|404)\b|authentication failed|could not read username|permission denied \(publickey\)|repository not found|no marketplace\.json found/i.test(message)) actions.push('authentication');
+  if (/\b(?:401|403|404)\b|authentication|repository.credentials|could not read username|permission denied \(publickey\)|repository not found|no marketplace\.json found/i.test(message)) actions.push('authentication');
   if (/policy (?:denied|violation|blocked)|blocked by.*policy|executable trust/i.test(message)) actions.push('policy');
   if (/no (?:active |detected )?targets|no harness|zero output/i.test(message)) actions.push('targets');
   return actions;

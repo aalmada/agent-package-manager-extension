@@ -54,6 +54,7 @@ p { line-height: 1.5; }
 .sidebar-welcome p { margin: 0; }
 .sidebar-welcome button { width: 100%; }
 .sidebar-controls { padding: 8px 12px 10px; position: sticky; top: 0; z-index: 3; background: var(--vscode-sideBar-background); }
+.sidebar-controls > button + .searchbar { margin-top: 8px; }
 .sidebar-controls .field { margin: 0 0 8px; }
 .sidebar-controls .field > span { font-size: 11px; font-weight: normal; color: var(--vscode-descriptionForeground); }
 .searchbar { display: flex; align-items: center; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-input-background); min-width: 0; }

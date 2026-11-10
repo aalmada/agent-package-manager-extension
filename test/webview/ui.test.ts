@@ -7,7 +7,7 @@ import { descriptors } from '../../src/apm/commands';
 import type { BrowserSection, State, Message } from '../../src/protocol';
 import { renderMarkdown } from '../../src/views/markdown';
 import { parseOutdated } from '../../src/apm/adapters';
-import { applyUpdateRows, getUpdateBadge, reconcileDetailContexts } from '../../src/apm/packageState';
+import { applyUpdateRows, getUpdateBadge, reconcileDetailContexts, withInstallations } from '../../src/apm/packageState';
 
 const bundle = buildSync({ entryPoints: ['src/webview/main.ts'], bundle: true, write: false, platform: 'browser', format: 'iife' }).outputFiles[0].text;
 function browser(section?: BrowserSection, persisted?: unknown) {
@@ -55,6 +55,59 @@ test('sidebar has no duplicate scope control, onboarding or deployment sections'
     row.focus(); const id = row.id; page.update();
     assert.equal(page.document.activeElement?.id, id);
     assert.ok(!page.messages.some(message => message.type === 'workflow'));
+  } finally { page.dom.window.close(); }
+});
+
+test('dual installations have two catalog tags, separate scoped rows and unambiguous navigation', () => {
+  const page = browser();
+  try {
+    const workspace = page.state.scopes[0];
+    const global = { kind: 'global' as const, label: 'Global (user)', path: '/user/.apm' };
+    page.state.scopes.push(global);
+    const project = { ...page.state.installed[0], scope: workspace, direct: true };
+    const user = { ...project, scope: global, version: '0.8.0' };
+    page.state.installed = [user, project];
+    page.state.catalog = withInstallations(page.state.catalog, page.state.installed);
+    page.update();
+    const catalog = page.document.querySelector('#section-body-catalog .package-row')!;
+    assert.match(catalog.textContent ?? '', /Installed globally/);
+    assert.match(catalog.textContent ?? '', /Installed in workspace/);
+    assert.match(catalog.textContent ?? '', /Global: Update available/);
+    assert.match(catalog.textContent ?? '', /Workspace: Update available/);
+    const installedRows = [...page.document.querySelectorAll<HTMLButtonElement>('#section-body-installed .package-row')];
+    assert.equal(installedRows.length, 2);
+    assert.equal(new Set(installedRows.map(row => row.id)).size, 2);
+    assert.deepEqual([...installedRows[0].querySelectorAll('.badge')].map(badge => badge.textContent), ['Update available', 'Global']);
+    assert.deepEqual([...installedRows[1].querySelectorAll('.badge')].map(badge => badge.textContent), ['Update available', 'Workspace']);
+    installedRows[0].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: user.id, scopeKey: 'global:/user/.apm' }));
+    installedRows[1].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
+    assert.equal(page.document.querySelector('#section-heading-updates .count-badge')?.textContent, '2');
+    const updateRows = [...page.document.querySelectorAll<HTMLButtonElement>('#section-body-updates .package-row')];
+    assert.equal(updateRows.length, 2);
+    assert.deepEqual(updateRows.map(row => row.querySelector('.badge')?.textContent), ['Global', 'Workspace']);
+    updateRows[1].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
+    page.state.browserSearch = '@scope:workspace'; page.update();
+    assert.equal(page.document.querySelectorAll('#section-body-installed .package-row').length, 1);
+    page.state.browserSearch = '@dependencies @scope:workspace';
+    page.state.errors = ['Installed: Global (user): unavailable']; page.update();
+    const dependencyRow = page.document.querySelector<HTMLButtonElement>('#section-body-direct .package-row');
+    assert.ok(dependencyRow, 'One scope failing must not hide dependencies from the other');
+    assert.equal([...dependencyRow.querySelectorAll('.badge')].at(-1)?.textContent, 'Workspace');
+    dependencyRow.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
+    page.state.errors = [];
+    page.state.browserSearch = ''; page.state.mode = 'details'; page.state.item = project; page.update();
+    assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Global (0.8.0)'));
+    assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Workspace: project (0.9.0)'));
+    assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Install in…'));
+    page.state.mode = 'browser'; page.state.projectPresent = false; page.state.installed = [user];
+    page.state.catalog = withInstallations(page.state.catalog, [user]); page.update();
+    assert.ok(page.document.querySelector('#search'));
+    assert.match(page.document.querySelector('#section-body-installed')?.textContent ?? '', /Global/);
+    assert.doesNotMatch(page.document.querySelector('#section-body-catalog')?.textContent ?? '', /Installed in workspace/);
   } finally { page.dom.window.close(); }
 });
 test('busy views leave progress to VS Code without refresh buttons or working banners', () => {
@@ -207,21 +260,16 @@ test('missing CLI shows a welcome view instead of package controls and cached li
     assert.equal(page.document.querySelectorAll('.package-row').length, 4);
   } finally { page.dom.window.close(); }
 });
-test('uninitialized workspace shows only initialization welcome instead of cached package lists', () => {
+test('uninitialized workspace keeps browsing and global management available', () => {
   const page = browser();
   try {
     page.state.projectPresent = false;
     page.update();
-    assert.match(page.document.querySelector('.sidebar-welcome')?.textContent ?? '', /Initialize this project/);
-    assert.equal(page.document.querySelectorAll('.sidebar-controls, .notifications, .sections, .package-row, footer').length, 0);
-    assert.deepEqual([...page.document.querySelectorAll('button')].map(button => button.textContent), ['Initialize APM project']);
+    assert.ok(page.document.querySelector('#search'));
+    assert.equal(page.document.querySelectorAll('.package-row').length, 4);
+    assert.equal(page.document.querySelector('.sidebar-welcome'), null);
     page.document.querySelector<HTMLButtonElement>('button')!.click();
     assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"workflow","workflow":"initialize"}');
-    page.state.error = 'Initialization failed';
-    page.update();
-    [...page.document.querySelectorAll('button')].find(button => button.textContent === 'Show Output')!.click();
-    assert.equal(page.messages.at(-1)?.type, 'output');
-    page.state.error = undefined;
     page.state.projectPresent = true;
     page.update();
     assert.equal(page.document.querySelector('.sidebar-welcome'), null);
@@ -232,6 +280,11 @@ test('uninitialized workspace shows only initialization welcome instead of cache
     page.update();
     assert.equal(page.document.querySelector('.sidebar-welcome'), null);
     assert.ok(page.document.querySelector('#search'));
+    page.state.scopes = page.state.scopes.filter(scope => scope.kind === 'global');
+    page.update();
+    assert.ok(page.document.querySelector('#search'));
+    assert.ok(![...page.document.querySelectorAll('button')].some(button => /project folder|Initialize/.test(button.textContent ?? '')));
+    page.state.scopes.push({ kind: 'workspace', path: '/project', label: 'project' });
     page.state.scopeKey = 'workspace:/project';
     page.state.version = undefined;
     page.update();
@@ -321,13 +374,13 @@ test('sections support keyboard collapse and navigation without moving search', 
     assert.ok(page.document.querySelector('#search'));
   } finally { page.dom.window.close(); }
 });
-test('package sections gate workspace setup without blocking global packages', () => {
+test('package sections do not require workspace setup but still require trust and CLI', () => {
   const page = browser('catalog');
   try {
     page.state.projectPresent = undefined; page.update();
-    assert.equal(page.document.querySelectorAll('.package-row').length, 0);
+    assert.equal(page.document.querySelectorAll('.package-row').length, 4);
     page.state.projectPresent = false; page.update();
-    assert.equal(page.document.querySelectorAll('.package-row').length, 0);
+    assert.equal(page.document.querySelectorAll('.package-row').length, 4);
     page.state.scopeKey = 'global:/user/.apm'; page.update();
     assert.equal(page.document.querySelectorAll('.package-row').length, 4);
     page.state.version = undefined; page.update();

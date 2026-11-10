@@ -25,7 +25,7 @@ test('versions compare semantically, including prerelease precedence', () => {
   assert.deepEqual(filterPackages(packages, base).filter(p => p.name === 'sample').map(p => p.id), ['a::sample', 'b::sample']);
 });
 test('filter token helpers back the native filter menu', () => {
-  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:version-desc'), { marketplace: 'my market', sort: 'version-desc', installed: false, updates: true, dependencies: false });
+  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:version-desc'), { marketplace: 'my market', scope: '', sort: 'version-desc', installed: false, updates: true, dependencies: false });
   assert.equal(filterTokens('@dependencies').dependencies, true);
   assert.equal(withToken('kanban @sort:version', '@sort:', 'name-desc'), 'kanban @sort:name-desc');
   assert.equal(withToken('kanban @marketplace:one', '@marketplace:', ''), 'kanban');
@@ -34,4 +34,16 @@ test('filter token helpers back the native filter menu', () => {
   assert.equal(withStatus('@updates kanban', ''), 'kanban');
   assert.equal(withStatus('kanban @updates', '@dependencies'), 'kanban @dependencies');
   assert.equal(withStatus('kanban @dependencies', '@installed'), 'kanban @installed');
+});
+
+test('scope filters match installations without borrowing update status from the other scope', () => {
+  const workspace: PackageItem = { ...packages[0], scope: { kind: 'workspace', label: 'project', path: '/project' } };
+  const global: PackageItem = { ...packages[0], updateStatus: 'current', scope: { kind: 'global', label: 'Global', path: '/user/.apm' } };
+  const catalog: PackageItem = { ...packages[0], installations: [global, workspace] };
+  assert.deepEqual(filterPackages([global, workspace], { ...base, text: '@scope:workspace' }), [workspace]);
+  assert.deepEqual(filterPackages([global, workspace], { ...base, text: '@scope:global' }), [global]);
+  assert.equal(filterPackages([catalog], { ...base, text: '@updates @scope:global' }).length, 0);
+  assert.equal(filterPackages([catalog], { ...base, text: '@updates @scope:workspace' }).length, 1);
+  assert.equal(filterTokens('@scope:global').scope, 'global');
+  assert.equal(withToken('@scope:global @updates', '@scope:', ''), '@updates');
 });

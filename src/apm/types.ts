@@ -7,6 +7,8 @@ export interface PackageItem {
   version: string;
   description?: string;
   installed: boolean;
+  scope?: Scope;
+  installations?: PackageItem[];
   direct?: boolean;
   updateStatus?: UpdateStatus;
   latestVersion?: string;

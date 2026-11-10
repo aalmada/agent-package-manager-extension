@@ -1,0 +1,72 @@
+# Wiring CBM into an Agent, Skill, or Prompt
+
+When you create or edit an agent, subagent, skill, or prompt that operates on a codebase, replace `grep`/`ripgrep`/glob-and-read exploration with CBM CLI calls. This mirrors CBM's own documented agent-integration model (Scout/Verify/Auditor tiers, README "Multi-Agent Support"), generalized to any workflow stage.
+
+## Why this replaces grep/search
+
+A single graph query answers what would otherwise take a cascade of `grep → read file → grep again → read more files`. `search_graph`/`query_graph` return structured, pre-resolved relationships (import-aware, type-inferred call edges) that a text search cannot reconstruct — e.g. "who calls this function across packages" or "what does this route handler call" is one `trace_path`/`query_graph` call versus dozens of file reads.
+
+Before wiring in CBM, confirm it applies: [installation.md](installation.md) covers checking install state and index freshness. A stale or absent index still requires `index_repository` first — CBM cannot answer structural questions about code it hasn't parsed.
+
+## Mandatory readiness owner and preflight
+
+The integrated agent must prove CBM readiness before its first codebase query.
+For a multi-agent squad, the orchestrator owns this preflight and completes it
+before dispatching the planner or any specialist; do not assume each child will
+independently notice a missing binary. Give that orchestrator narrowly scoped
+shell access for this preflight even when it delegates every other command.
+
+1. Run `command -v codebase-memory-mcp && codebase-memory-mcp --version`.
+2. If absent, install it using the platform command in
+   [installation.md](installation.md), update `PATH` when needed, and rerun the
+   version check. Do not continue if installation fails.
+3. Run `codebase-memory-mcp cli index_status --project <project-name>`.
+4. If the project is absent, stale, or not `ready`, run:
+
+   ```bash
+   codebase-memory-mcp cli index_repository \
+     --repo-path "$PWD" \
+     --name <project-name>
+   ```
+
+5. Run `index_status` again and continue only after it reports `ready`.
+6. Pass the successful version and status output into child dispatches. Require
+   actual CBM command output from agents that claim to have used CBM; prompt
+   text mentioning CBM is not usage evidence.
+
+Specialists should recheck `index_status` before structural work because edits
+made by an earlier node can stale the graph. They use the same index-and-recheck
+sequence when needed, but installation remains the orchestrator's responsibility
+in a squad.
+
+## Per-stage tool selection
+
+| Stage | Goal | CLI tool(s) | Why |
+| --- | --- | --- | --- |
+| Setup | Confirm CBM is usable before relying on it | `index_status`, `list_projects` | Fails fast if the project isn't indexed or the index is stale, instead of silently falling back to slower search. |
+| Discovery / scout | Fast, provisional orientation in an unfamiliar area of the codebase | `get_graph_schema`, `get_architecture`, `search_graph` (incl. `semantic_query`) | Establish what exists before narrowing — no absence or exhaustive-impact claims yet. |
+| Locating symbols | Find the exact qualified name/location before acting on it | `search_graph` (`name_pattern`, `label`, `file` filters), `search_code` | `get_code_snippet` and `trace_path` require exact names; `search_graph` is how you discover them first. |
+| Understanding relationships | Who calls this, what does this call, what inherits/implements it | `trace_path` (bounded BFS; default depth 3, max 15), `query_graph` (Cypher for multi-hop or filtered patterns `search_graph` can't express) | Discover the exact qualified name first. |
+| Reading implementation | Read source or declarations from a confirmed graph path | `get_code_snippet`, `get_file_outline` | `get_code_snippet` reads a qualified symbol; `get_file_outline` takes an exact repository-relative file path. |
+| Verification / task-directed work (default tier) | Before making a claim or edit, confirm evidence is complete for the files in scope | `check_index_coverage` for every cited path, then `get_code_snippet`/`trace_path` for exact source | A clean graph result only means "no recorded gap" — read flagged/skipped ranges directly from source before asserting completeness or absence (e.g. dead code, "no callers"). |
+| Change impact / test selection | What does an uncommitted diff affect, how risky is it, and which tests can it reach | `detect_changes` (including `scope: "tests"`) | Maps diffs to affected symbols and risk; test scope names reachable tests and why. If evidence is incomplete, it recommends running everything rather than silently narrowing the test set. |
+| Dead-code candidates | Find functions with no indexed callers | `query_graph` with `WHERE NOT EXISTS { (f)<-[:CALLS]-() }` or `search_graph` degree filters | There is no dedicated dead-code tool. A zero-caller result is only a candidate: check entry points, coverage, pagination, and unresolved relationships before conclusions. |
+| Cross-service / architecture review | HTTP routes, gRPC/GraphQL/tRPC, pub-sub channels, cross-repo links, or infrastructure deployment paths | `get_architecture`, `query_graph` (`HTTP_CALLS`/`ASYNC_CALLS`/`EMITS`/`LISTENS_ON`/`DEPLOYS`/`CONFIGURES`/`CROSS_*` edges) | These relationships are cross-file/cross-service by nature; the graph can resolve application links and, in v0.12.1, Helm chart-to-object and chart-to-image paths. |
+| Snapshot comparison | What changed between two indexed graph snapshots | `compare_graphs` | Reports target-only additions and base-only removals; inspect totals and truncation metadata. |
+| Documentation / API references | Which documents mention code, or which API operations appear in an OpenAPI spec | `trace_path` / `query_graph` over indexed `MENTIONS` and `Route` relationships | Extraction and linking are format-dependent; inspect coverage and unresolved references. |
+| Runtime evidence | Store call paths collected by an external tracer | `ingest_traces` | It records supplied observations; it does not collect traces and it mutates persistent graph state. |
+| Broader / auditor-tier review | Bounded-scope, complete-pagination verification across a wider area | `search_graph`/`query_graph` with explicit pagination, `check_index_coverage` for the full relevant scope | Matches CBM's own Auditor tier: complete relevant pagination and explicit unresolved limitations, not a sampled pass. |
+| Architecture decisions | Retrieve or change a graph-backed decision record | `manage_adr` | Writes mutate persistent state; make them only when requested. |
+| Compare snapshots | Identify graph additions/removals between two indexed project snapshots | `compare_graphs` | Check exact totals and truncation reasons; this compares graph identities, not runtime behavior. |
+| Runtime evidence | Store call paths collected by an external tracer | `ingest_traces` | Does not collect traces; it writes observed paths into the graph. Use only with supplied traces and authorization. |
+
+## Authoring checklist
+
+When an agent/skill/prompt you're writing or editing touches a codebase:
+
+1. State explicitly that CBM's CLI is the required exploration path, not `grep`/`find`/reading files ad hoc.
+2. Assign the install/index readiness preflight to the integrated agent, or to the orchestrator before delegation when the target is a squad.
+3. Require a successful version check and a final `index_status: ready`; after indexing, always check status again.
+4. Match the tool to the stage using the table above, narrowest call first (schema/architecture before deep traversal).
+5. Require `check_index_coverage` before any negative claim ("no callers", "dead code", "nothing uses this"); no dedicated dead-code tool exists.
+6. Only fall back to a raw file read/grep for content CBM does not index as a graph relationship (e.g. reading a config value, a comment, or a non-code text file).

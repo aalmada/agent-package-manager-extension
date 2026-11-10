@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cacheShard, marketplaceManifest, readContained } from '../../src/apm/manifest';
+import { cacheShard, hasProjectManifest, marketplaceManifest, projectManifestPath, readContained, readProjectManifest } from '../../src/apm/manifest';
 
 test('versioned cache identities match upstream URL normalization without auth material', () => {
   const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 16);
@@ -29,4 +29,16 @@ test('local manifest adapters retain unknown fields and reject escapes and overs
     await writeFile(join(root, 'oversized.json'), Buffer.alloc(10 * 1024 * 1024 + 1));
     await assert.rejects(readContained(root, 'oversized.json'), /10 MB/);
   } finally { await rm(home, { recursive: true }); }
+});
+
+test('project manifest helpers read apm.yml freshly from the scope root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-project-'));
+  try {
+    assert.equal(projectManifestPath(root), join(root, 'apm.yml'));
+    assert.equal(await hasProjectManifest(root), false);
+    assert.equal(await readProjectManifest(root), undefined);
+    await writeFile(join(root, 'apm.yml'), 'name: project\n');
+    assert.equal(await hasProjectManifest(root), true);
+    assert.equal(await readProjectManifest(root), 'name: project\n');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

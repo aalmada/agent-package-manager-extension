@@ -23,6 +23,29 @@ export async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
+/** Reads APM's marketplace registry (current url and legacy owner/repo shapes) without writing it. */
+export async function readMarketplaces(home: string): Promise<Marketplace[]> {
+  const text = await readOptional(join(home, '.apm', 'marketplaces.json'));
+  if (text === undefined) return [];
+  const data: unknown = JSON.parse(text);
+  if (!record(data) || !Array.isArray(data.marketplaces)) throw new Error('Invalid APM marketplace registry.');
+  return data.marketplaces.map((entry: unknown) => {
+    if (!record(entry) || typeof entry.name !== 'string') throw new Error('Invalid marketplace registration.');
+    const host = typeof entry.host === 'string' ? entry.host : 'github.com';
+    const source = typeof entry.url === 'string' && entry.url ? entry.url :
+      typeof entry.owner === 'string' && typeof entry.repo === 'string' ?
+        `${host === 'github.com' ? '' : `${host}/`}${entry.owner}/${entry.repo}` : '';
+    if (!source) throw new Error(`Marketplace ${entry.name} has no readable source.`);
+    return { ...entry, name: entry.name, source, ref: typeof entry.ref === 'string' ? entry.ref : typeof entry.branch === 'string' ? entry.branch : 'main', host };
+  });
+}
+
+export const projectManifestName = 'apm.yml';
+export function projectManifestPath(root: string): string { return join(root, projectManifestName); }
+/** Reads the project manifest fresh from disk; cached presence state may be stale. */
+export function readProjectManifest(root: string): Promise<string | undefined> { return readOptional(projectManifestPath(root)); }
+export async function hasProjectManifest(root: string): Promise<boolean> { return await readProjectManifest(root) !== undefined; }
+
 export async function resolveContained(root: string, path: string): Promise<string | undefined> {
   const resolvedRoot = await realpath(root), candidate = resolve(resolvedRoot, path);
   const lexical = relative(resolvedRoot, candidate);

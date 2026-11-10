@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-11-08T12:25:42.882817+00:00'
+generated_at: '2026-11-10T10:27:55.676283+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: netfabric/intelligentium
@@ -210,6 +210,38 @@ dependencies:
   content_hash: sha256:212059b76bec95eb8729412f3f75566c29c5ebaa1e0b7a34f5f85ecccb1832ee
   discovered_via: intelligentium
   marketplace_plugin_name: vscode
+  declared_license: MIT
+- repo_url: netfabric/intelligentium
+  name: codebase-memory
+  host: github.com
+  resolved_commit: ac49c7fbbe63b717521be6315e4564c956db04b1
+  version: 0.3.0
+  virtual_path: plugins/codebase-memory
+  is_virtual: true
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/codebase-memory
+  - .agents/skills/codebase-memory-exploration
+  - .agents/skills/codebase-memory-exploration/SKILL.md
+  - .agents/skills/codebase-memory-lens
+  - .agents/skills/codebase-memory-lens/SKILL.md
+  - .agents/skills/codebase-memory-test-impact
+  - .agents/skills/codebase-memory-test-impact/SKILL.md
+  - .agents/skills/codebase-memory/SKILL.md
+  - .agents/skills/codebase-memory/references/installation.md
+  - .agents/skills/codebase-memory/references/integration-guide.md
+  - .agents/skills/codebase-memory/references/tools.md
+  deployed_file_hashes:
+    .agents/skills/codebase-memory-exploration/SKILL.md: sha256:d28e034ad1bcc4c1b018ddb26bbfb310f3fbaeda6af30cdde026d14dd150f1fa
+    .agents/skills/codebase-memory-lens/SKILL.md: sha256:ea949064aa4f9b5f3da547a93fa57bd6346fd73cf1cf43dd33e4808b309f7659
+    .agents/skills/codebase-memory-test-impact/SKILL.md: sha256:c3f47cf4e5efdbb2a97ec4f5fc2e910e3ad2217434f7a0814a7a9a810110447f
+    .agents/skills/codebase-memory/SKILL.md: sha256:4c87160e3da7a35433fe44fee99ad5e50c7b850a20e857d142367a707ce1079b
+    .agents/skills/codebase-memory/references/installation.md: sha256:2dde0bb2411b2bc2ba6a2951ae166c959d35ccd0e13a2afb6eb830df6ea66322
+    .agents/skills/codebase-memory/references/integration-guide.md: sha256:90ac8df1efe310487cdd85c2801c2af7409fce6f6981b664201dd6313b18c04f
+    .agents/skills/codebase-memory/references/tools.md: sha256:e6f756b47bcfe68e9703af227bf6e7dba26cdb11c7890a357f3b4537ec3a2194
+  content_hash: sha256:1cebfc8478c35cf48808623220a47a395ef261c9c8daa7c75d64dc3fa22aa598
+  discovered_via: intelligentium
+  marketplace_plugin_name: codebase-memory
   declared_license: MIT
 deployments:
 - kind: project-relative
@@ -500,6 +532,105 @@ deployments:
   - netfabric/intelligentium/plugins/agent-authoring
   active_owner: netfabric/intelligentium/plugins/agent-authoring
   content_hash: sha256:757c39e849a320d0d21d60705e51fb6240f9ac3c40bab65460ee285faea81e12
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-exploration
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-exploration/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:d28e034ad1bcc4c1b018ddb26bbfb310f3fbaeda6af30cdde026d14dd150f1fa
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-lens
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-lens/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:ea949064aa4f9b5f3da547a93fa57bd6346fd73cf1cf43dd33e4808b309f7659
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-test-impact
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory-test-impact/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:c3f47cf4e5efdbb2a97ec4f5fc2e910e3ad2217434f7a0814a7a9a810110447f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:4c87160e3da7a35433fe44fee99ad5e50c7b850a20e857d142367a707ce1079b
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory/references/installation.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:2dde0bb2411b2bc2ba6a2951ae166c959d35ccd0e13a2afb6eb830df6ea66322
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory/references/integration-guide.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:90ac8df1efe310487cdd85c2801c2af7409fce6f6981b664201dd6313b18c04f
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/codebase-memory/references/tools.md
+  runtime: null
+  scope: project
+  owners:
+  - netfabric/intelligentium/plugins/codebase-memory
+  active_owner: netfabric/intelligentium/plugins/codebase-memory
+  content_hash: sha256:e6f756b47bcfe68e9703af227bf6e7dba26cdb11c7890a357f3b4537ec3a2194
 - kind: project-relative
   target: copilot
   value: .agents/skills/copilot-cli-custom-agents

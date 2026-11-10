@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults } from '../../src/apm/packageState';
+import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from '../../src/apm/packageState';
 import type { PackageItem, Scope, UpdateRow } from '../../src/apm/types';
 
 const workspace: Scope = { kind: 'workspace', path: '/project', label: 'project' };
@@ -10,6 +10,22 @@ const installed: PackageItem = {
   ...catalog, version: '1.0', installed: true, updateStatus: 'outdated', latestVersion: '2.0',
   metadata: { cliIdentity: 'org/sample', lockIdentity: 'org/sample' }
 };
+
+test('one catalog package retains both independent installations and update states', () => {
+  const project = { ...installed, scope: workspace };
+  const user = { ...installed, scope: global, version: '2.0', updateStatus: 'current' as const };
+  const [item] = withInstallations([catalog], [user, project]);
+  assert.equal(item.installed, true);
+  assert.equal(item.installations?.length, 2);
+  assert.equal(item.updateStatus, 'outdated');
+  assert.equal(findInstalledPackage({ ...catalog, scope: workspace }, [user, project]), project);
+  assert.equal(findInstalledPackage({ ...catalog, scope: global }, [project]), undefined);
+  assert.equal(retainUpdateResults([{ ...project, updateStatus: 'unchecked' }], [user])[0].updateStatus, 'failed');
+  assert.equal(withInstallations([catalog], [user])[0].updateStatus, 'current');
+  assert.equal(withInstallations([catalog], [{ ...user, updateStatus: 'failed' }])[0].updateStatus, 'failed');
+  assert.equal(withInstallations([catalog], [])[0].installed, false);
+  assert.equal(getUpdateBadge({ trusted: true, version: '0.35.0', installed: [project, { ...project, scope: global }] })?.value, 2);
+});
 
 test('activity badge counts package updates plus one CLI upgrade and clears at zero', () => {
   const state = { trusted: true, version: '0.35.0', installed: [installed] };

@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
-import { join } from 'node:path';
 import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
-import { readOptional } from './apm/manifest';
+import { readProjectManifest } from './apm/manifest';
 import { record } from './apm/adapters';
 import { redact } from './apm/redact';
 import { githubEnvironment } from './authentication';
@@ -22,10 +21,11 @@ export function taskArguments(definition: ApmTaskDefinition): string[] {
 }
 
 export function registerApmTaskProvider(report: (message: string) => void,
-  serialize: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation()): vscode.Disposable {
+  serialize: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation(),
+  environment: (args: readonly string[], cwd: string, signal?: AbortSignal) => Promise<Record<string, string>> = githubEnvironment): vscode.Disposable {
   const active = new Set<AbortController>();
   const runScript = async (executable: string, args: string[], folder: vscode.WorkspaceFolder, signal: AbortSignal): Promise<number> => {
-    const env = await githubEnvironment();
+    const env = await environment(args, folder.uri.fsPath, signal);
     if (!vscode.workspace.isTrusted) throw new Error('Workspace Trust changed before task execution.');
     if (signal.aborted) return 130;
     const task = new vscode.Task({ type: 'apm-script-run' }, folder, `run ${args[1]}`, 'APM', new vscode.ProcessExecution(executable, args, { cwd: folder.uri.fsPath, env }), []);
@@ -66,7 +66,7 @@ export function registerApmTaskProvider(report: (message: string) => void,
               let scriptManifest: string | undefined;
               if (definition.workflow === 'script') {
                 if (!settings.get<boolean>('tasks.includeScripts', false)) throw new Error('Enable apm.tasks.includeScripts explicitly before running project scripts.');
-                const text = await readOptional(join(folder.uri.fsPath, 'apm.yml'));
+                const text = await readProjectManifest(folder.uri.fsPath);
                 scriptManifest = text;
                 const manifest: unknown = text === undefined ? undefined : parseDocument(text).toJS();
                 const scripts = record(manifest) ? manifest.scripts : undefined;
@@ -76,13 +76,13 @@ export function registerApmTaskProvider(report: (message: string) => void,
                 if (answer !== 'Run') { close.fire(0); return; }
               }
               const client = new ApmClient({ executable: settings.get<string>('executablePath', 'apm'), cwd: folder.uri.fsPath,
-                environment: githubEnvironment,
+                environment,
                 signal: controller.signal, onOutput: text => write.fire(redact(text).replace(/\r?\n/g, '\r\n')) });
               const flags = args.filter(value => value.startsWith('--'));
               if (!await client.supports([args[0]], flags)) throw new Error('The installed APM does not support this task. Upgrade APM.');
               if (controller.signal.aborted) { close.fire(130); return; }
               if (!vscode.workspace.isTrusted) throw new Error('Workspace Trust changed before task execution.');
-              if (definition.workflow === 'script' && scriptManifest !== await readOptional(join(folder.uri.fsPath, 'apm.yml'))) throw new Error('The manifest changed after script confirmation. Review and run the script again.');
+              if (definition.workflow === 'script' && scriptManifest !== await readProjectManifest(folder.uri.fsPath)) throw new Error('The manifest changed after script confirmation. Review and run the script again.');
               const run = () => {
                 if (!vscode.workspace.isTrusted) throw new Error('Workspace Trust changed before task execution.');
                 return client.execute(args, { timeoutMs: null, captureOutput: false });
@@ -122,7 +122,7 @@ export function registerApmTaskProvider(report: (message: string) => void,
     const tasks: vscode.Task[] = [];
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       if (folder.uri.scheme !== 'file') continue;
-      const text = await readOptional(join(folder.uri.fsPath, 'apm.yml'));
+      const text = await readProjectManifest(folder.uri.fsPath);
       if (text === undefined) continue;
       for (const workflow of Object.keys(commands) as (keyof typeof commands)[]) tasks.push(create({ type: 'apm', workflow }, folder));
       if (vscode.workspace.getConfiguration('apm', folder.uri).get<boolean>('tasks.includeScripts', false)) {

@@ -16,6 +16,8 @@ npm run build
 
 Press **F5** in VS Code to launch the Extension Development Host. Run `npm run watch` to rebuild TypeScript as you edit; rerun the build after changing webview CSS.
 
+To investigate Node deprecation warnings, select **Run APM Extension (Trace Deprecations)** in Run and Debug, then press **F5**. This optional [launch configuration](.vscode/launch.json) preserves existing `NODE_OPTIONS` and adds `--trace-deprecation`. Inspect the warning's stack in the Debug Console to identify the calling file or extension; other enabled extensions share the host, so a warning forwarded by `extensionHostProcess.js` does not identify APM as its source. Do not suppress warnings or share raw logs containing private data.
+
 The workspace disables VS Code's experimental Debug Network view to avoid a [Node inspector crash](https://github.com/nodejs/node/issues/64308) when the extension host starts or reloads. Other debugging features remain available. In a multi-root workspace, set `debug.javascript.enableNetworkView` to `false` in the workspace-level settings instead; restart the debug session after changing it.
 
 ## Tests

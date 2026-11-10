@@ -63,6 +63,36 @@ test('marketplace registry reads both current and legacy shapes without writing'
   } finally { await rm(home, { recursive: true }); }
 });
 
+test('catalog details use the plugin repository fetcher without requiring a globally authenticated CLI view', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-private-details-'));
+  try {
+    await mkdir(join(home, '.apm', 'cache', 'marketplace'), { recursive: true });
+    await writeFile(join(home, '.apm', 'marketplaces.json'), JSON.stringify({ marketplaces: [
+      { name: 'catalog', owner: 'team', repo: 'catalog', url: 'https://github.com/team/catalog' }
+    ] }));
+    const plugin = { name: 'private-plugin', source: { source: 'github', repo: 'different/private', path: 'plugins/example', ref: 'release' } };
+    await writeFile(join(home, '.apm', 'cache', 'marketplace', 'catalog.json'), JSON.stringify({ plugins: [plugin] }));
+    const requests: string[] = [];
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home, fetcher: async input => {
+      const url = new URL(String(input));
+      requests.push(url.href);
+      assert.match(url.pathname, /^\/repos\/different\/private\//);
+      if (url.pathname.includes('/git/trees/')) return new Response(JSON.stringify({
+        tree: [{ type: 'blob', path: 'plugins/example/skills/review/SKILL.md' }], truncated: false
+      }));
+      if (url.pathname.endsWith('/README.md')) return new Response('# Private plugin');
+      if (url.pathname.endsWith('/SKILL.md')) return new Response('---\nname: review\ndescription: Private review skill\n---\n');
+      return new Response(null, { status: 404 });
+    } });
+    t.mock.method(client, 'execute', async () => assert.fail('Catalog metadata must not require CLI-wide account selection'));
+    const details = await client.getDetails({ id: 'catalog::private-plugin', name: 'private-plugin', marketplace: 'catalog',
+      installed: false, version: '1.0', metadata: { plugin } }, { kind: 'workspace', label: 'project', path: home });
+    assert.equal(details.readme, '# Private plugin');
+    assert.match(JSON.stringify(details.contents), /Private review skill/);
+    assert.ok(requests.length >= 6);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('installed list recovers deployed standalone skills and opens their local details without a CLI view', async t => {
   const home = await mkdtemp(join(tmpdir(), 'apm-deployed-skill-test-'));
   try {

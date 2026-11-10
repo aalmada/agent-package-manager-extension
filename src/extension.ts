@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import { homedir, platform } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
 import { record, type VariablePrompt } from './apm/adapters';
 import { descriptors, buildCommandArguments, requiresTerminal } from './apm/commands';
-import type { PackageItem, Scope } from './apm/types';
+import type { Marketplace, PackageItem, Scope } from './apm/types';
 import type { Message, Mode, PackageSection, State } from './protocol';
-import { parseMessage, scopeKey } from './protocol';
+import { inScope, isSameScope, parseMessage, scopeKey, scopeLabel } from './protocol';
 import { SettingsSync } from './config/sync';
 import { webviewHtml } from './views/html';
 import { filterTokens, withStatus, withToken, type Ordering } from './webview/filter';
@@ -15,14 +15,15 @@ import { renderMarkdown } from './views/markdown';
 import { containsUrlCredentials, redact, safePayload } from './apm/redact';
 import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm/installation';
 import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
-import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults } from './apm/packageState';
+import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from './apm/packageState';
 import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
 import { AuditDiagnostics, contentNavigation, openNavigation, type NavigationTarget, type AuditTicket } from './navigation';
 import { registerManifestAssistance } from './manifestAssistance';
 import { registerApmTaskProvider } from './taskProvider';
 import type { ContentGroup } from './apm/contents';
-import { readOptional, resolveContained } from './apm/manifest';
-import { githubEnvironment, githubFetch, signInToGithub } from './authentication';
+import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveContained } from './apm/manifest';
+import { RepositoryAuthentication, signInToGithub } from './authentication';
+import { cliEnvironment } from './auth/cli';
 
 interface PanelContext {
   webview?: vscode.Webview;
@@ -40,6 +41,8 @@ interface PanelContext {
   preview?: { id: string; args: Record<string, string>; options: Record<string, unknown>; title: string; action: PackageAction };
 }
 
+const remoteRefreshInterval = 5 * 60_000;
+
 class ApmExtension implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel('APM');
   private readonly subscriptions: vscode.Disposable[] = [];
@@ -50,6 +53,8 @@ class ApmExtension implements vscode.Disposable {
   private refreshing?: Promise<void>;
   private refreshAgain = false;
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  private readonly catalogSnapshots = new Map<string, { at: number; items: PackageItem[]; errors: string[] }>();
+  private readonly updateSnapshots = new Map<string, { at: number; items: PackageItem[]; checkedAt?: string; error?: string }>();
   private operation?: AbortController;
   private refreshController?: AbortController;
   private queues = new Map<string, Promise<void>>();
@@ -62,11 +67,14 @@ class ApmExtension implements vscode.Disposable {
   private epoch = 0;
   private readonly settingsSync: SettingsSync;
   private readonly diagnostics = new AuditDiagnostics();
+  private readonly authentication: RepositoryAuthentication;
   private state: State = {
     mode: 'browser', trusted: vscode.workspace.isTrusted, scopes: [], scopeKey: '', busy: false,
     catalog: [], installed: [], marketplaces: [], commands: descriptors, availableCommands: [], errors: []
   };
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.authentication = new RepositoryAuthentication(context);
+    this.subscriptions.push(this.authentication);
     this.search = context.workspaceState.get<string>('browserSearch', '');
     this.state.hiddenSections = context.workspaceState.get<PackageSection[]>('hiddenSections', []);
     this.rebuildScopes();
@@ -87,17 +95,17 @@ class ApmExtension implements vscode.Disposable {
     this.subscriptions.push(registerManifestAssistance({
       details: (dependency, uri) => this.findDependency(dependency, uri)
     }));
-    this.subscriptions.push(registerApmTaskProvider(message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation)));
+    this.subscriptions.push(registerApmTaskProvider(message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation),
+      (args, cwd, signal) => this.commandEnvironment(args, cwd, signal)));
+    this.subscriptions.push(this.authentication.onDidChange(() => this.authenticationChanged()));
     this.subscriptions.push(vscode.authentication.onDidChangeSessions(event => {
-      if (event.provider.id === 'github') {
-        this.settingsSync.retry();
-        void this.settingsSync.sync().then(() => this.scheduleRefresh());
-      }
+      if (event.provider.id === 'github' || event.provider.id === 'github-enterprise') this.authentication.invalidate();
     }));
     this.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => { this.rebuildScopes(); this.scheduleRefresh(); }));
     this.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => { void this.settingsSync.sync(); this.scheduleRefresh(); }));
     this.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('apm.executablePath')) { this.epoch++; this.state.version = undefined; this.scheduleRefresh(); }
+      if (event.affectsConfiguration('github-enterprise.uri')) this.authentication.invalidate();
+      if (event.affectsConfiguration('apm.executablePath')) { this.epoch++; this.state.version = undefined; this.clearRemoteSnapshots(); this.scheduleRefresh(); }
       if (event.affectsConfiguration('apm.allowRemoteImages')) {
         for (const entry of this.panels.values()) {
           if (entry.mode !== 'details') continue;
@@ -114,6 +122,9 @@ class ApmExtension implements vscode.Disposable {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       this.subscriptions.push(watcher, watcher.onDidChange(() => this.scheduleRefresh()), watcher.onDidCreate(() => this.scheduleRefresh()), watcher.onDidDelete(() => this.scheduleRefresh()));
     }
+    const globalPackages = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), '{apm.yml,apm.lock.yaml,apm.lock}'));
+    this.subscriptions.push(globalPackages, globalPackages.onDidChange(() => this.scheduleRefresh()),
+      globalPackages.onDidCreate(() => this.scheduleRefresh()), globalPackages.onDidDelete(() => this.scheduleRefresh()));
     const registry = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), 'marketplaces.json'));
     const syncRegistry = () => { void this.settingsSync.sync().then(() => this.scheduleRefresh()); };
     this.subscriptions.push(registry, registry.onDidChange(syncRegistry), registry.onDidCreate(syncRegistry), registry.onDidDelete(syncRegistry));
@@ -152,12 +163,39 @@ class ApmExtension implements vscode.Disposable {
       executable: vscode.workspace.getConfiguration('apm', resource).get<string>('executablePath', 'apm'),
       cwd: scope.kind === 'global' ? homedir() : scope.path,
       signal,
-      environment: githubEnvironment, fetcher: githubFetch,
+      environment: (args, cwd, cancellation) => this.commandEnvironment(args, cwd, cancellation),
+      fetcher: (input, init) => this.authentication.fetch(input, { ...init,
+        signal: signal && init?.signal ? AbortSignal.any([signal, init.signal]) : signal ?? init?.signal }),
+      repositoryHosts: () => this.authentication.hosts(),
       onOutput: text => this.output.append(redact(text))
     });
   }
   private requireTrust() {
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before running APM or reading package sources.');
+  }
+  private commandEnvironment(args: readonly string[], cwd: string, signal?: AbortSignal) {
+    this.requireTrust();
+    const generation = this.authentication.generation;
+    return cliEnvironment(this.authentication, args, cwd, homedir(), signal).then(environment => {
+      this.requireTrust();
+      signal?.throwIfAborted();
+      if (generation !== this.authentication.generation) throw new Error('Repository authentication changed. Run the operation again.');
+      return environment;
+    });
+  }
+  private authenticationChanged() {
+    this.epoch++;
+    this.clearRemoteSnapshots();
+    this.refreshController?.abort();
+    for (const entry of this.panels.values()) {
+      if (entry.mode !== 'details') continue;
+      entry.detailsController?.abort();
+      entry.detailsRequest = (entry.detailsRequest ?? 0) + 1;
+      entry.extra = { ...entry.extra, details: undefined, readmeHtml: undefined, busy: false };
+      this.send(entry);
+    }
+    this.settingsSync.retry();
+    this.scheduleRefresh();
   }
   private allowRemoteImages() {
     return vscode.workspace.getConfiguration('apm').get<boolean>('allowRemoteImages', false);
@@ -210,7 +248,7 @@ class ApmExtension implements vscode.Disposable {
   private notifyError(message: string, context?: PanelContext) {
     const labels = recoveryActions(message).map(action => ({ output: 'Show APM Output', doctor: 'Run Doctor', authentication: 'Authentication Help', policy: 'Explain Policy', targets: 'Show Targets', retry: 'Retry' })[action]);
     if (context?.retry && !labels.includes('Retry')) labels.push('Retry');
-    if (labels.includes('Authentication Help')) labels.unshift('Sign in to GitHub');
+    if (labels.includes('Authentication Help')) labels.unshift('Manage Repository Accounts', 'Sign in to GitHub');
     void vscode.window.showErrorMessage(message, ...labels).then(choice => {
       if (choice === 'Show APM Output') this.output.show();
       else if (choice === 'Run Doctor') void this.workflow('doctor', undefined, context?.scope).catch(error => this.report(error, context));
@@ -218,11 +256,18 @@ class ApmExtension implements vscode.Disposable {
       else if (choice === 'Show Targets') void this.showTargets(context).catch(error => this.report(error, context));
       else if (choice === 'Authentication Help') void vscode.env.openExternal(vscode.Uri.parse('https://microsoft.github.io/apm/getting-started/authentication/'));
       else if (choice === 'Sign in to GitHub') void this.signIn().catch(error => this.report(error, context));
+      else if (choice === 'Manage Repository Accounts') void this.manageAccounts().catch(error => this.report(error, context));
       else if (choice === 'Retry' && context?.retry) void context.retry().catch(error => this.report(error, context));
     });
   }
   async signIn() {
     await signInToGithub();
+    this.authentication.invalidate();
+    await this.refreshAll();
+  }
+  async manageAccounts() {
+    this.requireTrust();
+    await this.authentication.manage();
     await this.refreshAll();
   }
   private notifyRefresh() {
@@ -249,12 +294,57 @@ class ApmExtension implements vscode.Disposable {
   }
   private scheduleRefresh() {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => { if (this.refreshing) this.refreshAgain = true; else void this.refresh(); }, 400);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      if (this.refreshing) this.refreshAgain = true;
+      else if (this.queues.has('apm-mutations') || this.commandTasks.size) this.scheduleRefresh();
+      else void this.refresh();
+    }, 400);
+  }
+  private clearRemoteSnapshots() {
+    this.catalogSnapshots.clear();
+    this.updateSnapshots.clear();
+  }
+  private async refreshCatalog(client: ApmClient, marketplaces: Marketplace[]) {
+    const items: PackageItem[] = [], errors: string[] = [], keys = new Set<string>();
+    for (const marketplace of marketplaces) {
+      const key = JSON.stringify([marketplace.name, marketplace.source, marketplace.ref, marketplace.path]);
+      keys.add(key);
+      let snapshot = this.catalogSnapshots.get(key);
+      const local = isAbsolute(marketplace.source) || marketplace.source.startsWith('file://');
+      if (!snapshot || local || Date.now() - snapshot.at >= remoteRefreshInterval) {
+        const at = Date.now(), epoch = this.epoch;
+        const result = await client.getCatalog([marketplace]);
+        snapshot = { at, ...result };
+        if (epoch === this.epoch) this.catalogSnapshots.set(key, snapshot);
+      }
+      items.push(...snapshot.items); errors.push(...snapshot.errors);
+    }
+    for (const key of this.catalogSnapshots.keys()) if (!keys.has(key)) this.catalogSnapshots.delete(key);
+    return { items, errors };
+  }
+  private async refreshUpdates(client: ApmClient, scope: Scope, installed: PackageItem[], previous: PackageItem[]) {
+    const key = scopeKey(scope), snapshot = this.updateSnapshots.get(key);
+    if (snapshot && Date.now() - snapshot.at < remoteRefreshInterval) {
+      return { ...snapshot, items: retainUpdateResults(installed, snapshot.items, false) };
+    }
+    const at = Date.now(), epoch = this.epoch;
+    let result: { at: number; items: PackageItem[]; checkedAt?: string; error?: string };
+    try {
+      const updates = await client.checkUpdates(scope, installed);
+      result = { at, items: applyUpdateRows(installed, updates), checkedAt: new Date().toISOString() };
+    } catch (error) {
+      result = { at, items: retainUpdateResults(installed, snapshot?.items ?? previous), checkedAt: snapshot?.checkedAt,
+        error: redact(String(error)) };
+    }
+    if (epoch === this.epoch) this.updateSnapshots.set(key, result);
+    return result;
   }
   /** Explicit user refresh: also retries marketplace entries that previously failed to register. */
   async refreshAll() {
     this.settingsSync.retry();
     if (this.refreshing) await this.refreshing;
+    this.clearRemoteSnapshots();
     const requests = new Map([...this.panels.values()].filter(entry => entry.mode === 'details').map(entry => [entry, entry.detailsRequest]));
     await this.refresh();
     if (this.state.error) return;
@@ -262,7 +352,10 @@ class ApmExtension implements vscode.Disposable {
       .map(([entry]) => this.loadDetails(entry)));
   }
   async refresh(): Promise<void> {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
     if (this.refreshing) return this.refreshing;
+    this.refreshAgain = false;
     this.refreshing = Promise.resolve(vscode.window.withProgress({ location: { viewId: 'apm.browser' } }, () => this.doRefresh())).catch(error => this.report(error)).finally(() => {
       this.refreshing = undefined;
       if (this.refreshAgain) { this.refreshAgain = false; this.scheduleRefresh(); }
@@ -275,18 +368,27 @@ class ApmExtension implements vscode.Disposable {
     const controller = new AbortController();
     this.refreshController = controller;
     const scope = this.scope(), client = this.client(scope, controller.signal);
+    const workspace = scope.kind === 'workspace' ? scope : this.state.scopes.find(candidate => candidate.kind === 'workspace');
+    const scopes = [this.globalScope(), ...(workspace ? [workspace] : [])];
     const previousInstalled = this.state.installed;
     this.state.busy = true; this.state.error = undefined; this.state.errors = []; this.broadcast();
     try {
       const probe = await client.probe();
       if (epoch !== this.epoch) return;
       this.state.version = probe.version; this.state.warning = probe.warning; this.state.availableCommands = probe.commands;
-      this.state.projectPresent = scope.kind === 'workspace' && (await readOptional(join(scope.path, 'apm.yml'))) !== undefined;
+      this.state.projectPresent = !!workspace && await hasProjectManifest(workspace.path);
       await this.settingsSync.sync();
       if (epoch !== this.epoch) return;
       const { registered, catalog, installed } = await this.serialize('apm-mutations', async () => {
         const registered = await client.getMarketplaces();
-        const [catalog, installed] = await Promise.allSettled([client.getCatalog(registered), client.getInstalled(scope)]);
+        const [catalog, installed] = await Promise.all([
+          Promise.allSettled([this.refreshCatalog(client, registered)]).then(([result]) => result),
+          Promise.all(scopes.map(async target => ({
+            scope: target,
+            result: await Promise.allSettled([target.kind === 'workspace' && !this.state.projectPresent
+              ? Promise.resolve([] as PackageItem[]) : this.client(target, controller.signal).getInstalled(target)]).then(([result]) => result)
+          })))
+        ]);
         return { registered, catalog, installed };
       });
       if (epoch !== this.epoch) return;
@@ -297,31 +399,44 @@ class ApmExtension implements vscode.Disposable {
         this.state.errors.push(...catalog.value.errors);
       } else this.state.errors.push(`Catalog: ${redact(String(catalog.reason))}`);
       // `apm deps list` has no descriptions; borrow catalog ones so text filters match Installed and Updates too.
-      if (installed.status === 'fulfilled') {
-        this.state.installed = this.withDescriptions(installed.value);
-        if (!installed.value.length) this.state.checkedAt = undefined;
-        this.updateDetailItems(scope, this.state.installed);
-      } else this.state.errors.push(`Installed: ${redact(String(installed.reason))}`);
-      this.setDetailRefreshError(scope);
+      this.state.installed = installed.flatMap<PackageItem>(({ scope: target, result }) => {
+        if (result.status === 'fulfilled') {
+          this.setDetailRefreshError(target);
+          return this.withDescriptions(result.value).map(item => ({ ...item, scope: target }));
+        }
+        const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
+        this.state.errors.push(error);
+        this.setDetailRefreshError(target, error, false);
+        return previousInstalled.filter(item => inScope(item, target))
+          .map(item => ({ ...item, updateStale: true }));
+      });
+      this.state.checkedAt = undefined;
+      for (const { scope: target, result } of installed) {
+        if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
+      }
       this.broadcast();
-      if (installed.status === 'fulfilled' && installed.value.length) {
-        try {
-          const updates = await client.checkUpdates(scope, this.state.installed);
-          if (epoch !== this.epoch) return;
-          this.state.installed = applyUpdateRows(this.state.installed, updates);
-          this.state.checkedAt = new Date().toISOString();
-        } catch (error) {
-          if (epoch !== this.epoch) return;
-          this.state.installed = retainUpdateResults(this.state.installed, previousInstalled);
-          this.state.errors.push(`Updates: ${redact(String(error))}`);
+      for (const { scope: target, result } of installed) {
+        if (result.status !== 'fulfilled' || !result.value.length) continue;
+        const items = this.state.installed.filter(item => inScope(item, target));
+        const updates = await this.refreshUpdates(this.client(target, controller.signal), target, items, previousInstalled);
+        if (epoch !== this.epoch) return;
+        this.state.installed = this.state.installed.map(item => inScope(item, target)
+          ? findInstalledPackage(item, updates.items) ?? item : item);
+        this.state.checkedAt = updates.checkedAt;
+        if (updates.error) {
+          const error = `Updates: ${target.label}: ${updates.error}`;
+          this.state.errors.push(error);
+          this.setDetailRefreshError(target, error, false);
         }
       }
-      this.state.catalog = this.state.catalog.map(item => {
-        const installedItem = findInstalledPackage(item, this.state.installed);
-        return { ...item, installed: !!installedItem, updateStatus: installedItem?.updateStatus, latestVersion: installedItem?.latestVersion, updateStale: installedItem?.updateStale };
-      });
-      if (installed.status === 'fulfilled') this.updateDetailItems(scope, this.state.installed);
-      await this.refreshOtherDetailScopes(scope, controller.signal, epoch);
+      this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
+      for (const { scope: target, result } of installed) {
+        if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
+      }
+      await this.refreshOtherDetailScopes(scopes, controller.signal, epoch);
+      if (epoch === this.epoch) await Promise.all([...this.panels.values()]
+        .filter(entry => entry.mode === 'details' && entry.item && entry.panel && !entry.extra.details && !entry.extra.busy)
+        .map(entry => this.loadDetails(entry)));
     } catch (error) {
       if (epoch === this.epoch) throw error;
     } finally {
@@ -333,11 +448,11 @@ class ApmExtension implements vscode.Disposable {
     return items.map(item => item.description ? item : { ...item, description: this.state.catalog.find(c => c.id === item.id)?.description });
   }
   private detailContexts(scope: Scope): PanelContext[] {
-    return [...this.panels.values()].filter(entry => entry.mode === 'details' && entry.scope && scopeKey(entry.scope) === scopeKey(scope) && entry.item);
+    return [...this.panels.values()].filter(entry => entry.mode === 'details' && inScope(entry, scope) && entry.item);
   }
-  private setDetailRefreshError(scope: Scope, error?: string) {
+  private setDetailRefreshError(scope: Scope, error?: string, notify = true) {
     const entries = this.detailContexts(scope);
-    if (error && entries.some(entry => entry.refreshError !== error)) {
+    if (notify && error && entries.some(entry => entry.refreshError !== error)) {
       this.output.appendLine(`\n${error}`);
       this.notifyError(error, entries[0]);
     }
@@ -347,10 +462,10 @@ class ApmExtension implements vscode.Disposable {
     reconcileDetailContexts(this.panels.values(), scope, this.state.catalog, installed, entry => { void this.loadDetails(entry); });
     for (const entry of this.detailContexts(scope)) this.send(entry);
   }
-  private async refreshOtherDetailScopes(selected: Scope, signal: AbortSignal, epoch: number) {
+  private async refreshOtherDetailScopes(selected: readonly Scope[], signal: AbortSignal, epoch: number) {
     const scopes = new Map<string, Scope>();
     for (const entry of this.panels.values()) {
-      if (entry.mode === 'details' && entry.scope && entry.item && scopeKey(entry.scope) !== scopeKey(selected)) {
+      if (entry.mode === 'details' && entry.scope && entry.item && !selected.some(scope => isSameScope(entry.scope!, scope))) {
         scopes.set(scopeKey(entry.scope), entry.scope);
       }
     }
@@ -358,21 +473,16 @@ class ApmExtension implements vscode.Disposable {
       const previous = this.detailContexts(scope).flatMap(entry => entry.item ? [entry.item] : []);
       const client = this.client(scope, signal);
       try {
-        let installed = this.withDescriptions(await client.getInstalled(scope));
+        let installed: PackageItem[] = this.withDescriptions(await client.getInstalled(scope)).map(item => ({ ...item, scope }));
         if (epoch !== this.epoch || signal.aborted) return;
         this.setDetailRefreshError(scope);
         this.updateDetailItems(scope, installed);
         let warning: string | undefined;
         if (installed.length) {
-          try {
-            const updates = await client.checkUpdates(scope, installed);
-            if (epoch !== this.epoch || signal.aborted) return;
-            installed = applyUpdateRows(installed, updates);
-          } catch (error) {
-            if (epoch !== this.epoch || signal.aborted) return;
-            installed = retainUpdateResults(installed, previous);
-            warning = `Updates (${scope.label}): ${redact(String(error))}`;
-          }
+          const updates = await this.refreshUpdates(client, scope, installed, previous);
+          if (epoch !== this.epoch || signal.aborted) return;
+          installed = updates.items;
+          if (updates.error) warning = `Updates (${scope.label}): ${updates.error}`;
         }
         this.setDetailRefreshError(scope, warning);
         this.updateDetailItems(scope, installed);
@@ -411,8 +521,8 @@ class ApmExtension implements vscode.Disposable {
     const args: Record<string, string> = {}, options: Record<string, unknown> = { ...command.options };
     let inputLines: string[] | undefined;
     if (workflow === 'initialize') {
-      if (await readOptional(join(scope.path, 'apm.yml')) !== undefined) {
-        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml'))));
+      if (await hasProjectManifest(scope.path)) {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(projectManifestPath(scope.path))));
         return;
       }
       const name = await vscode.window.showInputBox({ title: 'Initialize APM project (1/5)', prompt: 'Project name', value: scope.label, ignoreFocusOut: true,
@@ -453,7 +563,7 @@ class ApmExtension implements vscode.Disposable {
     if (!context.extra.result) return;
     if (context.extra.error && !context.extra.actionResult?.audit) throw new Error(context.extra.error);
     if (workflow === 'initialize') {
-      const manifest = await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml')));
+      const manifest = await vscode.workspace.openTextDocument(vscode.Uri.file(projectManifestPath(scope.path)));
       const parsed = parseDocument(manifest.getText());
       for (const [index, key] of ['name', 'version', 'description', 'author'].entries()) {
         if (inputLines?.[index] && parsed.get(key) !== inputLines[index]) throw new Error(`APM initialization did not preserve the selected ${key}. Review apm.yml and APM Output.`);
@@ -481,7 +591,7 @@ class ApmExtension implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { preview: true });
   }
   async installPackage(capturedScope?: Scope, preview = false) {
-    const scope = await this.workflowScope(undefined, capturedScope);
+    const scope = await this.installScope(capturedScope);
     if (!scope) return;
     const choices = [
       { label: '$(edit) Enter package source...', description: 'Repository or marketplace package', item: undefined as PackageItem | undefined },
@@ -500,7 +610,7 @@ class ApmExtension implements vscode.Disposable {
     }
     const context: PanelContext = { mode: 'details', scope, item, extra: {} };
     this.nativeOperations.add(context);
-    try { await this.packageAction(preview ? 'previewInstall' : 'install', context); }
+    try { await this.packageAction(preview ? 'previewInstall' : 'install', context, true); }
     finally { this.nativeOperations.delete(context); }
     const result = context.extra.actionResult;
     if (!result) return;
@@ -518,10 +628,26 @@ class ApmExtension implements vscode.Disposable {
       });
     }
   }
+  private async installScope(preferred = this.scope()): Promise<Scope | undefined> {
+    this.requireTrust();
+    const candidates = this.state.scopes.filter(scope => scope.kind === 'workspace');
+    const workspaces = (await Promise.all(candidates.map(async scope => ({
+      scope, present: await hasProjectManifest(scope.path)
+    })))).filter(entry => entry.present).map(entry => entry.scope);
+    const preferredWorkspace = workspaces.find(scope => isSameScope(scope, preferred)) ?? workspaces[0];
+    const defaultScope = preferredWorkspace ?? this.globalScope();
+    const scopes = [defaultScope, ...[...workspaces, this.globalScope()].filter(scope => !isSameScope(scope, defaultScope))];
+    const picked = await vscode.window.showQuickPick(scopes.map(scope => ({
+      label: scopeLabel(scope),
+      description: isSameScope(scope, defaultScope) ? 'Default' : undefined,
+      detail: `${scope.path} — ${this.hostLabel()}`, scope
+    })), { title: 'Install APM package: destination', placeHolder: 'Choose global or workspace installation' });
+    return picked ? { ...picked.scope } : undefined;
+  }
   private async runProjectScript(scope: Scope) {
     const uri = vscode.Uri.file(scope.path), settings = vscode.workspace.getConfiguration('apm', uri);
     if (!settings.get<boolean>('tasks.includeScripts', false)) throw new Error('Enable apm.tasks.includeScripts in Settings to run project scripts. Scripts execute project-defined commands.');
-    const text = await readOptional(join(scope.path, 'apm.yml'));
+    const text = await readProjectManifest(scope.path);
     if (text === undefined) throw new Error('This project has no apm.yml. Initialize it before running scripts.');
     const document = parseDocument(text);
     if (document.errors.length) throw new Error(`Cannot read APM scripts: ${document.errors[0].message}`);
@@ -539,7 +665,9 @@ class ApmExtension implements vscode.Disposable {
     this.requireTrust();
     const folder = uri && vscode.workspace.getWorkspaceFolder(uri);
     const scope = folder ? { kind: 'workspace' as const, label: folder.name, path: folder.uri.fsPath } : { ...this.scope() };
-    const installed = scopeKey(scope) === this.state.scopeKey ? this.state.installed : await this.client(scope).getInstalled(scope);
+    const installed = scopeKey(scope) === this.state.scopeKey
+      ? this.state.installed.filter(item => !item.scope || isSameScope(item.scope, scope))
+      : await this.client(scope).getInstalled(scope);
     const item = [...installed, ...this.state.catalog].find(item => item.name === dependency || item.source === dependency ||
       item.metadata?.cliIdentity === dependency || item.metadata?.installExpression === dependency);
     if (item) await this.openPackageDetails(item, scope);
@@ -568,7 +696,7 @@ class ApmExtension implements vscode.Disposable {
     this.requireTrust();
     const scope = this.scope(context);
     if (scope.kind !== 'workspace') throw new Error('Open a workspace folder to configure project targets.');
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(join(scope.path, 'apm.yml')));
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(projectManifestPath(scope.path)));
     const editor = await vscode.window.showTextDocument(document);
     const offset = document.getText().search(/^targets?:/m);
     if (offset >= 0) { const position = document.positionAt(offset); editor.selection = new vscode.Selection(position, position); editor.revealRange(new vscode.Range(position, position)); }
@@ -585,7 +713,7 @@ class ApmExtension implements vscode.Disposable {
     const tokens = filterTokens(this.search);
     const keys: Record<string, unknown> = {
       'apm.filter.installed': tokens.installed, 'apm.filter.updates': tokens.updates, 'apm.filter.dependencies': tokens.dependencies, 'apm.filter.sort': tokens.sort,
-      'apm.filter.marketplace': tokens.marketplace, 'apm.filter.scopeKind': this.scope()?.kind ?? ''
+      'apm.filter.marketplace': tokens.marketplace, 'apm.filter.scopeKind': tokens.scope
     };
     for (const section of ['catalog', 'installed', 'updates'] as const) keys[`apm.views.${section}`] = !this.state.hiddenSections?.includes(section);
     for (const [key, value] of Object.entries(keys)) void vscode.commands.executeCommand('setContext', key, value);
@@ -623,7 +751,7 @@ class ApmExtension implements vscode.Disposable {
     this.setSearch(withToken(this.search, '@marketplace:', name));
   }
   async chooseScope(kind: 'workspace' | 'global') {
-    let target = kind === 'global' ? this.globalScope() : undefined;
+    let target: Scope | undefined;
     if (kind === 'workspace') {
       const folders = this.state.scopes.filter(s => s.kind === 'workspace');
       if (!folders.length) { void vscode.window.showInformationMessage('Open a workspace folder to manage workspace packages.'); return; }
@@ -632,6 +760,7 @@ class ApmExtension implements vscode.Disposable {
         { title: 'Select Workspace Folder', placeHolder: 'Show and install packages for this folder' }))?.scope;
     }
     if (target && scopeKey(target) !== this.state.scopeKey) await this.selectScope(scopeKey(target));
+    this.setSearch(withToken(this.search, '@scope:', filterTokens(this.search).scope === kind ? '' : kind));
   }
   private async selectScope(key: string) {
     this.epoch++; this.refreshController?.abort(); if (this.refreshing) this.refreshAgain = true;
@@ -642,11 +771,16 @@ class ApmExtension implements vscode.Disposable {
     this.updateFilterContext();
     await this.refresh();
   }
-  private async openDetails(id: string) {
+  private async openDetails(id: string, key?: string) {
     this.requireTrust();
-    const item = this.state.installed.find(i => i.id === id) ?? this.state.catalog.find(i => i.id === id);
+    const scope = key ? this.state.scopes.find(scope => scopeKey(scope) === key) : this.scope();
+    if (!scope) throw new Error('This package scope is no longer available.');
+    const catalog = this.state.catalog.find(item => item.id === id);
+    const item = this.state.installed.find(i => i.id === id && inScope(i, scope))
+      ?? (key ? undefined : this.state.installed.find(i => i.id === id))
+      ?? (catalog ? { ...catalog, scope, installed: false, updateStatus: undefined, latestVersion: undefined, updateStale: undefined } : undefined);
     if (!item) throw new Error('Package is no longer available. Refresh and retry.');
-    await this.openPackageDetails(item, { ...this.scope() });
+    await this.openPackageDetails(item, { ...(item.scope ?? scope) });
   }
   private async openPackageDetails(item: PackageItem, scope: Scope) {
     this.requireTrust();
@@ -667,6 +801,7 @@ class ApmExtension implements vscode.Disposable {
     entry.item = item;
     entry.panel?.reveal();
     await this.loadDetails(entry);
+    return entry;
   }
   private async loadDetails(entry: PanelContext) {
     const item = entry.item!, scope = this.scope(entry);
@@ -728,7 +863,7 @@ class ApmExtension implements vscode.Disposable {
       case 'dependencies': {
         this.requireTrust();
         const scope = this.scope(context);
-        if (!this.state.scopes.some(candidate => scopeKey(candidate) === scopeKey(scope))) throw new Error('This package scope is no longer available. Select a current workspace or global scope.');
+        if (!this.state.scopes.some(candidate => isSameScope(candidate, scope))) throw new Error('This package scope is no longer available. Select a current workspace or global scope.');
         if (scopeKey(scope) !== this.state.scopeKey) await this.selectScope(scopeKey(scope));
         this.setSearch('@dependencies');
         await vscode.commands.executeCommand('apm.browser.focus');
@@ -739,7 +874,6 @@ class ApmExtension implements vscode.Disposable {
       case 'targets': await this.showTargets(context); break;
       case 'configureTargets': await this.configureTargets(context); break;
       case 'openTarget': await this.openTarget(message.target, context); break;
-      case 'openFolder': await vscode.commands.executeCommand('vscode.openFolder'); break;
       case 'retry':
         if (context.retry) await context.retry();
         else if (context.mode === 'browser') await this.refreshAll();
@@ -752,7 +886,7 @@ class ApmExtension implements vscode.Disposable {
         await openNavigation(target);
         break;
       }
-      case 'details': await this.openDetails(message.id); break;
+      case 'details': await this.openDetails(message.id, message.scopeKey); break;
       case 'install': await this.installPackage({ ...this.scope(context) }); break;
       case 'marketplaces': await openSettings('apm.marketplaces'); break;
       case 'setup': await this.setup(); break;
@@ -777,19 +911,37 @@ class ApmExtension implements vscode.Disposable {
         break;
     }
   }
-  private async packageAction(action: PackageAction, context: PanelContext) {
+  private async packageAction(action: PackageAction, context: PanelContext, scopeChosen = false) {
     this.requireTrust();
     if (context.mode !== 'details' || !context.item) throw new Error('Open a package page to run package actions.');
     if (context.controller) throw new Error('Another action is already running on this page. Wait for it or cancel it.');
-    const item = context.item, scope = this.scope(context);
-    context.retry = () => this.packageAction(action, context);
-    const installed = scopeKey(scope) === this.state.scopeKey
-      ? findInstalledPackage(item, this.state.installed)
-      : item.installed ? item : undefined;
-    const global = scope.kind === 'global';
     context.controller = new AbortController();
-    try { await this.dispatchPackageAction(action, context, item, installed, scope, global); }
-    finally { context.controller = undefined; }
+    try {
+      if (!scopeChosen && ['install', 'installWithOptions', 'previewInstall', 'previewWithOptions'].includes(action)) {
+        const target = await this.installScope(this.scope(context));
+        if (!target || context.controller.signal.aborted) return;
+        if (!isSameScope(target, this.scope(context))) {
+          const catalog = this.state.catalog.find(item => item.id === context.item!.id);
+          const installed = findInstalledPackage({ ...context.item, scope: target }, this.state.installed);
+          const item = installed ?? { ...(catalog ?? context.item), scope: target, installed: false,
+            updateStatus: undefined, latestVersion: undefined, updateStale: undefined };
+          if (context.panel) {
+            const entry = await this.openPackageDetails(item, target);
+            await this.packageAction(action, entry, true);
+            return;
+          }
+          context.scope = target;
+          context.item = item;
+        }
+      }
+      const item = context.item, scope = this.scope(context);
+      context.retry = () => this.packageAction(action, context);
+      const installed = findInstalledPackage({ ...item, scope }, this.state.installed)
+        ?? (item.installed && (!item.scope || isSameScope(item.scope, scope)) ? item : undefined);
+      await this.dispatchPackageAction(action, context, item, installed, scope, scope.kind === 'global');
+    } finally {
+      context.controller = undefined;
+    }
   }
   private async dispatchPackageAction(action: PackageAction, context: PanelContext, item: PackageItem, installed: PackageItem | undefined, scope: Scope, global: boolean) {
     switch (action) {
@@ -972,6 +1124,7 @@ class ApmExtension implements vscode.Disposable {
     if (context.extra.actionResult?.status === 'cancelled') return;
     const previousRequest = context.detailsRequest;
     if (this.refreshing) await this.refreshing;
+    this.updateSnapshots.delete(scopeKey(scope));
     await this.refresh();
     if (context.extra.actionResult) {
       const result = verifyPackageUpdate(context.extra.actionResult, context.item, this.state.error ?? context.refreshError);
@@ -1038,7 +1191,7 @@ class ApmExtension implements vscode.Disposable {
       this.requireTrust();
       const executable = vscode.workspace.getConfiguration('apm', scope.kind === 'workspace' ? vscode.Uri.file(scope.path) : undefined).get<string>('executablePath', 'apm');
       const taskScope = scope.kind === 'workspace' ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scope.path)) ?? vscode.TaskScope.Workspace : vscode.TaskScope.Global;
-      const env = await githubEnvironment();
+      const env = await this.commandEnvironment(args, scope.kind === 'global' ? homedir() : scope.path);
       this.requireTrust();
       if (this.commandTasks.has(context)) throw new Error('An APM task is already running on this page. Stop it before running another command.');
       const task = new vscode.Task({ type: 'apm-command', command: descriptor.id }, taskScope, descriptor.label, 'APM',
@@ -1084,7 +1237,7 @@ class ApmExtension implements vscode.Disposable {
     try {
       const execute = async () => {
         this.requireTrust();
-        if (descriptor.id === 'init' && inputLines && await readOptional(join(scope.path, 'apm.yml')) !== undefined) throw new Error('apm.yml was created while initialization was being configured. Open it instead of overwriting it.');
+        if (descriptor.id === 'init' && inputLines && await hasProjectManifest(scope.path)) throw new Error('apm.yml was created while initialization was being configured. Open it instead of overwriting it.');
         this.operation = controller;
         context.extra.busy = true; context.extra.result = undefined; this.send(context);
         try {
@@ -1115,6 +1268,10 @@ class ApmExtension implements vscode.Disposable {
       context.controller = undefined;
       if (mutating) {
         if (descriptor.id !== 'audit') this.diagnostics.clear();
+        if (['install', 'update', 'uninstall'].includes(descriptor.command[0])) {
+          if (this.refreshing) await this.refreshing;
+          this.updateSnapshots.delete(scopeKey(scope));
+        }
         await this.refresh();
       }
     }
@@ -1198,6 +1355,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
     ...(['catalog', 'installed', 'updates'] as const).map(section => [`apm.views.${section}`, () => extension.toggleSection(section)] as const),
     ['apm.signIn', () => extension.signIn()],
+    ['apm.manageAccounts', () => extension.manageAccounts()],
     ['apm.install', () => extension.installPackage()],
     ['apm.setup', () => extension.setup()],
     ['apm.filter.installed', () => extension.toggleStatus('@installed')],

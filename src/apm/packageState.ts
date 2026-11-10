@@ -1,4 +1,5 @@
 import { record } from './adapters';
+import { isSameScope } from '../protocol';
 import type { PackageItem, Scope, UpdateRow } from './types';
 
 export function getUpdateBadge(state: { trusted: boolean; version?: string; warning?: string; installed: readonly PackageItem[] }): { value: number; tooltip: string } | undefined {
@@ -18,13 +19,31 @@ function samePackage(a: PackageItem, b: PackageItem): boolean {
   return a.id === b.id || (!!a.marketplace && a.marketplace === b.marketplace && a.name === b.name);
 }
 
+function sameScope(a: Scope | undefined, b: Scope | undefined): boolean {
+  return !a || !b || isSameScope(a, b);
+}
+
+export function withInstallations(catalog: readonly PackageItem[], installed: readonly PackageItem[]): PackageItem[] {
+  return catalog.map(item => {
+    const installations = installed.filter(candidate => samePackage(item, candidate));
+    const update = installations.find(candidate => candidate.updateStatus === 'outdated')
+      ?? installations.find(candidate => candidate.updateStatus === 'failed' || candidate.updateStatus === 'unknown')
+      ?? installations.find(candidate => candidate.updateStatus === 'not-comparable')
+      ?? installations.find(candidate => candidate.updateStatus === 'unchecked')
+      ?? installations[0];
+    return { ...item, installations, installed: installations.length > 0, updateStatus: update?.updateStatus,
+      latestVersion: update?.latestVersion, updateStale: update?.updateStale };
+  });
+}
+
 function revision(item: PackageItem): string {
   const lock = record(item.metadata?.lock) ? item.metadata.lock : undefined;
   return JSON.stringify([lock?.resolved_commit, lock?.resolved_ref]);
 }
 
 export function findInstalledPackage(item: PackageItem, installed: readonly PackageItem[]): PackageItem | undefined {
-  return installed.find(candidate => candidate.id === item.id) ?? installed.find(candidate => samePackage(item, candidate));
+  const candidates = installed.filter(candidate => sameScope(item.scope, candidate.scope));
+  return candidates.find(candidate => candidate.id === item.id) ?? candidates.find(candidate => samePackage(item, candidate));
 }
 
 export function applyUpdateRows(installed: readonly PackageItem[], updates: readonly UpdateRow[]): PackageItem[] {
@@ -38,13 +57,13 @@ export function applyUpdateRows(installed: readonly PackageItem[], updates: read
   });
 }
 
-export function retainUpdateResults(installed: readonly PackageItem[], previous: readonly PackageItem[]): PackageItem[] {
+export function retainUpdateResults(installed: readonly PackageItem[], previous: readonly PackageItem[], stale = true): PackageItem[] {
   return installed.map(item => {
-    const prior = previous.find(candidate => samePackage(item, candidate) && candidate.version === item.version && revision(candidate) === revision(item));
+    const prior = previous.find(candidate => sameScope(item.scope, candidate.scope) && samePackage(item, candidate) && candidate.version === item.version && revision(candidate) === revision(item));
     const hasResult = prior?.updateStatus !== undefined && ['current', 'outdated', 'unknown', 'not-comparable'].includes(prior.updateStatus);
     return {
-      ...item, updateStatus: hasResult ? prior.updateStatus : 'failed',
-      latestVersion: hasResult ? prior.latestVersion : undefined, updateStale: hasResult
+      ...item, updateStatus: hasResult ? prior.updateStatus : stale ? 'failed' : item.updateStatus ?? 'unchecked',
+      latestVersion: hasResult ? prior.latestVersion : undefined, updateStale: hasResult ? stale || prior.updateStale : stale ? false : undefined
     };
   });
 }
@@ -60,11 +79,11 @@ export function reconcileDetailContexts<T extends DetailContext>(
 ): void {
   for (const context of contexts) {
     const current = context.item;
-    if (!current || !context.scope || context.scope.kind !== scope.kind || context.scope.path !== scope.path) continue;
-    const installedItem = findInstalledPackage(current, installed);
+    if (!current || !context.scope || !isSameScope(context.scope, scope)) continue;
+    const installedItem = findInstalledPackage({ ...current, scope }, installed);
     const available = catalog.find(item => samePackage(current, item));
     const item = installedItem ?? {
-      ...(available ?? current), installed: false, updateStatus: undefined, latestVersion: undefined, updateStale: undefined
+      ...(available ?? current), scope, installed: false, updateStatus: undefined, latestVersion: undefined, updateStale: undefined
     };
     context.item = item;
     if (item.id !== current.id || item.installed !== current.installed || item.version !== current.version ||
