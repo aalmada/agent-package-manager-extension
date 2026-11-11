@@ -6,13 +6,20 @@ import { descriptors, buildCommandArguments, requiresTerminal } from '../../src/
 test('utility commands stay contextual instead of cluttering the Command Palette', () => {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
   const menus = manifest.contributes.menus;
-  for (const command of ['apm.settings', 'apm.output', 'apm.refresh', 'apm.targets']) {
+  for (const command of ['apm.settings', 'apm.output', 'apm.refresh', 'apm.targets', 'apm.dependencies.refresh', 'apm.dependencies.why']) {
     assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
   }
+  assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.dependencies.find')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
   for (const command of ['apm.settings', 'apm.refresh']) {
     assert.ok(menus['view/title'].some((entry: { command: string; when: string }) => entry.command === command && entry.when === 'view == apm.browser'), command);
   }
+  assert.ok(menus['view/title'].some((entry: { command: string; when: string }) =>
+    entry.command === 'apm.dependencies.refresh' && entry.when === 'view == apm.dependencyTree && isWorkspaceTrusted'));
+  assert.ok(menus['view/item/context'].some((entry: { command: string; when: string }) =>
+    entry.command === 'apm.dependencies.why' && entry.when.includes('viewItem == apmDependencyPackage') && entry.when.includes('isWorkspaceTrusted')));
+  assert.ok(menus['editor/context'].some((entry: { command: string }) => entry.command === 'apm.dependencies.find'));
+  assert.ok(menus['explorer/context'].some((entry: { command: string }) => entry.command === 'apm.dependencies.find'));
 });
 
 test('baseline contains every command family and nested marketplace workflow', () => {

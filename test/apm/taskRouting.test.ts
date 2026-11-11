@@ -85,6 +85,8 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   const vscode = {
     authentication: { getSession: async () => options.token ? { accessToken: options.token } : undefined },
     env: { remoteName: undefined },
+    TreeItem: class { contextValue?: string; constructor(readonly label: string, readonly collapsibleState: number) {} },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1 },
     commands: { executeCommand: async (id: string, key?: string, value?: unknown) => {
       commands.push(id);
       if (id === 'setContext' && key) contexts.set(key, value);
@@ -169,6 +171,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' }
     ] },
     nativeOperations: new Set(), results: new Map(), search: '', refreshNotices: new Set(), readmeNotices: new Set(),
+    dependencyTree: { clear() {} },
     catalogSnapshots: new Map(), updateSnapshots: new Map(),
     authentication: { invalidate() {}, hosts: () => [] },
     settingsSync: { retry() {} },

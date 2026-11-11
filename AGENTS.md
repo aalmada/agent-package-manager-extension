@@ -9,6 +9,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 - [`src/webview/`](src/webview/) contains the browser UI; [`src/views/`](src/views/) provides the webview shell and sanitized Markdown.
 - Keep search and filters fixed above the browser's custom sections. Preserve right-aligned filtered counts, accessible resize handles between package sections, and saved sizes and collapse state.
 - [`src/navigation.ts`](src/navigation.ts) owns verified file links and audit Problems; [`src/manifestAssistance.ts`](src/manifestAssistance.ts) provides local YAML assistance; [`src/taskProvider.ts`](src/taskProvider.ts) discovers reusable tasks.
+- The Dependencies tree runs `apm deps tree` only on explicit refresh; package context actions use `apm deps why`, and file-owner actions use `apm find`.
 - [`scripts/`](scripts/) builds and generates the CLI contract; [`test/`](test/) contains unit, browser, and extension-host tests.
 
 ## Development

@@ -129,9 +129,10 @@ test('busy views leave progress to VS Code without refresh buttons or working ba
 
 test('one browser view keeps search and filter controls above all sections', () => {
   const contributions = JSON.parse(readFileSync('package.json', 'utf8')).contributes;
-  assert.equal(contributions.views.apm.length, 1);
+  assert.equal(contributions.views.apm.filter((view: { type?: string }) => view.type === 'webview').length, 1);
   assert.equal(contributions.views.apm[0].id, 'apm.browser');
   assert.equal(contributions.views.apm[0].name, contributions.viewsContainers.activitybar[0].title);
+  assert.ok(contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencyTree'));
   assert.ok(!contributions.commands.some((command: { command: string }) => command.command === 'apm.getStarted'));
   assert.equal(contributions.walkthroughs, undefined);
   assert.ok(!contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencies'));
@@ -147,7 +148,7 @@ test('one browser view keeps search and filter controls above all sections', () 
 test('title actions use native overflow with Views before Settings', () => {
   const contributions = JSON.parse(readFileSync('package.json', 'utf8')).contributes;
   const actions = contributions.menus['view/title'];
-  assert.deepEqual(actions.filter((item: { group: string }) => item.group === 'navigation').map((item: { command: string }) => item.command), ['apm.refresh']);
+  assert.deepEqual(actions.filter((item: { group: string; when: string }) => item.group === 'navigation' && item.when === 'view == apm.browser').map((item: { command: string }) => item.command), ['apm.refresh']);
   const overflow = actions.filter((item: { group: string }) => item.group !== 'navigation');
   assert.equal(overflow[0].submenu, 'apm.views');
   assert.equal(overflow[1].command, 'apm.settings');
