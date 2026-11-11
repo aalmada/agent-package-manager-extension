@@ -26,7 +26,7 @@ class Task {
 }
 interface Execution { task: Task; terminate(): void }
 interface Panel { mode: 'native' | 'details' | 'browser'; extra: Partial<State>; item?: PackageItem; scope?: Scope; controller?: AbortController;
-  detailsController?: AbortController; detailsRequest?: number }
+  detailsController?: AbortController; detailsRequest?: number; authenticationRepository?: { provider: 'github'; origin: string; path: string } }
 interface Harness {
   toggleSection(section: PackageSection): Promise<void>;
   state: State;
@@ -39,6 +39,7 @@ interface Harness {
   refreshCatalog(client: unknown, marketplaces: Marketplace[]): Promise<{ items: PackageItem[]; errors: string[] }>;
   refreshUpdates(client: unknown, scope: Scope, installed: PackageItem[], previous: PackageItem[]): Promise<{ items: PackageItem[]; checkedAt?: string; error?: string }>;
   authenticationChanged(): void;
+  report(error: unknown, context?: Panel): void;
   panels: Map<string, Panel>;
   epoch: number;
   runCommand(message: CommandRequest, context: Panel): Promise<void>;
@@ -52,6 +53,7 @@ interface Harness {
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
   cancelConfirmation?: boolean; onConfirmation?: () => Promise<void>;
+  errorChoice?: string;
   inputs?: (string | undefined)[]; picks?: (number | number[] | undefined)[]; scriptsEnabled?: boolean; token?: string;
   tasks?: { definition: { workflow: string; script?: string }; scope: { uri: { fsPath: string } } }[];
   output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number } } = {}) {
@@ -116,7 +118,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       },
       showErrorMessage: async (message: string, ...actions: unknown[]) => {
         assert.ok(actions.every(action => typeof action === 'string'), 'Errors must be non-modal notifications');
-        errors.push(message); return undefined;
+        errors.push(message); return options.errorChoice;
       },
       createQuickPick: () => {
         const picker = {
@@ -168,7 +170,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     ] },
     nativeOperations: new Set(), results: new Map(), search: '', refreshNotices: new Set(), readmeNotices: new Set(),
     catalogSnapshots: new Map(), updateSnapshots: new Map(),
-    authentication: { invalidate() {} },
+    authentication: { invalidate() {}, hosts: () => [] },
     settingsSync: { retry() {} },
     commandEnvironment: async () => options.token ? { GITHUB_APM_PAT: options.token } : {},
     allowRemoteImages: () => false,
@@ -202,6 +204,23 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     counts: () => ({ serializations, refreshes, terminations, processListeners: processListeners.size, endListeners: endListeners.size })
   };
 }
+test('direct package authentication errors offer contextual repository management', async () => {
+  const h = harness({ errorChoice: 'Manage Repository Accounts' });
+  const scope: Scope = { kind: 'workspace', label: 'project', path: '/project' };
+  const panel: Panel = { mode: 'details', scope, extra: {}, item: {
+    id: 'direct', name: 'direct', source: 'org/repo/plugins/demo#main', marketplace: '', version: '', installed: false
+  } };
+  let selected: unknown, selectedScope: unknown;
+  Reflect.set(h.extension, 'manageAccounts', async (repository: unknown, scope: unknown) => { selected = repository; selectedScope = scope; });
+  h.extension.report(new Error('No authorized account can access this repository.'), panel);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(selected)), { provider: 'github', origin: 'https://github.com', path: 'org/repo' });
+  assert.equal(selectedScope, scope);
+  panel.authenticationRepository = { provider: 'github', origin: 'https://github.com', path: 'other/dependency' };
+  h.extension.report(new Error('No authorized account can access a dependency.'), panel);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(selected, panel.authenticationRepository);
+});
 test('account changes discard stale private details and invalidate pending detail requests', () => {
   const h = harness();
   const controller = new AbortController();

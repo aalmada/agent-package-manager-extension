@@ -22,8 +22,9 @@ import { registerManifestAssistance } from './manifestAssistance';
 import { registerApmTaskProvider } from './taskProvider';
 import type { ContentGroup } from './apm/contents';
 import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveContained } from './apm/manifest';
-import { RepositoryAuthentication, signInToGithub } from './authentication';
+import { RepositoryAccessError, RepositoryAuthentication, signInToGithub } from './authentication';
 import { cliEnvironment } from './auth/cli';
+import { repositoryFromPackageSource, type Repository } from './auth/repositories';
 
 interface PanelContext {
   webview?: vscode.Webview;
@@ -38,6 +39,7 @@ interface PanelContext {
   extra: Partial<State>;
   navigation?: Map<string, NavigationTarget>;
   retry?: () => Promise<void>;
+  authenticationRepository?: Repository;
   preview?: { id: string; args: Record<string, string>; options: Record<string, unknown>; title: string; action: PackageAction };
 }
 
@@ -257,6 +259,10 @@ class ApmExtension implements vscode.Disposable {
     const labels = recoveryActions(message).map(action => ({ output: 'Show APM Output', doctor: 'Run Doctor', authentication: 'Authentication Help', policy: 'Explain Policy', targets: 'Show Targets', retry: 'Retry' })[action]);
     if (context?.retry && !labels.includes('Retry')) labels.push('Retry');
     if (labels.includes('Authentication Help')) labels.unshift('Manage Repository Accounts', 'Sign in to GitHub');
+    const item = context?.item;
+    const source = labels.includes('Authentication Help') && item && !item.marketplace ? packageIdentity(item, item.installed ? item : undefined, true) : undefined;
+    const repository = context?.authenticationRepository ?? (source ? repositoryFromPackageSource(source, this.authentication.hosts()) : undefined);
+    const scope = context?.scope;
     void vscode.window.showErrorMessage(message, ...labels).then(choice => {
       if (choice === 'Show APM Output') this.output.show();
       else if (choice === 'Run Doctor') void this.workflow('doctor', undefined, context?.scope).catch(error => this.report(error, context));
@@ -264,7 +270,7 @@ class ApmExtension implements vscode.Disposable {
       else if (choice === 'Show Targets') void this.showTargets(context).catch(error => this.report(error, context));
       else if (choice === 'Authentication Help') void vscode.env.openExternal(vscode.Uri.parse('https://microsoft.github.io/apm/getting-started/authentication/'));
       else if (choice === 'Sign in to GitHub') void this.signIn().catch(error => this.report(error, context));
-      else if (choice === 'Manage Repository Accounts') void this.manageAccounts().catch(error => this.report(error, context));
+      else if (choice === 'Manage Repository Accounts') void this.manageAccounts(repository, scope).catch(error => this.report(error, context));
       else if (choice === 'Retry' && context?.retry) void context.retry().catch(error => this.report(error, context));
     });
   }
@@ -273,9 +279,9 @@ class ApmExtension implements vscode.Disposable {
     this.authentication.invalidate();
     await this.refreshAll();
   }
-  async manageAccounts() {
+  async manageAccounts(repository?: Repository, scope = this.scope()) {
     this.requireTrust();
-    await this.authentication.manage();
+    await this.authentication.manage(repository, scope.path);
     await this.refreshAll();
   }
   private notifyRefresh() {
@@ -1095,6 +1101,8 @@ class ApmExtension implements vscode.Disposable {
         action: action === 'previewUpdate' ? 'update' : 'install' };
     }
     context.extra.actionResult = { action, title, status: 'running', command, preview };
+    context.extra.error = undefined;
+    context.authenticationRepository = undefined;
     this.send(context);
     const execute = async () => {
       this.requireTrust();
@@ -1119,6 +1127,7 @@ class ApmExtension implements vscode.Disposable {
         }
         if (result.exitCode !== 0 && !context.extra.actionResult.audit) context.extra.error = redact(result.stderr || `APM exited with code ${result.exitCode}. Review the output.`);
       } catch (error) {
+        if (error instanceof RepositoryAccessError) context.authenticationRepository = error.repository;
         context.extra.actionResult = { action, title, command, status: controller.signal.aborted ? 'cancelled' : 'failed',
           summary: redact(error instanceof Error ? error.message : String(error)) };
       } finally {

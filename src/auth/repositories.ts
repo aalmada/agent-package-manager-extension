@@ -58,6 +58,22 @@ export function repositoryFromSource(source: string, hosts: readonly RepositoryH
   } catch { return undefined; }
 }
 
+/** APM package expressions may address a path within a GitHub repository. */
+export function repositoryFromPackageSource(source: string, hosts: readonly RepositoryHost[] = []): Repository | undefined {
+  const direct = repositoryFromSource(source, hosts);
+  if (direct) return direct;
+  if (!source || /[\\\t\r\n?]/.test(source)) return undefined;
+  const value = source.split('#')[0];
+  const match = /^(?:(https:\/\/[^/]+\/|ssh:\/\/git@[^/]+\/|git@[^/:]+:)|((?:github\.com\/)?))([^/]+)\/([^/]+)\/(.+)$/.exec(value);
+  if (!match) return undefined;
+  const suffix = match[5];
+  try {
+    if (/%2f|%5c/i.test(suffix) || !safePath(suffix.split('/').map(decodeURIComponent).join('/'))) return undefined;
+  } catch { return undefined; }
+  const repository = repositoryFromSource(`${match[1] ?? match[2]}${match[3]}/${match[4]}`, hosts);
+  return repository?.provider === 'github' ? repository : undefined;
+}
+
 export function repositoryProbeUrl(repository: Repository): string {
   const { origin, path, provider } = repository;
   if (provider === 'github') return `${origin === 'https://github.com' ? 'https://api.github.com' : origin + '/api/v3'}/repos/${path}`;

@@ -170,6 +170,30 @@ test('repository picker cancellation never requests credentials or probes access
   assert.equal(host.secrets.size, 0);
 });
 
+test('repository picker discovers manifest and lockfile dependencies locally', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-auth-picker-'));
+  try {
+    await writeFile(join(home, 'apm.yml'), 'dependencies:\n  apm:\n    - org/direct/plugins/one#main\n    - plugin@market\n');
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [{ host: 'github.com', repo_url: 'org/locked' }] }));
+    const host = harness();
+    host.state.picks.push('Connect GitHub account', undefined);
+    await host.auth.manage(undefined, home);
+    assert.deepEqual(host.state.shownChoices[1], ['https://github.com/org/direct', 'https://github.com/org/locked', 'Enter another repository...']);
+    assert.equal(host.requests.length, 0);
+    assert.equal(host.calls.length, 0);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('contextual recovery selects the failed repository without another repository prompt', async () => {
+  const host = harness();
+  host.state.picks.push('Connect GitHub account');
+  host.state.respond = (_url, headers) => new Response('', { status: headers.has('Authorization') ? 200 : 404 });
+  await host.auth.manage(repo('direct'));
+  assert.equal(host.state.shownChoices.length, 1);
+  assert.equal(host.requests[0].url, 'https://api.github.com/repos/org/direct');
+  assert.ok(host.calls[0].options.createIfNone);
+});
+
 test('repository picker supports tokens for registered non-GitHub marketplaces', async () => {
   const host = harness();
   host.state.registered = [{ name: 'catalog', source: 'https://gitlab.com/group/catalog' }];
@@ -194,11 +218,31 @@ test('private marketplace credentials rotate on expiry and recover after reautho
     host.state.tokens.set('one', 'expired');
     assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-two');
     host.state.tokens.set('two', 'expired');
-    await assert.rejects(cliEnvironment(host.auth, args, home, home), /APM: Manage Repository Accounts/);
+    await assert.rejects(cliEnvironment(host.auth, args, home, home), error => {
+      assert.match(String(error), /APM: Manage Repository Accounts/);
+      assert.ok(recoveryActions(String(error)).includes('authentication'));
+      return true;
+    });
     host.state.tokens.set('one', 'token-one');
     host.auth.invalidate();
     assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-one');
   });
+});
+
+test('direct private subdirectory installs select another authorized account after expiry', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-private-auth-'));
+  try {
+    const host = harness();
+    host.state.respond = (_url, headers) => {
+      const token = headers.get('Authorization');
+      return new Response('', { status: token === 'Bearer token-one' || token === 'Bearer token-two' ? 200 : 404 });
+    };
+    const args = ['install', 'org/a/plugins/private#main'];
+    assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-one');
+    host.state.tokens.set('one', 'expired');
+    assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-two');
+    assert.ok(host.requests.every(request => request.url === 'https://api.github.com/repos/org/a'));
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
 
 test('known private metadata uses one authenticated file request and cached read-only probes', async t => {

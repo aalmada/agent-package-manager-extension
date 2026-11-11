@@ -5,6 +5,7 @@ import { Repository, RepositoryHost, repositoryForRequest, repositoryFromSource,
 import { marketplaceRepository } from './apm/remoteMetadata';
 import type { Marketplace } from './apm/types';
 import { parseEntry } from './config/marketplaces';
+import { dependencyRepositories } from './auth/dependencies';
 
 export type { Repository, RepositoryHost } from './auth/repositories';
 export { repositoryForRequest, repositoryFromSource, repositoryProbeUrl } from './auth/repositories';
@@ -15,6 +16,12 @@ type Binding = { repository: Repository; account?: string; secret?: string };
 export type RepositoryCredential = { repository: Repository; token: string; username: string; scheme: 'basic' | 'bearer' };
 type Candidate = RepositoryCredential & { account?: string; secret?: string };
 type MarketplaceSources = { settings: readonly string[]; registered: readonly Marketplace[]; workspaceRoot?: string };
+
+export class RepositoryAccessError extends Error {
+  constructor(readonly repository: Repository) {
+    super(`No authorized account can access ${repository.origin}/${repository.path}. Use APM: Manage Repository Accounts to select an account or update its token.`);
+  }
+}
 
 function trust(): void {
   if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before using repository authentication for APM.');
@@ -190,7 +197,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
     if (bound && await this.probe(repository, undefined, generation, signal, options.reuseAccess)) return undefined;
     if (anonymousLimit) throw anonymousLimit;
     if (options.allowFallback && !candidates.length && !this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository))) return undefined;
-    throw new Error(`No authorized account can access ${repository.origin}/${repository.path}. Use APM: Manage Repository Accounts to select an account or update its token.`);
+    throw new RepositoryAccessError(repository);
   }
   async credentials(repositories: readonly Repository[], signal?: AbortSignal): Promise<readonly RepositoryCredential[]> {
     const generation = this.revision;
@@ -247,7 +254,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
     permission(authenticated, true);
     return authenticated;
   };
-  private async chooseRepository(): Promise<Repository | undefined> {
+  private async chooseRepository(dependencyRoot?: string): Promise<Repository | undefined> {
     const sources = await this.marketplaceSources();
     trust();
     const hosts = this.hosts();
@@ -258,6 +265,8 @@ export class RepositoryAuthentication implements vscode.Disposable {
       repositories.set(repository.provider === 'github' ? key.toLowerCase() : key, repository);
     };
     for (const repository of this.knownRepositories()) add(repository);
+    if (dependencyRoot) for (const repository of await dependencyRepositories(dependencyRoot, hosts)) add(repository);
+    trust();
     for (const marketplace of sources.registered) {
       if (!/\.json(?:\?.*)?$/i.test(marketplace.source)) add(marketplaceRepository(marketplace, hosts));
     }
@@ -286,7 +295,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
     if (!repository) throw new Error('Enter a repository URL on a known or explicitly approved host.');
     return repository;
   }
-  async manage(): Promise<void> {
+  async manage(preferred?: Repository, dependencyRoot?: string): Promise<void> {
     trust();
     const action = await vscode.window.showQuickPick([
       'Connect GitHub account', 'Add repository token', 'Approve repository host', 'Remove repository authentication'
@@ -311,7 +320,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
       await this.context.globalState.update(`${this.namespace}.bindings`, this.bindings().filter(item => repositoryKey(item.repository) !== repositoryKey(binding.binding.repository)));
       this.invalidate(); return;
     }
-    const repository = await this.chooseRepository();
+    const repository = preferred ?? await this.chooseRepository(dependencyRoot);
     if (!repository) return;
     trust();
     this.validate(repository);

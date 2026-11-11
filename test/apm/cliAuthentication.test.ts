@@ -67,6 +67,21 @@ test('new marketplace registration preflights its concrete repository, not every
   });
 });
 
+test('direct GitHub subdirectory installs select the repository credential and preserve safety gates', async () => {
+  await fixture(async home => {
+    const { auth, calls } = authentication([credential('team/repo-a', 'first-opaque-value')]);
+    assert.deepEqual(await cliEnvironment(auth, ['install', 'team/repo-a/plugins/example#main'], home, home),
+      { GITHUB_APM_PAT: 'first-opaque-value' });
+    assert.deepEqual(calls[0], [repository('team/repo-a')]);
+    const conflicting = authentication([credential('team/repo-a', 'one'), credential('team/repo-b', 'two')]);
+    await assert.rejects(cliEnvironment(conflicting.auth, ['install', 'team/repo-a/plugins/example', 'team/repo-b/skills/demo'], home, home),
+      error => /Different credentials/.test(String(error)) && /team\/repo-a/.test(String(error)) && /team\/repo-b/.test(String(error)));
+    const unrelated = authentication([credential('team/repo-a', 'one')], [repository('team/repo-a'), repository('team/repo-b')]);
+    await assert.rejects(cliEnvironment(unrelated.auth, ['install', 'team/repo-a/plugins/example'], home, home),
+      /Saved bindings outside this operation: https:\/\/github.com\/team\/repo-b/);
+  });
+});
+
 test('scoped marketplace operations use raw provider tokens with the CLI-specific environment name', async () => {
   await fixture(async home => {
     const cases: { repository: Repository; scheme: CliCredential['scheme']; variable: string }[] = [

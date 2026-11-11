@@ -1,10 +1,10 @@
 import { join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
 import { record } from '../apm/adapters';
-import { marketplaceManifest, readMarketplaces, readOptional } from '../apm/manifest';
+import { marketplaceManifest, readMarketplaces } from '../apm/manifest';
 import { marketplaceRepository, remoteSource } from '../apm/remoteMetadata';
 import type { Marketplace } from '../apm/types';
-import { repositoryFromSource, type Repository, type RepositoryHost } from './repositories';
+import { repositoryFromSource, repositoryFromPackageSource, type Repository, type RepositoryHost } from './repositories';
+import { dependencyExpressions } from './dependencies';
 
 export interface CliCredential {
   repository: Repository;
@@ -38,19 +38,10 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   if (args[0] === 'marketplace' && !['add', 'update', 'check'].includes(args[1])) return {};
   const registered = await readMarketplaces(home);
   const repositories = new Map<string, Repository>();
-  const add = (source: unknown) => {
+  const add = (source: unknown, packageSource = false) => {
     if (typeof source !== 'string' || /^(?:file:|\/|\.\/|\.\.\/)/.test(source)) return;
-    const repository = repositoryFromSource(source, authentication.hosts());
+    const repository = packageSource ? repositoryFromPackageSource(source, authentication.hosts()) : repositoryFromSource(source, authentication.hosts());
     if (repository) repositories.set(key(repository), repository);
-  };
-  const sourceOf = (value: unknown) => {
-    if (typeof value === 'string') { expression(value); return; }
-    if (!record(value)) return;
-    if (typeof value.host === 'string' && typeof value.repo_url === 'string') {
-      add(`https://${value.host}/${value.repo_url}`);
-    } else for (const field of ['git', 'repo', 'repository', 'url', 'repo_url']) {
-      if (typeof value[field] === 'string') add(value[field]);
-    }
   };
   const addMarketplace = async (marketplace: Marketplace, pluginName?: string) => {
     if (!/^(?:file:|\/|\.\/|\.\.\/)/.test(marketplace.source)) {
@@ -72,7 +63,7 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   function expression(value: string) {
     const match = /^([^/@:#]+)@([^/#]+)(?:#.*)?$/.exec(value);
     if (match) selectedMarketplaces.set(match[2], match[1]);
-    else add(value);
+    else add(value, true);
   }
   if (args[0] === 'marketplace') {
     if (args[1] === 'add') add(args[2]);
@@ -80,15 +71,7 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   } else {
     for (const arg of args.slice(1).filter(value => !value.startsWith('-'))) expression(arg);
     const root = args.includes('--global') ? join(home, '.apm') : cwd;
-    for (const name of ['apm.yml', 'apm.lock.yaml']) {
-      const text = await readOptional(join(root, name));
-      if (text === undefined) continue;
-      const document: unknown = parseYaml(text);
-      if (!record(document)) throw new Error(`Cannot read authentication context from ${name}: expected an object.`);
-      const dependencies = document.dependencies;
-      if (Array.isArray(dependencies)) dependencies.forEach(sourceOf);
-      else if (record(dependencies) && Array.isArray(dependencies.apm)) dependencies.apm.forEach(sourceOf);
-    }
+    for (const dependency of await dependencyExpressions(root)) expression(dependency);
     for (const [name, plugin] of selectedMarketplaces) {
       const marketplace = registered.find(entry => entry.name === name);
       if (marketplace) await addMarketplace(marketplace, plugin);
@@ -100,16 +83,20 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   if (!selected.length) return {};
   const tokens = new Set(selected.map(credential => credential.token));
   const origins = new Set([...repositories.values()].map(repository => repository.origin));
-  if (tokens.size > 1 || origins.size > 1 ||
-    selected.some(credential => credential.repository.provider === 'azure' && credential.scheme === 'bearer')) {
-    throw new Error(compatibilityError);
+  const describe = (entries: readonly Repository[]) => entries.map(repository => `${repository.origin}/${repository.path}`).join(', ');
+  if (tokens.size > 1) throw new Error(`${compatibilityError} Different credentials are required by: ${describe(selected.map(entry => entry.repository))}.`);
+  if (origins.size > 1) throw new Error(`${compatibilityError} Multiple repository origins are involved: ${describe([...repositories.values()])}.`);
+  if (selected.some(credential => credential.repository.provider === 'azure' && credential.scheme === 'bearer')) {
+    throw new Error(`${compatibilityError} Azure bearer credentials are not supported by this CLI.`);
   }
   // Scoped marketplace operations have one concrete source. A resolver operation
   // can discover new repositories that the current CLI cannot credential-scope.
   if (args[0] !== 'marketplace') {
     const bindings = authentication.knownRepositories();
-    if (bindings.some(repository => !repositories.has(key(repository))) || selected.some(credential => credential.repository.provider !== 'github' ||
-      credential.repository.origin !== 'https://github.com')) throw new Error(compatibilityError);
+    const outside = bindings.filter(repository => !repositories.has(key(repository)));
+    if (outside.length) throw new Error(`${compatibilityError} Saved bindings outside this operation: ${describe(outside)}.`);
+    const unsupported = selected.filter(credential => credential.repository.provider !== 'github' || credential.repository.origin !== 'https://github.com');
+    if (unsupported.length) throw new Error(`${compatibilityError} Resolver credentials are unsupported for: ${describe(unsupported.map(entry => entry.repository))}.`);
   }
   const credential = selected[0];
   if (credential.repository.provider === 'github') {

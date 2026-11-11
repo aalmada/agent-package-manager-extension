@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { repositoryForRequest, repositoryFromSource, repositoryProbeUrl } from '../../src/auth/repositories';
+import { repositoryForRequest, repositoryFromPackageSource, repositoryFromSource, repositoryProbeUrl } from '../../src/auth/repositories';
 
 test('repository sources normalize transport and preserve provider-specific paths', () => {
   for (const source of ['owner/repo', 'github.com/owner/repo', 'https://github.com/owner/repo.git#main', 'git@github.com:owner/repo.git', 'ssh://git@github.com/owner/repo']) {
@@ -27,6 +27,21 @@ test('repository parsing rejects credentials, traversal and unapproved origins',
     assert.equal(repositoryFromSource(source), undefined, source);
   }
   assert.equal(repositoryFromSource('https://enterprise.test/a/b', [{ origin: 'https://enterprise.test', provider: 'github' }])?.origin, 'https://enterprise.test');
+});
+
+test('direct GitHub package paths resolve to their validated repository root', () => {
+  const expected = { provider: 'github', origin: 'https://github.com', path: 'owner/repo' };
+  for (const source of ['owner/repo/plugins/one#release', 'github.com/owner/repo/plugins/one',
+    'https://github.com/owner/repo.git/plugins/one#v1', 'git@github.com:owner/repo/plugins/one',
+    'ssh://git@github.com/owner/repo/plugins/one']) {
+    assert.deepEqual(repositoryFromPackageSource(source), expected, source);
+  }
+  for (const source of ['https://user@github.com/owner/repo/plugin', 'owner/repo/../other',
+    'owner/repo/%2e%2e/other', 'owner/repo/a%2fb', 'owner/repo/a//b',
+    'https://github.com.evil.test/owner/repo/plugin', 'owner/repo/plugin?token=secret']) {
+    assert.equal(repositoryFromPackageSource(source), undefined, source);
+  }
+  assert.equal(repositoryFromPackageSource('https://gitlab.com/group/subgroup/repo')?.path, 'group/subgroup/repo');
 });
 
 test('metadata request routes identify exactly one contained repository', () => {
