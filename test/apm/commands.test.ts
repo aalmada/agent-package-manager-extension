@@ -6,10 +6,15 @@ import { descriptors, buildCommandArguments, requiresTerminal } from '../../src/
 test('utility commands stay contextual instead of cluttering the Command Palette', () => {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
   const menus = manifest.contributes.menus;
-  for (const command of ['apm.settings', 'apm.output', 'apm.refresh', 'apm.targets', 'apm.dependencies.refresh', 'apm.dependencies.why']) {
+  for (const command of ['apm.settings', 'apm.output', 'apm.refresh', 'apm.targets']) {
     assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
   }
+  for (const command of ['apm.dependencies.refresh', 'apm.dependencies.why']) {
+    assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
+    assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'isWorkspaceTrusted', command);
+  }
+  assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.actions')?.when, 'isWorkspaceTrusted');
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.dependencies.find')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
   for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle', 'apm.reports.dependencies']) {
     assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
@@ -24,10 +29,8 @@ test('utility commands stay contextual instead of cluttering the Command Palette
   for (const command of ['apm.settings', 'apm.refresh']) {
     assert.ok(menus['view/title'].some((entry: { command: string; when: string }) => entry.command === command && entry.when === 'view == apm.browser'), command);
   }
-  assert.ok(menus['view/title'].some((entry: { command: string; when: string }) =>
-    entry.command === 'apm.dependencies.refresh' && entry.when === 'view == apm.dependencyTree && isWorkspaceTrusted'));
-  assert.ok(menus['view/item/context'].some((entry: { command: string; when: string }) =>
-    entry.command === 'apm.dependencies.why' && entry.when.includes('viewItem == apmDependencyPackage') && entry.when.includes('isWorkspaceTrusted')));
+  assert.ok(!menus['view/title'].some((entry: { command: string }) => entry.command === 'apm.dependencies.refresh'));
+  assert.ok(!menus['view/item/context']?.some((entry: { command: string }) => entry.command === 'apm.dependencies.why'));
   assert.ok(menus['editor/context'].some((entry: { command: string }) => entry.command === 'apm.dependencies.find'));
   assert.ok(menus['explorer/context'].some((entry: { command: string }) => entry.command === 'apm.dependencies.find'));
 });

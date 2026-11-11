@@ -9,7 +9,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 - [`src/webview/`](src/webview/) contains the browser UI; [`src/views/`](src/views/) provides the webview shell and sanitized Markdown.
 - Keep search and filters fixed above the browser's custom sections. Preserve right-aligned filtered counts, accessible resize handles between package sections, and saved sizes and collapse state.
 - [`src/navigation.ts`](src/navigation.ts) owns verified file links and audit Problems; [`src/manifestAssistance.ts`](src/manifestAssistance.ts) provides local YAML assistance; [`src/taskProvider.ts`](src/taskProvider.ts) discovers reusable tasks.
-- The Dependencies tree runs `apm deps tree` only on explicit refresh; package context actions use `apm deps why`, and file-owner actions use `apm find`.
+- Keep dependency browsing, the dependency tree report, and `apm deps why` actions inside the Agent Package Manager view; run `apm deps tree` only after an explicit user action. File-owner actions use `apm find`.
 - Run policy status, pending-approval, effective-trust, and explain reports only from explicit commands; route reports to read-only result documents. Approve/deny must keep package scope and policy destination distinct and require confirmation.
 - Run marketplace validation, checks, audits, and outdated reports only from explicit commands; label network versus offline modes and preserve nonzero report output in read-only documents.
 - Run MCP registry list/search/show only from explicit commands and preserve reports, including nonzero output, in read-only documents. Install MCP servers by registry name through the canonical `apm install --mcp` path, ask for a destination independently of scope filters, and retain mutation confirmation.

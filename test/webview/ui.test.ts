@@ -130,9 +130,11 @@ test('busy views leave progress to VS Code without refresh buttons or working ba
 test('one browser view keeps search and filter controls above all sections', () => {
   const contributions = JSON.parse(readFileSync('package.json', 'utf8')).contributes;
   assert.equal(contributions.views.apm.filter((view: { type?: string }) => view.type === 'webview').length, 1);
+  assert.equal(contributions.views.apm.length, 1);
   assert.equal(contributions.views.apm[0].id, 'apm.browser');
   assert.equal(contributions.views.apm[0].name, contributions.viewsContainers.activitybar[0].title);
-  assert.ok(contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencyTree'));
+  assert.ok(contributions.commands.some((command: { command: string }) => command.command === 'apm.actions'));
+  assert.ok(!contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencyTree'));
   assert.ok(!contributions.commands.some((command: { command: string }) => command.command === 'apm.getStarted'));
   assert.equal(contributions.walkthroughs, undefined);
   assert.ok(!contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencies'));
@@ -199,7 +201,9 @@ test('hidden sections remove their headers and sashes but preserve fixed search'
     assert.equal(page.document.querySelectorAll('.section-heading, [role="separator"]').length, 0);
     assert.ok(page.document.querySelector('#search'));
     page.state.browserSearch = '@dependencies'; page.update();
-    assert.equal(page.document.querySelectorAll('.section-heading').length, 3);
+    assert.equal(page.document.querySelectorAll('.section-heading').length, 0);
+    page.state.hiddenSections = []; page.update();
+    assert.equal(page.document.querySelectorAll('.section-heading').length, 1);
     page.state.browserSearch = ''; page.state.hiddenSections = []; page.update();
     assert.equal(page.document.querySelectorAll('.section-heading').length, 3);
     assert.deepEqual([...page.document.querySelectorAll('.count-badge')].map(node => node.textContent), ['2', '1', '1']);
@@ -411,7 +415,7 @@ test('section sizes and collapse state survive recreation and filter changes', (
       assert.equal(restored.document.querySelector<HTMLElement>('[data-section="catalog"]')!.style.flexGrow, '150');
       const filter = (value: string) => restored.dom.window.dispatchEvent(new restored.dom.window.MessageEvent('message', { data: { type: 'setSearch', search: value } }));
       filter('@dependencies');
-      assert.ok(restored.document.querySelector('#section-heading-direct'));
+      assert.match(restored.document.querySelector('.dependency-group-heading')?.textContent ?? '', /Direct dependencies/);
       filter('');
       assert.equal(restored.document.querySelector('#section-heading-catalog')?.getAttribute('aria-expanded'), 'false');
       assert.equal(restored.document.querySelector('.sidebar-controls [role="separator"]'), null);
@@ -701,11 +705,20 @@ test('dependency mode groups current-scope packages in the browser and supports 
     const search = (value: string) => page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message', { data: { type: 'setSearch', search: value } }));
     search('@dependencies');
     assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Workspace: project.*Remote: ssh-remote/);
+    assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Installed dependencies/);
+    const actions = page.document.querySelector<HTMLButtonElement>('[aria-label="More APM actions"]');
+    assert.ok(actions);
+    actions.click();
+    assert.equal(page.messages.at(-1)?.type, 'actions');
+    [...page.document.querySelectorAll('button')].find(button => button.textContent === 'View dependency tree')!.click();
+    assert.equal(page.messages.at(-1)?.type, 'dependencyTree');
     assert.doesNotMatch(page.document.body.textContent ?? '', /\/project|Catalog|dependency graph/);
+    const groupLabels = { direct: 'Direct dependencies', transitive: 'Transitive dependencies', unclassified: 'Unclassified dependencies' };
     for (const section of ['direct', 'transitive', 'unclassified'] as const) {
       page.state.browserSearch = '@dependencies'; page.update();
       assert.equal(page.document.querySelectorAll(`#section-body-${section} .package-row`).length, 1);
-      assert.equal(page.document.querySelector(`#section-heading-${section} .count-badge`)?.textContent, '1');
+      const heading = [...page.document.querySelectorAll('.dependency-group-heading')].find(node => node.textContent?.startsWith(groupLabels[section]));
+      assert.equal(heading?.textContent, `${groupLabels[section]} (1)`);
     }
     page.document.querySelector<HTMLButtonElement>('#package-Transitive\\ dependencies-transitive')!.click();
     assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"details","id":"transitive"}');
@@ -750,19 +763,22 @@ test('dependency navigation survives the browser being opened for the first time
 
 test('plugin page buttons run package actions and show results in place', () => {
   const page = browser();
-  Object.assign(page.state, { mode: 'details', item: page.state.installed[0], details: {} });
+  const installed = { ...page.state.installed[0], scope: page.state.scopes[0] };
+  page.state.installed = [installed];
+  Object.assign(page.state, { mode: 'details', item: installed, details: {} });
   page.update();
   const click = (text: string) => [...page.document.querySelectorAll('button')].find(b => b.textContent === text)!.click();
   for (const text of ['Update', 'Uninstall', 'Change version…', 'Audit']) click(text);
   assert.deepEqual(page.messages.filter(m => m.type === 'packageAction').map(m => 'action' in m && m.action), ['update', 'uninstall', 'installWithOptions', 'audit']);
+  click('Explain dependency');
+  assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'dependencyWhy', id: installed.id, scopeKey: 'workspace:/project' }));
   click('View workspace dependencies');
   assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"dependencies"}');
-  assert.equal([...page.document.querySelectorAll('button')].some(b => b.textContent === 'Dependency tree'), false);
 
   page.state.actionResult = { action: 'update', title: 'Update sample', status: 'running', command: 'apm update sample --yes' };
   page.update();
   assert.match(page.document.querySelector('.action-result')!.textContent!, /Update sample.*Running/);
-  assert.equal(page.document.querySelector<HTMLButtonElement>('.toolbar button')!.disabled, true);
+  assert.equal(page.document.querySelector<HTMLButtonElement>('#package-action-update')!.disabled, true);
   click('Cancel');
   assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"cancel"}');
 

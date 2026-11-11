@@ -63,6 +63,7 @@ p { line-height: 1.5; }
 .searchbar input:focus { outline: 0; }
 .icon-button { padding: 4px; background: transparent; color: var(--vscode-icon-foreground); border: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; min-width: 25px; }
 .icon-button.codicon { width: 22px; height: 22px; min-width: 22px; padding: 3px; margin-right: 2px; border-radius: 5px; }
+.actions-button { width: auto; min-width: 0; height: auto; padding: 3px 7px; margin: 0 3px 0 0; white-space: nowrap; border-radius: 3px; }
 .icon-button svg { width: 16px; height: 16px; display: block; }
 .icon-button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
 .icon-button:disabled { opacity: .5; background: transparent; }
@@ -72,6 +73,10 @@ p { line-height: 1.5; }
 .dependency-summary h2 { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
 .dependency-summary p { margin: 6px 0; }
 .dependency-summary button { margin-top: 4px; }
+.dependency-groups { overflow-y: auto; }
+.dependency-group { border-top: 1px solid var(--vscode-panel-border); }
+.dependency-group-heading { font-size: 12px; font-weight: 600; margin: 0; padding: 8px 12px; }
+.dependency-group > .section-body { flex: 0 0 auto; min-height: 0; overflow: visible; }
 .package-row { width: 100%; padding: 8px 12px 8px 22px; display: flex; gap: 10px; background: transparent; color: var(--vscode-foreground); border: 0; border-radius: 0; text-align: left; }
 .package-row:hover { background: var(--vscode-list-hoverBackground); }
 .package-row:focus-visible { background: var(--vscode-list-focusBackground); outline-offset: -1px; }

@@ -56,6 +56,7 @@ interface Harness {
   installMcpServer(): Promise<void>;
   lifecycleWorkflows(): Promise<void>;
   dependencyReports(): Promise<void>;
+  moreActions(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -186,7 +187,6 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' }
     ] },
     nativeOperations: new Set(), results: new Map(), search: '', refreshNotices: new Set(), readmeNotices: new Set(),
-    dependencyTree: { clear() {} },
     catalogSnapshots: new Map(), updateSnapshots: new Map(),
     authentication: { invalidate() {}, hosts: () => [] },
     settingsSync: { retry() {} },
@@ -1033,6 +1033,43 @@ test('dependency reports check outdated packages and export SBOMs in both format
   assert.equal(declined.argv.length, 0, 'Dismissing the SBOM write confirmation does not run APM');
 });
 
+test('dependency tree and why reports stay in the selected package scope', async () => {
+  const global: Scope = { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' };
+  const host = harness({
+    scope: global,
+    output: args => args[1] === 'tree'
+      ? { stdout: 'project\n└── owner/package@1.2.0', stderr: '', exitCode: 0 }
+      : { stdout: '{"package":"owner/package","parents":[]}', stderr: '', exitCode: 0 }
+  });
+  const panel: Panel = { mode: 'browser', scope: global, extra: {} };
+  await host.extension.handle({ type: 'dependencyTree' }, panel);
+  assert.deepEqual(Array.from(host.argv[0]), ['deps', 'tree', '--global']);
+  assert.match(host.previews[0].content, /owner\/package@1\.2\.0/);
+
+  host.extension.state.installed = [{
+    id: 'owner/package', name: 'package', marketplace: '', version: '1.2.0', installed: true, scope: global,
+    metadata: { cliIdentity: 'owner/package' }
+  }];
+  await host.extension.handle({ type: 'dependencyWhy', id: 'owner/package', scopeKey: 'global:/home/test/.apm' }, panel);
+  assert.deepEqual(Array.from(host.argv[1]), ['deps', 'why', '--global', 'owner/package', '--json']);
+  assert.match(host.previews[1].content, /"parents": \[\]/);
+  assert.equal(host.executionScopes[1]?.kind, 'global');
+});
+
+test('More APM actions picker exposes recently added workflows', async () => {
+  const host = harness({ picks: [8] });
+  let invoked = false;
+  Reflect.set(host.extension, 'discoverMcpServers', async () => { invoked = true; });
+  await host.extension.moreActions();
+  assert.equal(invoked, true);
+  assert.deepEqual(host.choices[0].labels, [
+    'Dependency Reports', 'View Dependency Tree', 'Explain Dependency', 'Find File Owner',
+    'Review Executable Trust', 'Manage Executable Trust', 'Explain Package Policy',
+    'Check Marketplace Health', 'Discover MCP Servers', 'Install MCP Server',
+    'Manage Lifecycle Workflows'
+  ]);
+});
+
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {
   const host = harness();
   await host.extension.handle({ type: 'dependencies' }, {
@@ -1081,6 +1118,9 @@ test('deployment explanations use native pickers and removed generic messages ar
   assert.deepEqual(Array.from(host.argv[0]), ['targets', '--json']);
   assert.match(host.prompts[0], /APM deployment targets/);
   for (const type of ['tools', 'selectCommand', 'command', 'help']) assert.throws(() => parseMessage({ type, id: 'install', args: {}, options: {} }), /Unknown/);
+  assert.deepEqual(parseMessage({ type: 'dependencyWhy', id: 'sample', scopeKey: 'workspace:/project' }),
+    { type: 'dependencyWhy', id: 'sample', scopeKey: 'workspace:/project' });
+  assert.throws(() => parseMessage({ type: 'dependencyWhy', id: 'sample' }), /Unknown/);
 });
 
 test('native script selection starts only the chosen folder-bound VS Code task', async () => {

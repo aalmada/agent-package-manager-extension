@@ -25,7 +25,7 @@ import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveCo
 import { RepositoryAccessError, RepositoryAuthentication, signInToGithub } from './authentication';
 import { cliEnvironment } from './auth/cli';
 import { repositoryFromPackageSource, type Repository } from './auth/repositories';
-import { DependencyTreeProvider, DependencyTreeItem } from './dependencyTree';
+import { parseDependencyTree } from './apm/dependencyTree';
 
 interface PanelContext {
   webview?: vscode.Webview;
@@ -70,7 +70,6 @@ class ApmExtension implements vscode.Disposable {
   private epoch = 0;
   private readonly settingsSync: SettingsSync;
   private readonly diagnostics = new AuditDiagnostics();
-  private readonly dependencyTree = new DependencyTreeProvider();
   private readonly authentication: RepositoryAuthentication;
   private state: State = {
     mode: 'browser', trusted: vscode.workspace.isTrusted, scopes: [], scopeKey: '', busy: false,
@@ -95,7 +94,6 @@ class ApmExtension implements vscode.Disposable {
       message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation)
     );
     this.subscriptions.push(this.output, this.diagnostics);
-    this.subscriptions.push(this.dependencyTree, vscode.window.registerTreeDataProvider('apm.dependencyTree', this.dependencyTree));
     this.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('apm-result', {
       provideTextDocumentContent: uri => {
         const content = this.results.get(uri.toString());
@@ -747,6 +745,26 @@ class ApmExtension implements vscode.Disposable {
     if (!await hasProjectManifest(scope.path)) throw new Error(`Initialize an APM project in ${scope.label} before changing its lifecycle configuration.`);
     await this.runLifecycleCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
   }
+  async moreActions() {
+    const actions = [
+      { label: 'Dependency Reports', description: 'Check outdated packages or generate an SBOM', run: () => this.dependencyReports() },
+      { label: 'View Dependency Tree', description: 'Inspect the selected scope dependency tree', run: () => this.refreshDependencyTree() },
+      { label: 'Explain Dependency', description: 'Inspect why an installed package is present', run: () => this.explainDependency() },
+      { label: 'Find File Owner', description: 'Find which APM package deployed a file', run: () => this.findDependencyFile() },
+      { label: 'Review Executable Trust', description: 'Review executable policy and pending approvals', run: () => this.reviewExecutableTrust() },
+      { label: 'Manage Executable Trust', description: 'Approve or deny a package executable primitives', run: () => this.manageExecutableTrust() },
+      { label: 'Explain Package Policy', description: 'Inspect a package effective policy decision', run: () => this.workflow('policy') },
+      { label: 'Check Marketplace Health', description: 'Check marketplace packages and dependency health', run: () => this.marketplaceHealth() },
+      { label: 'Discover MCP Servers', description: 'Search the configured MCP registry', run: () => this.discoverMcpServers() },
+      { label: 'Install MCP Server', description: 'Install a server from the configured MCP registry', run: () => this.installMcpServer() },
+      { label: 'Manage Lifecycle Workflows', description: 'Inspect and manage APM lifecycle scripts', run: () => this.lifecycleWorkflows() }
+    ];
+    const selected = await vscode.window.showQuickPick(actions, {
+      title: 'More APM actions',
+      placeHolder: 'Search dependency, policy, marketplace, MCP, and lifecycle workflows'
+    });
+    await selected?.run();
+  }
   async dependencyReports() {
     const scope = await this.workflowScope();
     if (!scope) return;
@@ -815,11 +833,12 @@ class ApmExtension implements vscode.Disposable {
         .then(undefined, error => this.report(error));
     });
   }
-  private async showDependencyReport(scope: Scope, title: string, args: string[]) {
+  private async showDependencyReport(scope: Scope, title: string, args: string[], validate?: (output: string) => void) {
     const result = await this.executeInspection(scope, title, args);
     if (!result) return;
     const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
     if (result.exitCode === 0 && !output) throw new Error('APM returned an empty dependency report. Review APM Output.');
+    if (result.exitCode === 0) validate?.(result.stdout);
     await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
     if (result.exitCode !== 0) {
       void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
@@ -939,22 +958,15 @@ class ApmExtension implements vscode.Disposable {
       if (!controller.signal.aborted) throw error;
     } finally { this.nativeOperations.delete(context); }
   }
-  async refreshDependencyTree() {
-    this.requireTrust();
-    const scope = { ...this.scope() };
-    const args = ['deps', 'tree', ...(scope.kind === 'global' ? ['--global'] : [])];
-    const result = await this.client(scope).execute(args);
-    if (result.exitCode !== 0) throw new Error(`Dependency tree failed: ${redact(result.stderr || result.stdout)}`);
-    this.dependencyTree.setTree(result.stdout.trim(), scopeKey(scope), scopeLabel(scope));
+  async refreshDependencyTree(capturedScope?: Scope) {
+    const scope = { ...(capturedScope ?? this.scope()) };
+    await this.showDependencyReport(scope, `Dependency tree — ${scope.label}`,
+      ['deps', 'tree', ...(scope.kind === 'global' ? ['--global'] : [])], output => { parseDependencyTree(output); });
   }
-  async explainDependency(target?: unknown) {
+  async explainDependency(target?: unknown, capturedScope?: Scope) {
     this.requireTrust();
-    const item = target instanceof DependencyTreeItem ? target : undefined;
-    const scope = item
-      ? this.state.scopes.find(candidate => scopeKey(candidate) === item.scopeKey)
-      : { ...this.scope() };
-    if (!scope) throw new Error('The dependency scope is no longer available. Refresh the tree.');
-    let packageName = item?.node.packageName ?? (typeof target === 'string' ? target : undefined);
+    const scope = { ...(capturedScope ?? this.scope()) };
+    let packageName = typeof target === 'string' ? target : undefined;
     if (!packageName) {
       const installed = await this.client(scope).getInstalled(scope);
       if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
@@ -965,9 +977,10 @@ class ApmExtension implements vscode.Disposable {
       packageName = packageIdentity(picked.dependency, picked.dependency, false);
     }
     if (packageName.startsWith('-') || /[\s\0]/.test(packageName)) throw new Error('APM returned an invalid dependency identity.');
-    const result = await this.client(scope).execute([
+    const result = await this.executeInspection(scope, `Why ${packageName} is installed`, [
       'deps', 'why', ...(scope.kind === 'global' ? ['--global'] : []), packageName, '--json'
     ]);
+    if (!result) return;
     if (result.exitCode !== 0) throw new Error(`Dependency explanation failed: ${redact(result.stderr || result.stdout)}`);
     let formatted: string;
     try { formatted = JSON.stringify(JSON.parse(result.stdout), null, 2); }
@@ -1214,7 +1227,6 @@ class ApmExtension implements vscode.Disposable {
   }
   private async selectScope(key: string) {
     this.epoch++; this.refreshController?.abort(); if (this.refreshing) this.refreshAgain = true;
-    this.dependencyTree.clear();
     this.state.scopeKey = key; this.state.catalog = []; this.state.installed = []; this.state.checkedAt = undefined;
     this.state.projectPresent = undefined;
     if (this.sidebar) this.sidebar.extra.targets = undefined;
@@ -1318,6 +1330,15 @@ class ApmExtension implements vscode.Disposable {
         if (scopeKey(scope) !== this.state.scopeKey) await this.selectScope(scopeKey(scope));
         this.setSearch('@dependencies');
         await vscode.commands.executeCommand('apm.browser.focus');
+        break;
+      }
+      case 'dependencyTree': await this.refreshDependencyTree(this.scope(context)); break;
+      case 'actions': await this.moreActions(); break;
+      case 'dependencyWhy': {
+        const scope = this.state.scopes.find(candidate => scopeKey(candidate) === message.scopeKey);
+        const item = scope && this.state.installed.find(candidate => candidate.id === message.id && inScope(candidate, scope));
+        if (!scope || !item) throw new Error('This installed dependency is no longer available. Refresh and retry.');
+        await this.explainDependency(packageIdentity(item, item, false), scope);
         break;
       }
       case 'chooseScope': await this.chooseAnyScope(); break;
@@ -1824,6 +1845,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.dependencies.refresh', () => extension.refreshDependencyTree()],
     ['apm.dependencies.why', (item?: unknown) => extension.explainDependency(item)],
     ['apm.dependencies.find', (uri?: unknown) => extension.findDependencyFile(uri)],
+    ['apm.actions', () => extension.moreActions()],
     ['apm.policy.review', () => extension.reviewExecutableTrust()],
     ['apm.policy.explain', () => extension.workflow('policy')],
     ['apm.policy.manage', () => extension.manageExecutableTrust()],

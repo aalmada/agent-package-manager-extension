@@ -60,11 +60,6 @@
           "name": "Agent Package Manager",
           "icon": "media/apm.svg",
           "type": "webview"
-        },
-        {
-          "id": "apm.dependencyTree",
-          "name": "Dependencies",
-          "icon": "media/apm.svg"
         }
       ]
     },
@@ -78,7 +73,8 @@
       { "command": "apm.signIn", "title": "APM: Sign in to GitHub" },
       { "command": "apm.manageAccounts", "title": "APM: Manage Repository Accounts" },
       { "command": "apm.targets", "title": "APM: Explain Deployment Targets" },
-      { "command": "apm.dependencies.refresh", "title": "APM: Refresh Dependency Tree" },
+      { "command": "apm.actions", "title": "APM: More Actions" },
+      { "command": "apm.dependencies.refresh", "title": "APM: View Dependency Tree" },
       { "command": "apm.dependencies.why", "title": "APM: Explain Dependency" },
       { "command": "apm.dependencies.find", "title": "APM: Find File Owner" },
       { "command": "apm.policy.review", "title": "APM: Review Executable Trust" },
@@ -175,26 +171,6 @@
           "command": "apm.settings",
           "when": "view == apm.browser",
           "group": "2_settings@1"
-        },
-        {
-          "command": "apm.dependencies.refresh",
-          "when": "view == apm.dependencyTree && isWorkspaceTrusted",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        { "command": "apm.dependencies.why", "when": "view == apm.dependencyTree && viewItem == apmDependencyPackage && isWorkspaceTrusted", "group": "inline" }
-      ],
-      "viewsWelcome": [
-        {
-          "view": "apm.dependencyTree",
-          "when": "isWorkspaceTrusted",
-          "contents": "Refresh to inspect the APM dependency tree for the selected package scope. Select a dependency and choose **Explain Dependency** to see why it is installed.\n\n[Refresh Dependency Tree](command:apm.dependencies.refresh)"
-        },
-        {
-          "view": "apm.dependencyTree",
-          "when": "!isWorkspaceTrusted",
-          "contents": "Trust the workspace before running APM dependency inspections."
         }
       ],
       "apm.views": [
@@ -263,11 +239,12 @@
         { "command": "apm.validate", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.auditWorkspace", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.targets", "when": "false" },
+        { "command": "apm.actions", "when": "isWorkspaceTrusted" },
         { "command": "apm.settings", "when": "false" },
         { "command": "apm.output", "when": "false" },
         { "command": "apm.refresh", "when": "false" },
-        { "command": "apm.dependencies.refresh", "when": "false" },
-        { "command": "apm.dependencies.why", "when": "false" },
+        { "command": "apm.dependencies.refresh", "when": "isWorkspaceTrusted" },
+        { "command": "apm.dependencies.why", "when": "isWorkspaceTrusted" },
         { "command": "apm.dependencies.find", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.policy.review", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.policy.explain", "when": "isWorkspaceTrusted" },

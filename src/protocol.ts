@@ -37,10 +37,11 @@ export interface State {
   actionResult?: ActionResult;
 }
 export type Message =
-  | { type: 'ready' | 'refresh' | 'install' | 'dependencies' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' }
+  | { type: 'ready' | 'refresh' | 'install' | 'dependencies' | 'dependencyTree' | 'actions' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' }
   | { type: 'scope'; key: string }
   | { type: 'filters'; search: string }
   | { type: 'details'; id: string; scopeKey?: string }
+  | { type: 'dependencyWhy'; id: string; scopeKey: string }
   | { type: 'packageAction'; action: PackageAction }
   | { type: 'external'; url: string }
   | { type: 'workflow'; workflow: Workflow }
@@ -49,9 +50,12 @@ export type Message =
 
 export function parseMessage(value: unknown): Message {
   if (!record(value) || typeof value.type !== 'string') throw new Error('Invalid webview message.');
-  const simple = ['ready', 'refresh', 'install', 'dependencies', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
+  const simple = ['ready', 'refresh', 'install', 'dependencies', 'dependencyTree', 'actions', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
     'chooseScope', 'targets', 'configureTargets', 'retry'];
   if (simple.includes(value.type)) return { type: value.type } as Message;
+  if (value.type === 'dependencyWhy' && typeof value.id === 'string' && typeof value.scopeKey === 'string') {
+    return { type: 'dependencyWhy', id: value.id, scopeKey: value.scopeKey };
+  }
   if (value.type === 'details') {
     if (typeof value.id !== 'string' || (value.scopeKey !== undefined && typeof value.scopeKey !== 'string')) throw new Error('Invalid package details request.');
     return { type: 'details', id: value.id, ...(typeof value.scopeKey === 'string' ? { scopeKey: value.scopeKey } : {}) };
