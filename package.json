@@ -73,7 +73,7 @@
       { "command": "apm.signIn", "title": "APM: Sign in to GitHub" },
       { "command": "apm.manageAccounts", "title": "APM: Manage Repository Accounts" },
       { "command": "apm.targets", "title": "APM: Explain Deployment Targets" },
-      { "command": "apm.actions", "title": "APM: More Actions" },
+      { "command": "apm.actions", "title": "APM: More APM Actions" },
       { "command": "apm.dependencies.refresh", "title": "APM: View Dependency Tree" },
       { "command": "apm.dependencies.why", "title": "APM: Explain Dependency" },
       { "command": "apm.dependencies.find", "title": "APM: Find File Owner" },
@@ -171,6 +171,11 @@
           "command": "apm.settings",
           "when": "view == apm.browser",
           "group": "2_settings@1"
+        },
+        {
+          "command": "apm.actions",
+          "when": "view == apm.browser && isWorkspaceTrusted",
+          "group": "3_actions@1"
         }
       ],
       "apm.views": [

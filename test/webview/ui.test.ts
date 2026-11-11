@@ -706,10 +706,8 @@ test('dependency mode groups current-scope packages in the browser and supports 
     search('@dependencies');
     assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Workspace: project.*Remote: ssh-remote/);
     assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Installed dependencies/);
-    const actions = page.document.querySelector<HTMLButtonElement>('[aria-label="More APM actions"]');
-    assert.ok(actions);
-    actions.click();
-    assert.equal(page.messages.at(-1)?.type, 'actions');
+    assert.equal(page.document.querySelector('[aria-label="More APM actions"]'), null);
+    assert.equal(page.document.querySelectorAll('.searchbar button').length, 2);
     [...page.document.querySelectorAll('button')].find(button => button.textContent === 'View dependency tree')!.click();
     assert.equal(page.messages.at(-1)?.type, 'dependencyTree');
     assert.doesNotMatch(page.document.body.textContent ?? '', /\/project|Catalog|dependency graph/);

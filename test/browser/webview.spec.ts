@@ -186,6 +186,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await postMessage(page, { type: 'state', state: dependencies });
     await postMessage(page, { type: 'setSearch', search: '@dependencies' });
     await expect(page.getByRole('heading', { name: 'Installed dependencies', exact: true })).toBeVisible();
+    await expect(page.getByLabel('More APM actions')).toHaveCount(0);
     await expect(page.locator('.dependency-summary')).toContainText('Workspace: My agent project');
     await page.getByRole('button', { name: 'View dependency tree' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"dependencyTree"}');

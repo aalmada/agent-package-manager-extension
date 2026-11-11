@@ -29,6 +29,8 @@ test('utility commands stay contextual instead of cluttering the Command Palette
   for (const command of ['apm.settings', 'apm.refresh']) {
     assert.ok(menus['view/title'].some((entry: { command: string; when: string }) => entry.command === command && entry.when === 'view == apm.browser'), command);
   }
+  assert.ok(menus['view/title'].some((entry: { command: string; when: string }) =>
+    entry.command === 'apm.actions' && entry.when === 'view == apm.browser && isWorkspaceTrusted'));
   assert.ok(!menus['view/title'].some((entry: { command: string }) => entry.command === 'apm.dependencies.refresh'));
   assert.ok(!menus['view/item/context']?.some((entry: { command: string }) => entry.command === 'apm.dependencies.why'));
   assert.ok(menus['editor/context'].some((entry: { command: string }) => entry.command === 'apm.dependencies.find'));

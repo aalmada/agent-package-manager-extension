@@ -106,10 +106,7 @@ function renderBrowser() {
   filter.title = 'Filter and sort packages'; filter.setAttribute('aria-label', 'Filter and sort packages'); filter.setAttribute('aria-haspopup', 'menu');
   filter.dataset.vscodeContext = JSON.stringify({ webviewSection: 'filter', preventDefaultContextMenuItems: true });
   filter.innerHTML = codicons.filter;
-  const actions = button('Actions', () => send({ type: 'actions' }), 'icon-button actions-button');
-  actions.title = 'More APM actions';
-  actions.setAttribute('aria-label', 'More APM actions');
-  searchbar.append(input, clear, filter, actions);
+  searchbar.append(input, clear, filter);
   controls.append(searchbar);
   root.append(controls);
   root.append(el('div', 'browser-context'));
