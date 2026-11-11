@@ -84,6 +84,7 @@
       { "command": "apm.policy.review", "title": "APM: Review Executable Trust" },
       { "command": "apm.policy.explain", "title": "APM: Explain Package Policy" },
       { "command": "apm.policy.manage", "title": "APM: Manage Executable Trust" },
+      { "command": "apm.marketplace.health", "title": "APM: Check Marketplace Health" },
       { "command": "apm.runScript", "title": "APM: Run Script" },
       {
         "command": "apm.refresh",
@@ -267,6 +268,7 @@
         { "command": "apm.policy.review", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.policy.explain", "when": "isWorkspaceTrusted" },
         { "command": "apm.policy.manage", "when": "isWorkspaceTrusted" },
+        { "command": "apm.marketplace.health", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
         { "command": "apm.runScript", "when": "isWorkspaceTrusted && workspaceFolderCount != 0 && config.apm.tasks.includeScripts" },
         {
           "command": "apm.filter.installed",

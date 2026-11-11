@@ -51,6 +51,7 @@ interface Harness {
   showTargets(context?: Panel): Promise<void>;
   reviewExecutableTrust(): Promise<void>;
   manageExecutableTrust(): Promise<void>;
+  marketplaceHealth(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -58,6 +59,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   errorChoice?: string;
   inputs?: (string | undefined)[]; picks?: (number | number[] | undefined)[]; scriptsEnabled?: boolean; token?: string;
   installed?: PackageItem[];
+  marketplaces?: Marketplace[];
   tasks?: { definition: { workflow: string; script?: string }; scope: { uri: { fsPath: string } } }[];
   output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number } } = {}) {
   const processListeners = new Set<(event: { execution: Execution; exitCode?: number }) => void>();
@@ -168,7 +170,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     context: { workspaceState: { get: (_key: string, fallback: unknown) => fallback, update: async (key: string, value: unknown) => { saved.set(key, value); } } },
     output: { appendLine() {}, show() {} },
     diagnostics: { clear() {}, begin: (key: string) => ({ key, generation: 0, run: 1 }) },
-    state: { scopeKey: `workspace:${root}`, installed: [], catalog: [], marketplaces: [], scopes: [
+    state: { scopeKey: `workspace:${root}`, installed: [], catalog: [], marketplaces: options.marketplaces ?? [], scopes: [
       { kind: 'workspace', label: 'project', path: root },
       { kind: 'workspace', label: 'other', path: '/other' },
       { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' }
@@ -794,6 +796,34 @@ test('shared executable trust changes require an existing project manifest', asy
     assert.match(host.confirmations[0], /the shared apm\.yml in project/);
     assert.equal(host.executionScopes[0]?.path, root);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('marketplace health offers explicit offline checks and preserves failing reports', async () => {
+  const host = harness({
+    picks: [1],
+    output: args => ({
+      stdout: args.includes('--offline') ? 'Marketplace entry could not be resolved from cache.' : '',
+      stderr: '', exitCode: 1
+    })
+  });
+  await host.extension.marketplaceHealth();
+  assert.deepEqual(Array.from(host.argv[0]), ['marketplace', 'check', '--offline']);
+  assert.match(host.previews[0].content, /Marketplace entry could not be resolved from cache/);
+  assert.match(host.previews[0].content, /Exit code: 1/);
+  assert.match(host.confirmations[0], /reported findings or exited with code 1/);
+});
+
+test('marketplace validation selects a registered marketplace without exposing its source URL', async () => {
+  const host = harness({
+    picks: [4, 0],
+    marketplaces: [{ name: 'central', source: 'https://example.test/marketplace.json' }],
+    output: () => ({ stdout: 'Marketplace structure is valid.', stderr: '', exitCode: 0 })
+  });
+  await host.extension.marketplaceHealth();
+  assert.deepEqual(Array.from(host.argv[0]), ['marketplace', 'validate', 'central']);
+  assert.match(host.previews[0].title, /central/);
+  assert.doesNotMatch(host.choices[1].labels.join(' '), /example\.test/);
+  assert.equal(host.confirmations.length, 0);
 });
 
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {

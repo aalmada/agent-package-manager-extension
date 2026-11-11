@@ -11,6 +11,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 - [`src/navigation.ts`](src/navigation.ts) owns verified file links and audit Problems; [`src/manifestAssistance.ts`](src/manifestAssistance.ts) provides local YAML assistance; [`src/taskProvider.ts`](src/taskProvider.ts) discovers reusable tasks.
 - The Dependencies tree runs `apm deps tree` only on explicit refresh; package context actions use `apm deps why`, and file-owner actions use `apm find`.
 - Run policy status, pending-approval, effective-trust, and explain reports only from explicit commands; route reports to read-only result documents. Approve/deny must keep package scope and policy destination distinct and require confirmation.
+- Run marketplace validation, checks, audits, and outdated reports only from explicit commands; label network versus offline modes and preserve nonzero report output in read-only documents.
 - [`scripts/`](scripts/) builds and generates the CLI contract; [`test/`](test/) contains unit, browser, and extension-host tests.
 
 ## Development

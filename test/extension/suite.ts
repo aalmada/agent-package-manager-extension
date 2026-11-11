@@ -154,7 +154,7 @@ async function steps() {
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
   await unlink(manifestUri.fsPath);
   await unlink(instructionPath);
-  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.dependencies.refresh', 'apm.dependencies.why', 'apm.dependencies.find', 'apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.all', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.dependencies.refresh', 'apm.dependencies.why', 'apm.dependencies.find', 'apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.all', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name']) assert.ok(commands.includes(command), command);
   assert.ok(!commands.includes('apm.filter.sort.version'));
   assert.ok(!commands.includes('apm.filter.sort.version-desc'));
 

@@ -622,6 +622,45 @@ class ApmExtension implements vscode.Disposable {
     if (!picked) return;
     await this.showPolicyReport(scope, picked.title, picked.args, picked.json);
   }
+  async marketplaceHealth() {
+    this.requireTrust();
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const reports = [
+      { label: 'Check marketplace entries (network)', description: 'Resolve entries from the project marketplace configuration', title: 'Marketplace entry check', args: ['marketplace', 'check'] },
+      { label: 'Check marketplace entries (offline)', description: 'Validate schema and cached refs without network access', title: 'Offline marketplace entry check', args: ['marketplace', 'check', '--offline'] },
+      { label: 'Show outdated marketplace packages (network)', description: 'Look for available upgrades', title: 'Outdated marketplace packages', args: ['marketplace', 'outdated'] },
+      { label: 'Show outdated packages (offline)', description: 'Use cached refs only', title: 'Offline outdated marketplace packages', args: ['marketplace', 'outdated', '--offline'] },
+      { label: 'Validate a registered marketplace', description: 'Check marketplace structure and plugin schema', title: 'Marketplace validation', args: ['marketplace', 'validate'], marketplaceCommand: 'validate' as const },
+      { label: 'Audit marketplace dependencies (may fetch refs)', description: 'Check whether plugin dependencies resolve through the marketplace', title: 'Marketplace dependency audit', args: ['marketplace', 'audit'], marketplaceCommand: 'audit' as const }
+    ];
+    const picked = await vscode.window.showQuickPick(reports, {
+      title: `Marketplace health — ${scope.label}`,
+      placeHolder: 'Choose a read-only check; network actions are labeled'
+    });
+    if (!picked) return;
+    const args = [...picked.args];
+    let title = `${picked.title} — ${scope.label}`;
+    if ('marketplaceCommand' in picked) {
+      if (!this.state.marketplaces.length) throw new Error('No registered marketplaces are available to validate or audit.');
+      const selected = await vscode.window.showQuickPick(this.state.marketplaces.map(marketplace => ({
+        label: marketplace.name, marketplace
+      })), { title: picked.title, placeHolder: 'Choose a registered marketplace' });
+      if (!selected) return;
+      args.push(selected.marketplace.name);
+      title = `${picked.title}: ${selected.marketplace.name} — ${scope.label}`;
+    }
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty marketplace health report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
   async manageExecutableTrust() {
     this.requireTrust();
     const selectedScope = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
@@ -676,6 +715,19 @@ class ApmExtension implements vscode.Disposable {
     }
   }
   private async showPolicyReport(scope: Scope, title: string, args: string[], json = false) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    if (result.exitCode !== 0) throw new Error(`APM policy inspection failed: ${redact(result.stderr || result.stdout)}`);
+    let output = result.stdout.trim();
+    if (json) {
+      try { output = JSON.stringify(JSON.parse(output), null, 2); }
+      catch { throw new Error('APM returned an invalid policy status report. Review APM Output.'); }
+    }
+    if (result.stderr.trim()) output = [output, result.stderr.trim()].filter(Boolean).join('\n');
+    if (!output) throw new Error('APM returned an empty policy report. Review APM Output.');
+    await this.showTextResult(title, output);
+  }
+  private async executeInspection(scope: Scope, title: string, args: string[]) {
     this.requireTrust();
     const capturedScope = { ...scope };
     const controller = new AbortController();
@@ -694,15 +746,7 @@ class ApmExtension implements vscode.Disposable {
         } finally { subscription.dispose(); }
       });
       if (controller.signal.aborted) return;
-      if (result.exitCode !== 0) throw new Error(`APM policy inspection failed: ${redact(result.stderr || result.stdout)}`);
-      let output = result.stdout.trim();
-      if (json) {
-        try { output = JSON.stringify(JSON.parse(output), null, 2); }
-        catch { throw new Error('APM returned an invalid policy status report. Review APM Output.'); }
-      }
-      if (result.stderr.trim()) output = [output, result.stderr.trim()].filter(Boolean).join('\n');
-      if (!output) throw new Error('APM returned an empty policy report. Review APM Output.');
-      await this.showTextResult(title, output);
+      return result;
     } catch (error) {
       if (!controller.signal.aborted) throw error;
     } finally { this.nativeOperations.delete(context); }
@@ -1553,6 +1597,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.policy.review', () => extension.reviewExecutableTrust()],
     ['apm.policy.explain', () => extension.workflow('policy')],
     ['apm.policy.manage', () => extension.manageExecutableTrust()],
+    ['apm.marketplace.health', () => extension.marketplaceHealth()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
