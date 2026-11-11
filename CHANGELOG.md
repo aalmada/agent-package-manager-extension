@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Add dependency tree and dependency explanation workflows, executable trust and policy management, and marketplace health checks.
+- Add MCP registry discovery and installation, lifecycle workflow management, outdated dependency reports, and CycloneDX/SPDX SBOM export.
+- Keep dependency categories within the Installed section and expose APM workflows through the Agent Package Manager view's **More APM Actions** menu.
+- Improve dependency scope handling, package navigation, and report access.
+
 ## 0.3.0
 
 - Show global and current-workspace installations and updates together, including global packages without a workspace manifest. Distinguish both catalog installation tags and scope-bound entries, and ask for an installation destination before package/version selection or previews.
