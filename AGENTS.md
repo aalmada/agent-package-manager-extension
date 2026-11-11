@@ -13,6 +13,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 - Run policy status, pending-approval, effective-trust, and explain reports only from explicit commands; route reports to read-only result documents. Approve/deny must keep package scope and policy destination distinct and require confirmation.
 - Run marketplace validation, checks, audits, and outdated reports only from explicit commands; label network versus offline modes and preserve nonzero report output in read-only documents.
 - Run MCP registry list/search/show only from explicit commands and preserve reports, including nonzero output, in read-only documents. Install MCP servers by registry name through the canonical `apm install --mcp` path, ask for a destination independently of scope filters, and retain mutation confirmation.
+- Keep lifecycle listing, validation, and dry-run tests read-only; route test execution, trust changes, and lifecycle block writes through explicit confirmation. Lifecycle operations require a selected workspace project and never run during discovery.
 - [`scripts/`](scripts/) builds and generates the CLI contract; [`test/`](test/) contains unit, browser, and extension-host tests.
 
 ## Development

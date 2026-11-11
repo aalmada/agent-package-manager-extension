@@ -54,6 +54,7 @@ interface Harness {
   marketplaceHealth(): Promise<void>;
   discoverMcpServers(): Promise<void>;
   installMcpServer(): Promise<void>;
+  lifecycleWorkflows(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -896,6 +897,79 @@ test('MCP installation uses the independent destination picker and confirms the 
   await global.extension.installMcpServer();
   assert.deepEqual(Array.from(global.argv[0]), ['install', '--global', '--mcp', 'io.github.example/server']);
   assert.equal(global.executionScopes[0]?.kind, 'global');
+});
+
+test('lifecycle discovery and dry runs stay read-only while execution requires explicit confirmation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-lifecycle-'));
+  try {
+    const inspected = harness({
+      root,
+      picks: [0],
+      output: () => ({ stdout: 'post-install command: echo ready', stderr: '', exitCode: 0 })
+    });
+    await inspected.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(inspected.argv[0]), ['lifecycle']);
+    assert.equal(inspected.confirmations.length, 0);
+
+    const validation = harness({
+      root,
+      picks: [1],
+      output: () => ({ stdout: 'script.js: invalid lifecycle handler', stderr: '', exitCode: 1 })
+    });
+    await validation.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(validation.argv[0]), ['lifecycle', 'validate']);
+    assert.match(validation.previews[0].content, /Exit code: 1/);
+    assert.match(validation.previews[0].content, /invalid lifecycle handler/);
+    assert.match(validation.confirmations[0], /reported findings or exited with code 1/);
+
+    const dryRun = harness({
+      root,
+      picks: [2, 2],
+      output: () => ({ stdout: 'Dry-run: pre-update would fire 1 script.', stderr: '', exitCode: 0 })
+    });
+    await dryRun.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(dryRun.argv[0]), ['lifecycle', 'test', 'pre-update']);
+    assert.equal(dryRun.confirmations.length, 0);
+    assert.match(dryRun.previews[0].content, /would fire 1 script/);
+
+    const executed = harness({
+      root,
+      picks: [3, 0],
+      output: () => ({ stdout: 'Lifecycle event fired.', stderr: '', exitCode: 0 })
+    });
+    await executed.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(executed.argv[0]), ['lifecycle', 'test', '--execute', 'pre-install']);
+    assert.match(executed.confirmations[0], /runs project-defined commands/);
+    assert.match(executed.previews[0].content, /Lifecycle event fired/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('lifecycle trust changes and forced initialization use confirmed APM mutations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-lifecycle-mutation-'));
+  try {
+    const missingManifest = harness({ root, picks: [4] });
+    await assert.rejects(missingManifest.extension.lifecycleWorkflows(), /Initialize an APM project/);
+    assert.equal(missingManifest.argv.length, 0);
+
+    await writeFile(join(root, 'apm.yml'), 'name: lifecycle-test\n');
+    const trusted = harness({
+      root,
+      picks: [4],
+      output: () => ({ stdout: 'Lifecycle scripts are trusted.', stderr: '', exitCode: 0 })
+    });
+    await trusted.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(trusted.argv[0]), ['lifecycle', 'trust']);
+    assert.match(trusted.confirmations[0], /during future installs/);
+
+    const replaced = harness({
+      root,
+      picks: [7],
+      output: () => ({ stdout: 'Injected lifecycle block.', stderr: '', exitCode: 0 })
+    });
+    await replaced.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(replaced.argv[0]), ['lifecycle', 'init', '--force']);
+    assert.match(replaced.confirmations[0], /Overwrite the existing lifecycle block/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {

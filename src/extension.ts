@@ -705,6 +705,70 @@ class ApmExtension implements vscode.Disposable {
       void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
     }
   }
+  async lifecycleWorkflows() {
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const actions: (
+      | { label: string; description: string; actionType: 'report'; args: string[]; title: string }
+      | { label: string; description: string; actionType: 'test'; execute: boolean }
+      | { label: string; description: string; actionType: 'command'; id: string; options: Record<string, unknown>; title: string }
+    )[] = [
+      { label: 'Inspect discovered lifecycle scripts', description: 'List scripts APM discovers from project, user, and policy sources', actionType: 'report', args: ['lifecycle'], title: 'Discovered lifecycle scripts' },
+      { label: 'Validate lifecycle scripts', description: 'Check discovered script files without running them', actionType: 'report', args: ['lifecycle', 'validate'], title: 'Lifecycle script validation' },
+      { label: 'Test lifecycle event (dry run)', description: 'Preview matching scripts without running commands or requests', actionType: 'test', execute: false },
+      { label: 'Execute lifecycle event scripts', description: 'Run project-defined scripts; explicit confirmation required', actionType: 'test', execute: true },
+      { label: 'Trust project lifecycle scripts', description: 'Allow this project lifecycle block to run during installs', actionType: 'command', id: 'lifecycle trust', options: {}, title: 'Trust project lifecycle scripts' },
+      { label: 'Revoke lifecycle trust', description: 'Prevent this project lifecycle block from running during installs', actionType: 'command', id: 'lifecycle untrust', options: {}, title: 'Revoke project lifecycle trust' },
+      { label: 'Add starter lifecycle block', description: 'Add an example lifecycle block to apm.yml', actionType: 'command', id: 'lifecycle init', options: {}, title: 'Add starter lifecycle block' },
+      { label: 'Replace lifecycle block (overwrite)', description: 'Overwrite the existing lifecycle definition in apm.yml', actionType: 'command', id: 'lifecycle init', options: { '--force': true }, title: 'Replace lifecycle block' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Lifecycle workflows — ${scope.label}`,
+      placeHolder: 'Choose an explicit inspection, test, or trust action'
+    });
+    if (!action) return;
+    if (action.actionType === 'report') {
+      await this.showLifecycleReport(scope, `${action.title} — ${scope.label}`, action.args);
+      return;
+    }
+    if (action.actionType === 'test') {
+      const events = ['pre-install', 'post-install', 'pre-update', 'post-update', 'pre-uninstall', 'post-uninstall'];
+      const event = await vscode.window.showQuickPick(events.map(label => ({ label })), {
+        title: action.execute ? 'Execute lifecycle event scripts' : 'Dry-run lifecycle event',
+        placeHolder: 'Choose one of the six lifecycle events'
+      });
+      if (!event) return;
+      const args = { event: event.label };
+      const title = `${action.execute ? 'Executed' : 'Dry-run'} lifecycle event: ${event.label} — ${scope.label}`;
+      if (action.execute) await this.runLifecycleCommand(scope, 'lifecycle test', args, { '--execute': true }, title);
+      else await this.showLifecycleReport(scope, title, ['lifecycle', 'test', event.label]);
+      return;
+    }
+    if (!await hasProjectManifest(scope.path)) throw new Error(`Initialize an APM project in ${scope.label} before changing its lifecycle configuration.`);
+    await this.runLifecycleCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
+  }
+  private async showLifecycleReport(scope: Scope, title: string, args: string[]) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty lifecycle report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
+  private async runLifecycleCommand(scope: Scope, id: string, args: Record<string, string>, options: Record<string, unknown>, title: string) {
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try { await this.runCommand({ type: 'command', id, args, options }, context); }
+    finally { this.nativeOperations.delete(context); }
+    if (!context.extra.result) return;
+    await this.showTextResult(title, context.extra.result);
+    if (context.extra.error) throw new Error(context.extra.error);
+    void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+  }
   async manageExecutableTrust() {
     this.requireTrust();
     const selectedScope = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
@@ -1492,10 +1556,21 @@ class ApmExtension implements vscode.Disposable {
       const trustMutation = descriptor.command[0] === 'approve' || descriptor.command[0] === 'deny';
       const trustDestination = options['--user'] === true ? 'your personal APM configuration' : `the shared apm.yml in ${scope.label}`;
       const trustAction = descriptor.command[0] === 'approve' ? 'Approve executable primitives for' : 'Deny executable primitives for';
+      const lifecycleExecution = descriptor.id === 'lifecycle test' && options['--execute'] === true;
+      const lifecycleReplacement = descriptor.id === 'lifecycle init' && options['--force'] === true;
+      const lifecycleTrustChange = descriptor.id === 'lifecycle trust' || descriptor.id === 'lifecycle untrust';
       const confirmation = await vscode.window.showWarningMessage(
         trustMutation
           ? `${trustAction} ${message.args.packages} in ${trustDestination}? Host: ${this.hostLabel()}. This changes executable trust for the selected package. Only proceed for sources you trust.`
-          : `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`,
+          : lifecycleExecution
+            ? `Execute the "${message.args.event}" lifecycle scripts in ${scope.label}? Host: ${this.hostLabel()}. This runs project-defined commands and may change files or make network requests. Only proceed for projects you trust.`
+            : lifecycleReplacement
+              ? `Overwrite the existing lifecycle block in apm.yml in ${scope.label}? Host: ${this.hostLabel()}. This replaces the project's lifecycle definition. Only proceed for projects you trust.`
+              : lifecycleTrustChange
+                ? `${descriptor.id === 'lifecycle trust' ? 'Trust' : 'Revoke trust for'} lifecycle scripts from apm.yml in ${scope.label}? Host: ${this.hostLabel()}. ${descriptor.id === 'lifecycle trust' ? 'This allows' : 'This prevents'} APM from running these project-defined commands during future installs.`
+                : descriptor.id === 'lifecycle init'
+                  ? `Add a starter lifecycle block to apm.yml in ${scope.label}? Host: ${this.hostLabel()}. Edit and validate the scripts before trusting them.`
+              : `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`,
         trustMutation ? 'Apply Trust Decision' : 'Run');
       if (!confirmation) return;
     }
@@ -1675,6 +1750,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.marketplace.health', () => extension.marketplaceHealth()],
     ['apm.mcp.discover', () => extension.discoverMcpServers()],
     ['apm.mcp.install', () => extension.installMcpServer()],
+    ['apm.lifecycle', () => extension.lifecycleWorkflows()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],

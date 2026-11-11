@@ -93,7 +93,7 @@ async function steps() {
   await apm().update('allowRemoteImages', undefined, vscode.ConfigurationTarget.Global);
   assert.equal(apm().get('allowRemoteImages'), false);
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript', 'apm.mcp.discover', 'apm.mcp.install']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle']) assert.ok(commands.includes(command), command);
   assert.ok(!commands.includes('apm.getStarted'));
   for (const command of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!commands.includes(command), command);
   assert.equal(apm().get('tasks.includeScripts'), false);
