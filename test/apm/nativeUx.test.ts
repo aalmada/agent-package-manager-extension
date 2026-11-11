@@ -26,6 +26,7 @@ class Uri {
   static parse(value: string) { const split = value.indexOf(':'); return new Uri(value.slice(0, split), value.slice(split + 1)); }
 }
 class Range { constructor(readonly startLine: number, readonly startCharacter: number, readonly endLine: number, readonly endCharacter: number) {} }
+class CodeLens { command?: { title: string; command: string; arguments?: unknown[] }; constructor(readonly range: Range) {} }
 class Diagnostic {
   source?: string; code?: string;
   constructor(readonly range: Range, readonly message: string, readonly severity: number) {}
@@ -34,14 +35,14 @@ const disposable = () => ({ dispose() {} });
 type Native = typeof import('../../src/navigation') & typeof import('../../src/manifestAssistance') & typeof import('../../src/taskProvider');
 function harness(root: string, trusted = true, includeScripts = false) {
   const diagnostics = new Map<string, Diagnostic[]>();
-  const providers: Record<string, object> = {};
+  const providers: Record<string, unknown> = {};
   const folder = { name: 'project', uri: Uri.file(root), index: 0 };
   class Task {
     constructor(readonly definition: object, readonly scope: object, readonly name: string, readonly source: string, readonly execution: object) {}
   }
   const vscode = {
     authentication: { getSession: async () => undefined },
-    Uri, Range, Diagnostic, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2 },
+    Uri, Range, CodeLens, Diagnostic, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2 }, EndOfLine: { LF: 1, CRLF: 2 },
     RelativePattern: class { constructor(readonly root: Uri, readonly pattern: string) {} },
     EventEmitter: class { event = () => disposable(); fire() {} dispose() {} },
     Task, CustomExecution: class { constructor(readonly callback: () => Promise<object>) {} },
@@ -49,6 +50,8 @@ function harness(root: string, trusted = true, includeScripts = false) {
     workspace: {
       isTrusted: trusted, workspaceFolders: [folder], textDocuments: [],
       getConfiguration: () => ({ get: (_name: string, fallback: unknown) => _name === 'tasks.includeScripts' ? includeScripts : fallback }),
+      openTextDocument: async () => providers.manifest,
+      applyEdit: async (edit: object) => { providers.appliedEdit = edit; return true; },
       registerTextDocumentContentProvider: (_scheme: string, provider: object) => { providers.decoded = provider; return disposable(); },
       createFileSystemWatcher: () => ({
         ...disposable(),
@@ -70,12 +73,22 @@ function harness(root: string, trusted = true, includeScripts = false) {
       }),
       registerCodeActionsProvider: (_selector: unknown, provider: object) => { providers.actions = provider; return disposable(); },
       registerCompletionItemProvider: (_selector: unknown, provider: object) => { providers.completions = provider; return disposable(); },
+      registerCodeLensProvider: (_selector: unknown, provider: object) => { providers.codeLenses = provider; return disposable(); },
       registerHoverProvider: (_selector: unknown, provider: object) => { providers.hovers = provider; return disposable(); },
       registerDocumentLinkProvider: (_selector: unknown, provider: object) => { providers.links = provider; return disposable(); }
     },
     tasks: { registerTaskProvider: (_type: string, provider: object) => { providers.tasks = provider; return disposable(); } },
     extensions: { getExtension: () => undefined },
-    commands: { registerCommand: disposable },
+    commands: { registerCommand: (id: string, callback: (...args: unknown[]) => unknown) => {
+      const commands = (providers.commands ??= {}) as Record<string, (...args: unknown[]) => unknown>;
+      commands[id] = callback;
+      return disposable();
+    } },
+    window: { showQuickPick: async (items: { label: string }[], options: { canPickMany?: boolean }) => {
+      providers.quickPick = { items, options };
+      return options.canPickMany ? items.filter(item => item.label === providers.selectedTarget) : undefined;
+    } },
+    WorkspaceEdit: class { replace(uri: Uri, range: Range, text: string) { providers.edit = { uri, range, text }; } },
     Disposable: { from: (...items: { dispose(): void }[]) => ({ dispose() { for (const item of items) item.dispose(); } }) },
     CompletionItemKind: { Property: 1, EnumMember: 2 }, CodeActionKind: { Source: 'source', QuickFix: 'quickfix' },
     CompletionItem: class { constructor(readonly label: string) {} },
@@ -237,7 +250,7 @@ test('task discovery refreshes cached manifests and retries failures', async () 
   } finally { registration.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('manifest assistance uses YAML ranges and does not select a contract', () => {
+test('manifest assistance uses YAML ranges and does not select a contract', async () => {
   const host = harness('/project');
   const working = host.api.manifestContext('name: test\nversion: 1.0.0\n# preserve this\nx-custom: value\n');
   assert.equal(working.schema, undefined);
@@ -247,12 +260,36 @@ test('manifest assistance uses YAML ranges and does not select a contract', () =
   assert.equal(host.api.manifestContext('name: [\n').errors.length, 1);
   const registration = host.api.registerManifestAssistance({ async details() {} });
   const provider = host.providers.completions as { provideCompletionItems(document: { uri: Uri; getText(): string; lineAt(line: number): { text: string } }, position: { line: number; character: number }): { label: string }[] };
-  const document = (text: string) => ({ uri: Uri.file('/project/apm.yml'), getText: () => text, lineAt: (line: number) => ({ text: text.split('\n')[line] }) });
+  const document = (text: string) => ({
+    uri: Uri.file('/project/apm.yml'), eol: 1, getText: () => text,
+    lineAt: (line: number) => ({ lineNumber: line, text: text.split('\n')[line] }),
+    positionAt: (offset: number) => {
+      const before = text.slice(0, offset), lines = before.split('\n');
+      return { line: lines.length - 1, character: lines.at(-1)!.length };
+    }
+  });
   const targets = provider.provideCompletionItems(document('targets:\n  - co'), { line: 1, character: 6 });
   assert.ok(targets.some(item => item.label === 'copilot'));
   const dependencies = provider.provideCompletionItems(document('targets:\n  - copilot\ndependencies:\n  apm:\n    - co'), { line: 4, character: 8 });
   assert.equal(dependencies.length, 0);
   assert.ok(provider.provideCompletionItems(document('des'), { line: 0, character: 3 }).some(item => item.label === 'description'));
+  const manifest = document('# project settings\ntargets:\n  - copilot\ndependencies:\n  apm: []\n');
+  host.providers.manifest = manifest;
+  const lenses = host.providers.codeLenses as { provideCodeLenses(doc: ReturnType<typeof document>): { command?: { title: string; command: string; arguments?: unknown[] } }[] };
+  const lens = lenses.provideCodeLenses(manifest)[0];
+  assert.equal(lens.command?.title, 'Select deployment targets (1 selected)');
+  assert.equal(lens.command?.command, 'apm.selectManifestTargets');
+  const commands = host.providers.commands as Record<string, (uri: Uri) => Promise<void>>;
+  host.providers.selectedTarget = 'claude';
+  await commands['apm.selectManifestTargets'](manifest.uri);
+  const edit = host.providers.edit as { range: Range; text: string };
+  assert.ok(host.providers.appliedEdit);
+  assert.equal(edit.range.startLine, 1, 'The edit leaves comments preceding the targets field untouched');
+  assert.equal(edit.text, 'targets:\n  - claude\n');
+  assert.ok((host.providers.quickPick as { items: { label: string }[] }).items.some(item => item.label === 'copilot'));
+  host.providers.selectedTarget = '';
+  await commands['apm.selectManifestTargets'](manifest.uri);
+  assert.equal((host.providers.edit as { text: string }).text, '', 'Clearing the selection removes the explicit targets field');
   registration.dispose();
 });
 
