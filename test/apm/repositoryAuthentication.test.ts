@@ -10,6 +10,7 @@ import { ApmClient } from '../../src/apm/client';
 import { recoveryActions } from '../../src/apm/workflows';
 import { cliEnvironment } from '../../src/auth/cli';
 import type { Repository } from '../../src/auth/repositories';
+import type { Marketplace } from '../../src/apm/types';
 
 const source = buildSync({
   entryPoints: ['src/authentication.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', external: ['vscode']
@@ -23,7 +24,9 @@ function harness() {
     trusted: true, enterprise: '', accounts: [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }],
     tokens: new Map([['one', 'token-one'], ['two', 'token-two']]), providerError: undefined as Error | undefined,
     respond: (() => new Response('', { status: 404 })) as (url: string, headers: Headers) => Response,
-    picks: [] as string[], inputs: [] as string[], sessionWait: undefined as Promise<void> | undefined
+    picks: [] as (string | undefined)[], inputs: [] as string[], sessionWait: undefined as Promise<void> | undefined,
+    marketplaceSettings: [] as string[], registered: [] as Marketplace[], workspaceRoot: undefined as string | undefined,
+    shownChoices: [] as string[][], warnings: [] as string[]
   };
   const calls: { provider: string; options: { silent?: boolean; account?: { id: string }; createIfNone?: boolean } }[] = [];
   const requests: { url: string; headers: Headers; options: RequestInit }[] = [];
@@ -63,9 +66,14 @@ function harness() {
         }
       },
       window: {
-        showQuickPick: async () => state.picks.shift(),
+        showQuickPick: async (items: (string | { label: string })[]) => {
+          state.shownChoices.push(Array.from(items, item => typeof item === 'string' ? item : item.label));
+          const selection = state.picks.shift();
+          return items.find(item => (typeof item === 'string' ? item : item.label) === selection);
+        },
         showInputBox: async () => state.inputs.shift(),
-        showInformationMessage: async () => undefined
+        showInformationMessage: async () => undefined,
+        showWarningMessage: async (message: string) => { state.warnings.push(message); }
       }
     } : nodeRequire(id),
     fetch: async (url: string, options: RequestInit) => {
@@ -75,7 +83,8 @@ function harness() {
     }
   });
   const api = module.exports as Api;
-  const auth = new api.RepositoryAuthentication(context as unknown as ConstructorParameters<Api['RepositoryAuthentication']>[0]);
+  const auth = new api.RepositoryAuthentication(context as unknown as ConstructorParameters<Api['RepositoryAuthentication']>[0],
+    async () => ({ settings: state.marketplaceSettings, registered: state.registered, workspaceRoot: state.workspaceRoot }));
   return { api, auth, state, calls, requests, values, secrets, context };
 }
 
@@ -122,6 +131,74 @@ test('permission denial and unavailable silent consent rotate to the next author
   host.state.tokens.delete('one');
   assert.equal((await host.auth.credentials([repo('b')]))[0].token, 'token-two');
   assert.ok(host.calls.every(call => call.options.silent));
+});
+
+test('repository picker offers configured and registered marketplaces and known repositories without network discovery', async () => {
+  const host = harness();
+  host.state.respond = (_url, headers) => new Response('', { status: headers.has('Authorization') ? 200 : 404 });
+  await host.auth.credentials([repo('known')]);
+  host.requests.length = 0;
+  host.state.marketplaceSettings = [
+    'private=NTT-EMEAL-COPILOT-IBIOL/sdlc-plugins#main', 'org/catalog', '/tmp/local-marketplace',
+    'https://example.test/marketplace.json', 'https://user@example.com/invalid'
+  ];
+  host.state.registered = [
+    { name: 'catalog', source: 'https://github.com/org/catalog.git' },
+    { name: 'other', source: 'org/other' }
+  ];
+  host.state.picks.push('Connect GitHub account', 'https://github.com/NTT-EMEAL-COPILOT-IBIOL/sdlc-plugins');
+  await host.auth.manage();
+  const choices = host.state.shownChoices[1];
+  assert.deepEqual(choices, [
+    'https://github.com/org/known', 'https://github.com/org/catalog', 'https://github.com/org/other',
+    'https://github.com/NTT-EMEAL-COPILOT-IBIOL/sdlc-plugins', 'Enter another repository...'
+  ]);
+  assert.equal(host.requests.length, 1, 'Only the chosen credential is probed');
+  assert.equal(host.requests[0].url, 'https://api.github.com/repos/NTT-EMEAL-COPILOT-IBIOL/sdlc-plugins');
+  assert.equal(host.state.warnings.length, 1);
+  assert.ok(host.state.warnings.every(message => !message.includes('user@')));
+  assert.equal(host.state.inputs.length, 0);
+});
+
+test('repository picker cancellation never requests credentials or probes access', async () => {
+  const host = harness();
+  host.state.marketplaceSettings = ['org/catalog'];
+  host.state.picks.push('Add repository token', undefined);
+  await host.auth.manage();
+  assert.equal(host.requests.length, 0);
+  assert.equal(host.calls.length, 0);
+  assert.equal(host.secrets.size, 0);
+});
+
+test('repository picker supports tokens for registered non-GitHub marketplaces', async () => {
+  const host = harness();
+  host.state.registered = [{ name: 'catalog', source: 'https://gitlab.com/group/catalog' }];
+  host.state.picks.push('Add repository token', 'https://gitlab.com/group/catalog');
+  host.state.inputs.push('private-pat');
+  host.state.respond = (_url, headers) => new Response('', { status: headers.get('PRIVATE-TOKEN') === 'private-pat' ? 200 : 401 });
+  await host.auth.manage();
+  assert.equal(host.requests.length, 1);
+  assert.equal(host.requests[0].url, 'https://gitlab.com/api/v4/projects/group%2Fcatalog');
+  assert.equal(host.secrets.size, 1);
+});
+
+test('private marketplace credentials rotate on expiry and recover after reauthorization', async () => {
+  const host = harness();
+  await marketplaceFixture('org/a', async home => {
+    host.state.respond = (_url, headers) => {
+      const token = headers.get('Authorization');
+      return new Response('', { status: token === 'Bearer token-one' || token === 'Bearer token-two' ? 200 : 404 });
+    };
+    const args = ['marketplace', 'update', 'intelligentium'];
+    assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-one');
+    host.state.tokens.set('one', 'expired');
+    assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-two');
+    host.state.tokens.set('two', 'expired');
+    await assert.rejects(cliEnvironment(host.auth, args, home, home), /APM: Manage Repository Accounts/);
+    host.state.tokens.set('one', 'token-one');
+    host.auth.invalidate();
+    assert.equal((await cliEnvironment(host.auth, args, home, home)).GITHUB_APM_PAT, 'token-one');
+  });
 });
 
 test('known private metadata uses one authenticated file request and cached read-only probes', async t => {
@@ -405,7 +482,7 @@ test('private enterprise metadata uses a repository-specific account without cha
 test('repository PATs stay in SecretStorage, expire explicitly, and are deleted only by native management', async () => {
   const host = harness();
   const repository: Repository = { provider: 'gitlab', origin: 'https://gitlab.com', path: 'group/repo' };
-  host.state.picks.push('Add repository token');
+  host.state.picks.push('Add repository token', 'Enter another repository...');
   host.state.inputs.push('https://gitlab.com/group/repo', 'private-pat');
   host.state.respond = (_url, headers) => new Response('', { status: headers.get('PRIVATE-TOKEN') === 'private-pat' ? 200 : 401 });
   await host.auth.manage();
@@ -436,7 +513,7 @@ test('secret changes and management notify listeners without exposing credential
   let changes = 0;
   const listener = host.auth.onDidChange(() => { changes++; });
   const generation = host.auth.generation;
-  host.state.picks.push('Add repository token');
+  host.state.picks.push('Add repository token', 'Enter another repository...');
   host.state.inputs.push('https://dev.azure.com/org/project/_git/repo', 'azure-pat');
   host.state.respond = (_url, headers) => new Response('', { status: headers.has('Authorization') ? 200 : 401 });
   await host.auth.manage();
@@ -453,7 +530,7 @@ test('secret changes and management notify listeners without exposing credential
 
 test('SecretStorage errors propagate rather than pretending a token was saved', async () => {
   const host = harness();
-  host.state.picks.push('Add repository token');
+  host.state.picks.push('Add repository token', 'Enter another repository...');
   host.state.inputs.push('https://gitlab.com/group/repo', 'private-pat');
   host.state.respond = () => new Response('');
   host.context.secrets.store = async () => { throw new Error('SecretStorage unavailable'); };

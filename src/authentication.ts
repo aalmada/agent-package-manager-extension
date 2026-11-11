@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { Repository, RepositoryHost, repositoryForRequest, repositoryFromSource, repositoryHosts, repositoryKey, repositoryProbeUrl, validOrigin } from './auth/repositories';
+import { marketplaceRepository } from './apm/remoteMetadata';
+import type { Marketplace } from './apm/types';
+import { parseEntry } from './config/marketplaces';
 
 export type { Repository, RepositoryHost } from './auth/repositories';
 export { repositoryForRequest, repositoryFromSource, repositoryProbeUrl } from './auth/repositories';
@@ -11,6 +14,7 @@ type Context = Pick<vscode.ExtensionContext, 'globalState' | 'secrets'>;
 type Binding = { repository: Repository; account?: string; secret?: string };
 export type RepositoryCredential = { repository: Repository; token: string; username: string; scheme: 'basic' | 'bearer' };
 type Candidate = RepositoryCredential & { account?: string; secret?: string };
+type MarketplaceSources = { settings: readonly string[]; registered: readonly Marketplace[]; workspaceRoot?: string };
 
 function trust(): void {
   if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before using repository authentication for APM.');
@@ -74,7 +78,8 @@ export class RepositoryAuthentication implements vscode.Disposable {
   private readonly changes = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changes.event;
 
-  constructor(private readonly context: Context) {
+  constructor(private readonly context: Context, private readonly marketplaceSources: () => Promise<MarketplaceSources> =
+    async () => ({ settings: [], registered: [] })) {
     this.listener = context.secrets.onDidChange?.(event => {
       if (event.key.startsWith(this.namespace)) this.invalidate();
     });
@@ -185,7 +190,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
     if (bound && await this.probe(repository, undefined, generation, signal, options.reuseAccess)) return undefined;
     if (anonymousLimit) throw anonymousLimit;
     if (options.allowFallback && !candidates.length && !this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository))) return undefined;
-    throw new Error(`No authorized account can access ${repository.origin}/${repository.path}. Use APM: Manage Repository Authentication to select an account or update its token.`);
+    throw new Error(`No authorized account can access ${repository.origin}/${repository.path}. Use APM: Manage Repository Accounts to select an account or update its token.`);
   }
   async credentials(repositories: readonly Repository[], signal?: AbortSignal): Promise<readonly RepositoryCredential[]> {
     const generation = this.revision;
@@ -242,6 +247,45 @@ export class RepositoryAuthentication implements vscode.Disposable {
     permission(authenticated, true);
     return authenticated;
   };
+  private async chooseRepository(): Promise<Repository | undefined> {
+    const sources = await this.marketplaceSources();
+    trust();
+    const hosts = this.hosts();
+    const repositories = new Map<string, Repository>();
+    const add = (repository: Repository | undefined) => {
+      if (!repository) return;
+      const key = repositoryKey(repository);
+      repositories.set(repository.provider === 'github' ? key.toLowerCase() : key, repository);
+    };
+    for (const repository of this.knownRepositories()) add(repository);
+    for (const marketplace of sources.registered) {
+      if (!/\.json(?:\?.*)?$/i.test(marketplace.source)) add(marketplaceRepository(marketplace, hosts));
+    }
+    let invalid = false;
+    for (const text of sources.settings) {
+      try {
+        const entry = parseEntry(text, sources.workspaceRoot);
+        if (!entry.local && !/\.json(?:\?.*)?$/i.test(entry.source)) add(repositoryFromSource(entry.source, hosts));
+      } catch {
+        invalid = true;
+      }
+    }
+    if (invalid) void vscode.window.showWarningMessage('Some marketplace settings could not be used for repository selection. Review APM marketplace settings.');
+    const choices = [...repositories.values()].map(repository => ({
+      label: `${repository.origin}/${repository.path}`, repository
+    }));
+    const choice = await vscode.window.showQuickPick([
+      ...choices, { label: 'Enter another repository...', repository: undefined }
+    ], { title: 'Select a repository', placeHolder: 'Choose a marketplace or known repository' });
+    if (!choice) return undefined;
+    trust();
+    if (choice.repository) return choice.repository;
+    const source = await vscode.window.showInputBox({ prompt: 'Repository URL or GitHub owner/repository', ignoreFocusOut: true });
+    if (!source) return undefined;
+    const repository = repositoryFromSource(source, this.hosts());
+    if (!repository) throw new Error('Enter a repository URL on a known or explicitly approved host.');
+    return repository;
+  }
   async manage(): Promise<void> {
     trust();
     const action = await vscode.window.showQuickPick([
@@ -267,11 +311,10 @@ export class RepositoryAuthentication implements vscode.Disposable {
       await this.context.globalState.update(`${this.namespace}.bindings`, this.bindings().filter(item => repositoryKey(item.repository) !== repositoryKey(binding.binding.repository)));
       this.invalidate(); return;
     }
-    const source = await vscode.window.showInputBox({ prompt: 'Repository URL or GitHub owner/repository', ignoreFocusOut: true });
-    if (!source) return;
-    const repository = repositoryFromSource(source, this.hosts());
-    if (!repository) throw new Error('Enter a repository URL on a known or explicitly approved host.');
+    const repository = await this.chooseRepository();
+    if (!repository) return;
     trust();
+    this.validate(repository);
     if (action === 'Connect GitHub account') {
       if (repository.provider !== 'github') throw new Error('Use a repository token for GitLab or Azure DevOps.');
       const provider = githubAccountProvider(repository);

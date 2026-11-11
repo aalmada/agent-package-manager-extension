@@ -73,7 +73,15 @@ class ApmExtension implements vscode.Disposable {
     catalog: [], installed: [], marketplaces: [], commands: descriptors, availableCommands: [], errors: []
   };
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.authentication = new RepositoryAuthentication(context);
+    this.authentication = new RepositoryAuthentication(context, async () => {
+      const settings = vscode.workspace.getConfiguration('apm').get<unknown>('marketplaces', []);
+      if (!Array.isArray(settings) || !settings.every(entry => typeof entry === 'string')) {
+        throw new Error('APM Marketplaces must be a list of strings.');
+      }
+      const folders = (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === 'file');
+      return { settings, registered: await this.client(this.globalScope()).getMarketplaces(),
+        workspaceRoot: folders.length === 1 ? folders[0].uri.fsPath : undefined };
+    });
     this.subscriptions.push(this.authentication);
     this.search = context.workspaceState.get<string>('browserSearch', '');
     this.state.hiddenSections = context.workspaceState.get<PackageSection[]>('hiddenSections', []);
