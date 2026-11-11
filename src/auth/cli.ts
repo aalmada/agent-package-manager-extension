@@ -3,7 +3,7 @@ import { record } from '../apm/adapters';
 import { marketplaceManifest, readMarketplaces } from '../apm/manifest';
 import { marketplaceRepository, remoteSource } from '../apm/remoteMetadata';
 import type { Marketplace } from '../apm/types';
-import { repositoryFromSource, repositoryFromPackageSource, type Repository, type RepositoryHost } from './repositories';
+import { repositoryFromSource, repositoryFromPackageSource, repositoryKey, type Repository, type RepositoryHost } from './repositories';
 import { dependencyExpressions } from './dependencies';
 
 export interface CliCredential {
@@ -24,10 +24,6 @@ const compatibilityError = 'This APM CLI cannot safely route different repositor
   'Package contents and README support separate accounts, but this operation requires upstream APM repository-credential routing. ' +
   'Use APM with repository-aware Git/SSH authentication outside the extension, or an account with access to all dependencies.';
 
-function key(repository: Repository) {
-  return `${repository.provider}:${repository.origin}/${repository.path}`;
-}
-
 /** Read-only context collection; APM remains responsible for dependency resolution. */
 export async function cliEnvironment(authentication: CliAuthentication, args: readonly string[],
   cwd: string, home: string, signal?: AbortSignal): Promise<Record<string, string>> {
@@ -41,12 +37,12 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   const add = (source: unknown, packageSource = false) => {
     if (typeof source !== 'string' || /^(?:file:|\/|\.\/|\.\.\/)/.test(source)) return;
     const repository = packageSource ? repositoryFromPackageSource(source, authentication.hosts()) : repositoryFromSource(source, authentication.hosts());
-    if (repository) repositories.set(key(repository), repository);
+    if (repository) repositories.set(repositoryKey(repository), repository);
   };
   const addMarketplace = async (marketplace: Marketplace, pluginName?: string) => {
     if (!/^(?:file:|\/|\.\/|\.\.\/)/.test(marketplace.source)) {
       const repository = marketplaceRepository(marketplace, authentication.hosts());
-      if (repository) repositories.set(key(repository), repository);
+      if (repository) repositories.set(repositoryKey(repository), repository);
     }
     if (!pluginName) return;
     const snapshot = await marketplaceManifest(marketplace, home);
@@ -55,7 +51,7 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
       const plugin = plugins.find(candidate => record(candidate) && candidate.name === pluginName);
       if (record(plugin)) {
         const source = remoteSource(plugin.source, marketplace, authentication.hosts());
-        if (source) repositories.set(key(source.repository), source.repository);
+        if (source) repositories.set(repositoryKey(source.repository), source.repository);
       }
     }
   };
@@ -93,7 +89,7 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
   // can discover new repositories that the current CLI cannot credential-scope.
   if (args[0] !== 'marketplace') {
     const bindings = authentication.knownRepositories();
-    const outside = bindings.filter(repository => !repositories.has(key(repository)));
+    const outside = bindings.filter(repository => !repositories.has(repositoryKey(repository)));
     if (outside.length) throw new Error(`${compatibilityError} Saved bindings outside this operation: ${describe(outside)}.`);
     const unsupported = selected.filter(credential => credential.repository.provider !== 'github' || credential.repository.origin !== 'https://github.com');
     if (unsupported.length) throw new Error(`${compatibilityError} Resolver credentials are unsupported for: ${describe(unsupported.map(entry => entry.repository))}.`);

@@ -15,6 +15,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 
 CI uses Node.js 22 and tests the baseline APM CLI on Linux, Windows, and macOS. Install npm dependencies from the lockfile; the [CI workflow](.github/workflows/ci.yml) contains setup and packaging steps. Run commands from the repository root.
 
+- Use `codebase-memory-mcp` to search code structure, symbols, and relationships. Check index readiness and freshness before querying; index or update this repository when missing or stale, and refresh the index after code changes. Verify graph results against source when coverage is incomplete.
 - `npm run typecheck`: check strict TypeScript types.
 - `npm run lint`: lint TypeScript and JavaScript under source, tests, and scripts.
 - `npm test`: run Node unit tests; real-CLI tests are opt-in.
