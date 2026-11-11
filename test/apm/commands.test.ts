@@ -11,9 +11,12 @@ test('utility commands stay contextual instead of cluttering the Command Palette
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
   }
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.dependencies.find')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
-  for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health']) {
+  for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.mcp.discover', 'apm.mcp.install']) {
     assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
     assert.ok(menus.commandPalette.some((entry: { command: string; when: string }) => entry.command === command && entry.when.includes('isWorkspaceTrusted')), command);
+  }
+  for (const command of ['apm.mcp.discover', 'apm.mcp.install']) {
+    assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'isWorkspaceTrusted');
   }
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.policy.review')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.marketplace.health')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
@@ -61,6 +64,13 @@ test('marketplace command arguments retain whitespace and shell metacharacters w
   assert.throws(() => buildCommandArguments(descriptor, { source: '--malicious' }, {}), /Invalid/);
   assert.throws(() => buildCommandArguments(descriptor, {}, {}), /required/);
   assert.throws(() => buildCommandArguments(descriptor, { source: 'owner/repo' }, { '--unknown': true }), /Unknown/);
+});
+test('MCP installation uses the canonical install contract for registry names and global scope', () => {
+  const descriptor = descriptors.find(d => d.id === 'install')!;
+  assert.deepEqual(buildCommandArguments(descriptor, {}, { '--mcp': 'io.github.example/server' }),
+    ['install', '--mcp', 'io.github.example/server']);
+  assert.deepEqual(buildCommandArguments(descriptor, {}, { '--mcp': 'io.github.example/server', '--global': true }),
+    ['install', '--global', '--mcp', 'io.github.example/server']);
 });
 test('watch mode and initialization select terminal tasks only when needed', () => {
   const command = (id: string) => descriptors.find(d => d.id === id)!;

@@ -661,6 +661,50 @@ class ApmExtension implements vscode.Disposable {
       void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
     }
   }
+  async discoverMcpServers() {
+    const scope = await this.workflowScope();
+    if (!scope) return;
+    const actions = [
+      { label: 'List MCP servers (registry/network)', description: 'Browse the configured registry', command: 'list', title: 'MCP registry servers' },
+      { label: 'Search MCP servers (registry/network)', description: 'Search by keyword or phrase', command: 'search', title: 'MCP registry search' },
+      { label: 'Show MCP server details (registry/network)', description: 'Look up an exact registry name', command: 'show', title: 'MCP server details' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Discover MCP servers — ${scope.label}`,
+      placeHolder: 'Choose an explicit registry query'
+    });
+    if (!action) return;
+    const args = ['mcp', action.command];
+    let title = `${action.title} — ${scope.label}`;
+    if (action.command !== 'list') {
+      const search = action.command === 'search';
+      const value = await vscode.window.showInputBox({
+        title: search ? 'Search MCP registry' : 'Show MCP server details',
+        prompt: search ? 'Enter a keyword or phrase' : 'Enter the exact MCP registry name',
+        validateInput: input => {
+          const trimmed = input.trim();
+          if (!trimmed || trimmed.startsWith('-') || /[\r\n\0]/.test(input) || containsUrlCredentials(trimmed)) {
+            return 'Enter a non-empty value without leading flags, line breaks, NUL, or URL credentials.';
+          }
+          if (!search && /\s/.test(trimmed)) return 'Enter the exact registry name without whitespace.';
+          return undefined;
+        }
+      });
+      if (value === undefined) return;
+      args.push(value.trim());
+      if (!search) title = `${action.title}: ${value.trim()} — ${scope.label}`;
+    }
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty MCP registry report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
   async manageExecutableTrust() {
     this.requireTrust();
     const selectedScope = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
@@ -858,6 +902,37 @@ class ApmExtension implements vscode.Disposable {
         if (choice) void this.openPackageDetails(context.item ?? item, scope).catch(error => this.report(error));
       });
     }
+  }
+  async installMcpServer() {
+    const scope = await this.installScope();
+    if (!scope) return;
+    const name = await vscode.window.showInputBox({
+      title: `Install MCP server — ${scope.label}`,
+      prompt: 'Enter the exact MCP registry name',
+      validateInput: value => {
+        const trimmed = value.trim();
+        return !trimmed || trimmed.startsWith('-') || /[\s\0]/.test(trimmed) || containsUrlCredentials(trimmed)
+          ? 'Enter a registry name without whitespace, leading flags, NUL, or URL credentials.'
+          : undefined;
+      }
+    });
+    if (name === undefined) return;
+    const serverName = name.trim();
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      await this.runCommand({
+        type: 'command',
+        id: 'install',
+        args: {},
+        options: { '--mcp': serverName }
+      }, context);
+    } finally { this.nativeOperations.delete(context); }
+    if (!context.extra.result) return;
+    const title = `MCP server installation: ${serverName} — ${scope.label}`;
+    await this.showTextResult(title, context.extra.result);
+    if (context.extra.error) throw new Error(context.extra.error);
+    void vscode.window.showInformationMessage(`${serverName} installed in ${scope.label}. Review the result document for details.`);
   }
   private async installScope(preferred = this.scope()): Promise<Scope | undefined> {
     this.requireTrust();
@@ -1598,6 +1673,8 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.policy.explain', () => extension.workflow('policy')],
     ['apm.policy.manage', () => extension.manageExecutableTrust()],
     ['apm.marketplace.health', () => extension.marketplaceHealth()],
+    ['apm.mcp.discover', () => extension.discoverMcpServers()],
+    ['apm.mcp.install', () => extension.installMcpServer()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],

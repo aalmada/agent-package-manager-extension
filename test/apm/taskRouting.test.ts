@@ -52,6 +52,8 @@ interface Harness {
   reviewExecutableTrust(): Promise<void>;
   manageExecutableTrust(): Promise<void>;
   marketplaceHealth(): Promise<void>;
+  discoverMcpServers(): Promise<void>;
+  installMcpServer(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -824,6 +826,76 @@ test('marketplace validation selects a registered marketplace without exposing i
   assert.match(host.previews[0].title, /central/);
   assert.doesNotMatch(host.choices[1].labels.join(' '), /example\.test/);
   assert.equal(host.confirmations.length, 0);
+});
+
+test('MCP registry discovery runs only the selected explicit query and preserves nonzero output', async () => {
+  const listed = harness({
+    picks: [0],
+    output: () => ({ stdout: 'io.github.example/issues  Issue tracking server', stderr: '', exitCode: 0 })
+  });
+  await listed.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(listed.argv[0]), ['mcp', 'list']);
+  assert.match(listed.previews[0].content, /Issue tracking server/);
+
+  const host = harness({
+    picks: [1],
+    inputs: ['issue tracker'],
+    output: args => ({
+      stdout: args[1] === 'search' ? 'io.github.example/issues  Issue tracking server' : '',
+      stderr: 'Registry used: https://registry.example.test',
+      exitCode: 1
+    })
+  });
+  await host.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(host.argv[0]), ['mcp', 'search', 'issue tracker']);
+  assert.match(host.previews[0].content, /Exit code: 1/);
+  assert.match(host.previews[0].content, /Issue tracking server/);
+  assert.match(host.previews[0].content, /registry\.example\.test/);
+  assert.match(host.confirmations[0], /reported findings or exited with code 1/);
+  assert.equal(host.executionScopes[0]?.kind, 'workspace');
+
+  const shown = harness({
+    picks: [2],
+    inputs: ['io.github.example/issues'],
+    output: () => ({ stdout: 'Description: Issue tracking server', stderr: '', exitCode: 0 })
+  });
+  await shown.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(shown.argv[0]), ['mcp', 'show', 'io.github.example/issues']);
+  assert.match(shown.previews[0].content, /Description: Issue tracking server/);
+
+  const cancelled = harness({ picks: [2], inputs: [undefined] });
+  await cancelled.extension.discoverMcpServers();
+  assert.equal(cancelled.argv.length, 0);
+});
+
+test('MCP installation uses the independent destination picker and confirms the mutation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-mcp-install-'));
+  try {
+    await writeFile(join(root, 'apm.yml'), 'name: mcp-install\n');
+    const host = harness({
+      root,
+      picks: [0],
+      inputs: ['io.github.example/server'],
+      output: () => ({ stdout: 'Added MCP server to apm.yml.', stderr: '', exitCode: 0 })
+    });
+    await host.extension.installMcpServer();
+    assert.deepEqual(Array.from(host.argv[0]), ['install', '--mcp', 'io.github.example/server']);
+    assert.equal(host.executionScopes[0]?.path, root);
+    assert.match(host.confirmations[0], /apm install in project/);
+    assert.match(host.previews[0].content, /Added MCP server/);
+
+    const cancelled = harness({ root, picks: [0], inputs: ['io.github.example/server'], cancelConfirmation: true });
+    await cancelled.extension.installMcpServer();
+    assert.equal(cancelled.argv.length, 0, 'Dismissing the install confirmation does not run APM');
+  } finally { await rm(root, { recursive: true, force: true }); }
+
+  const global = harness({
+    picks: [0],
+    inputs: ['io.github.example/server']
+  });
+  await global.extension.installMcpServer();
+  assert.deepEqual(Array.from(global.argv[0]), ['install', '--global', '--mcp', 'io.github.example/server']);
+  assert.equal(global.executionScopes[0]?.kind, 'global');
 });
 
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {
