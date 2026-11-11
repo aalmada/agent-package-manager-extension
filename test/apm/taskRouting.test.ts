@@ -49,12 +49,15 @@ interface Harness {
   workflow(workflow: Workflow, uri?: unknown, scope?: Scope): Promise<void>;
   installPackage(scope?: Scope, preview?: boolean): Promise<void>;
   showTargets(context?: Panel): Promise<void>;
+  reviewExecutableTrust(): Promise<void>;
+  manageExecutableTrust(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
   cancelConfirmation?: boolean; onConfirmation?: () => Promise<void>;
   errorChoice?: string;
   inputs?: (string | undefined)[]; picks?: (number | number[] | undefined)[]; scriptsEnabled?: boolean; token?: string;
+  installed?: PackageItem[];
   tasks?: { definition: { workflow: string; script?: string }; scope: { uri: { fsPath: string } } }[];
   output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number } } = {}) {
   const processListeners = new Set<(event: { execution: Execution; exitCode?: number }) => void>();
@@ -185,7 +188,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     scope: (panel?: Panel) => panel?.scope ?? ({ kind: 'workspace', label: 'project', path: root }),
     client: (scope?: Scope) => ({
       supports: async () => true,
-      getInstalled: async () => [],
+      getInstalled: async () => options.installed ?? [],
       execute: async (args: string[], execution?: { inputLines?: readonly string[] }) => {
         argv.push(args); executionInputs.push(execution?.inputLines); executionScopes.push(scope);
         if (execution?.inputLines && args[0] === 'init') {
@@ -724,6 +727,73 @@ test('native validation, previews and doctor execute without command forms or un
   const untrusted = harness({ trusted: false });
   await assert.rejects(untrusted.extension.workflow('validate'), /Trust/);
   assert.equal(untrusted.argv.length, 0);
+});
+
+test('policy explanations and read-only trust reports bypass the contract mutation annotation', async () => {
+  const packageItem: PackageItem = {
+    id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true,
+    scope: { kind: 'workspace', label: 'project', path: '/project' }
+  };
+  const explanation = harness({
+    installed: [packageItem], picks: [0],
+    output: args => ({ stdout: args[0] === 'policy' ? 'Effective decision: denied' : '', stderr: '', exitCode: 0 })
+  });
+  await explanation.extension.workflow('policy');
+  assert.deepEqual(Array.from(explanation.argv[0]), ['policy', 'explain', 'owner/repo']);
+  assert.equal(explanation.confirmations.length, 0);
+  assert.match(explanation.previews[0].content, /Effective decision: denied/);
+
+  const report = harness({
+    picks: [1],
+    output: args => ({ stdout: args.join(' '), stderr: '', exitCode: 0 })
+  });
+  await report.extension.reviewExecutableTrust();
+  assert.deepEqual(Array.from(report.argv[0]), ['approve', '--pending']);
+  assert.equal(report.confirmations.length, 0);
+  assert.match(report.previews[0].content, /approve --pending/);
+
+  const status = harness({
+    picks: [0],
+    output: args => ({ stdout: args[0] === 'policy' ? '{"source":"org","rules":[]}' : '', stderr: '', exitCode: 0 })
+  });
+  await status.extension.reviewExecutableTrust();
+  assert.deepEqual(Array.from(status.argv[0]), ['policy', 'status', '--json']);
+  assert.match(status.previews[0].content, /"source": "org"/);
+});
+
+test('executable trust changes preserve package scope and confirm the personal destination', async () => {
+  const globalScope: Scope = { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' };
+  const packageItem: PackageItem = {
+    id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true, scope: globalScope
+  };
+  const approved = harness({ installed: [packageItem], picks: [2, 0, 0, 0] });
+  await approved.extension.manageExecutableTrust();
+  assert.deepEqual(Array.from(approved.argv[0]), ['approve', '--user', 'owner/repo']);
+  assert.equal(approved.executionScopes[0]?.kind, 'global');
+  assert.match(approved.confirmations[0], /your personal APM configuration/);
+  assert.match(approved.confirmations[0], /Only proceed for sources you trust/);
+  assert.match(approved.previews[0].content, /Exit code: 0/);
+
+  const denied = harness({ installed: [packageItem], picks: [2, 0, 1, 0], cancelConfirmation: true });
+  await denied.extension.manageExecutableTrust();
+  assert.match(denied.confirmations[0], /Deny executable primitives for owner\/repo/);
+  assert.equal(denied.argv.length, 0);
+});
+
+test('shared executable trust changes require an existing project manifest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-trust-policy-'));
+  try {
+    await writeFile(join(root, 'apm.yml'), 'name: trust-policy\n');
+    const packageItem: PackageItem = {
+      id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true,
+      scope: { kind: 'workspace', label: 'project', path: root }
+    };
+    const host = harness({ root, installed: [packageItem], picks: [0, 0, 0, 0] });
+    await host.extension.manageExecutableTrust();
+    assert.deepEqual(Array.from(host.argv[0]), ['approve', 'owner/repo']);
+    assert.match(host.confirmations[0], /the shared apm\.yml in project/);
+    assert.equal(host.executionScopes[0]?.path, root);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {

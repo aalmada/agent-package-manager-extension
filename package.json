@@ -81,6 +81,9 @@
       { "command": "apm.dependencies.refresh", "title": "APM: Refresh Dependency Tree" },
       { "command": "apm.dependencies.why", "title": "APM: Explain Dependency" },
       { "command": "apm.dependencies.find", "title": "APM: Find File Owner" },
+      { "command": "apm.policy.review", "title": "APM: Review Executable Trust" },
+      { "command": "apm.policy.explain", "title": "APM: Explain Package Policy" },
+      { "command": "apm.policy.manage", "title": "APM: Manage Executable Trust" },
       { "command": "apm.runScript", "title": "APM: Run Script" },
       {
         "command": "apm.refresh",
@@ -261,6 +264,9 @@
         { "command": "apm.dependencies.refresh", "when": "false" },
         { "command": "apm.dependencies.why", "when": "false" },
         { "command": "apm.dependencies.find", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
+        { "command": "apm.policy.review", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
+        { "command": "apm.policy.explain", "when": "isWorkspaceTrusted" },
+        { "command": "apm.policy.manage", "when": "isWorkspaceTrusted" },
         { "command": "apm.runScript", "when": "isWorkspaceTrusted && workspaceFolderCount != 0 && config.apm.tasks.includeScripts" },
         {
           "command": "apm.filter.installed",

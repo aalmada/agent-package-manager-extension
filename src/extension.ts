@@ -530,12 +530,25 @@ class ApmExtension implements vscode.Disposable {
     return picked?.scope;
   }
   async workflow(workflow: Workflow, uri?: vscode.Uri, capturedScope?: Scope) {
-    const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor');
+    const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor' && workflow !== 'policy');
     if (!scope) return;
     if (workflow === 'previewInstall') { await this.installPackage(scope, true); return; }
     if (workflow === 'runScript') { await this.runProjectScript(scope); return; }
     const command = workflowCommands[workflow];
     const args: Record<string, string> = {}, options: Record<string, unknown> = { ...command.options };
+    if (workflow === 'policy') {
+      const installed = await this.client(scope).getInstalled(scope);
+      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
+      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
+        { title: `Explain package policy — ${scope.label}`, placeHolder: 'Select an installed dependency' });
+      if (!picked) return;
+      const packageName = packageIdentity(picked.item, picked.item, false);
+      if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
+        throw new Error('APM returned an invalid dependency identity.');
+      }
+      await this.showPolicyReport(scope, `Executable trust policy: ${packageName}`, ['policy', 'explain', packageName]);
+      return;
+    }
     let inputLines: string[] | undefined;
     if (workflow === 'initialize') {
       if (await hasProjectManifest(scope.path)) {
@@ -565,14 +578,6 @@ class ApmExtension implements vscode.Disposable {
       args.project_name = '.';
       inputLines = [...fields, 'y'];
     }
-    if (workflow === 'policy') {
-      const installed = await this.client(scope).getInstalled(scope);
-      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
-      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
-        { title: 'Explain package policy', placeHolder: 'Select an installed dependency' });
-      if (!picked) return;
-      args.package = packageIdentity(picked.item, picked.item, false);
-    }
     const context: PanelContext = { mode: 'native', scope, extra: {} };
     this.nativeOperations.add(context);
     try { await this.runCommand({ type: 'command', id: command.id, args, options }, context, inputLines); }
@@ -593,13 +598,114 @@ class ApmExtension implements vscode.Disposable {
         `APM audit reported findings or incomplete coverage in ${scope.label}. Review Problems.`, 'Show Output').then(choice => {
         if (choice) this.output.show();
       });
-    } else if (workflow === 'previewCompile' || workflow === 'policy' || workflow === 'doctor') {
-      await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : workflow === 'doctor' ? 'APM health check' : 'Package policy', context.extra.result);
+    } else if (workflow === 'previewCompile' || workflow === 'doctor') {
+      await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : 'APM health check', context.extra.result);
     } else {
       void vscode.window.showInformationMessage(`APM ${workflow === 'validate' ? 'validation' : 'compilation'} completed in ${scope.label}.`, 'Show Output').then(choice => {
         if (choice) this.output.show();
       });
     }
+  }
+  async reviewExecutableTrust() {
+    this.requireTrust();
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const reports = [
+      { label: 'Policy status', description: 'Discovery source, cache, and effective rules', title: 'APM policy status', args: ['policy', 'status', '--json'], json: true },
+      { label: 'Pending executable approvals', description: 'Packages with unapproved executable primitives', title: 'Pending executable approvals', args: ['approve', '--pending'] },
+      { label: 'Effective trust decisions', description: 'Current executable allow and deny decisions', title: 'Effective executable trust decisions', args: ['approve', '--list'] }
+    ];
+    const picked = await vscode.window.showQuickPick(reports, {
+      title: `Review executable trust — ${scope.label}`,
+      placeHolder: 'Choose a read-only policy report'
+    });
+    if (!picked) return;
+    await this.showPolicyReport(scope, picked.title, picked.args, picked.json);
+  }
+  async manageExecutableTrust() {
+    this.requireTrust();
+    const selectedScope = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
+      label: scope.kind === 'global' ? 'Global (user)' : scope.label,
+      description: scope.path,
+      detail: scopeKey(scope) === this.state.scopeKey ? 'Current package scope' : undefined,
+      scope
+    })), { title: 'Choose package scope', placeHolder: 'Select where the package is installed' });
+    if (!selectedScope) return;
+    const scope = { ...selectedScope.scope };
+    const installed = await this.client(scope).getInstalled(scope);
+    if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
+    const picked = await vscode.window.showQuickPick(installed.map(item => ({
+      label: item.name,
+      description: item.version,
+      detail: scope.label,
+      item
+    })), { title: `Choose package — ${scope.label}`, placeHolder: 'Select a package to change executable trust for' });
+    if (!picked) return;
+    const packageName = packageIdentity(picked.item, picked.item, false);
+    if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
+      throw new Error('APM returned an invalid dependency identity.');
+    }
+    const action = await vscode.window.showQuickPick([
+      { label: 'Approve executable primitives', description: 'Grant this package permission to use its declared executables', command: 'approve' },
+      { label: 'Deny executable primitives', description: "Block this package's executable primitives; deny takes precedence", command: 'deny' }
+    ], { title: `Manage executable trust — ${packageName}`, placeHolder: 'Choose an explicit trust decision' });
+    if (!action) return;
+    const destinations = [
+      ...(scope.kind === 'workspace' && await hasProjectManifest(scope.path)
+        ? [{ label: 'Shared project policy', description: 'Write the decision to apm.yml', user: false }]
+        : []),
+      { label: 'Personal policy', description: 'Write the decision to ~/.apm/config.json', user: true }
+    ];
+    const destination = await vscode.window.showQuickPick(destinations, {
+      title: `Store trust decision — ${packageName}`,
+      placeHolder: 'Choose the policy destination; package scope stays unchanged'
+    });
+    if (!destination) return;
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      await this.runCommand({
+        type: 'command',
+        id: action.command,
+        args: { packages: packageName },
+        options: destination.user ? { '--user': true } : {}
+      }, context);
+    } finally { this.nativeOperations.delete(context); }
+    if (context.extra.result && !context.extra.error) {
+      await this.showTextResult(`${action.label}: ${packageName}`, context.extra.result);
+    }
+  }
+  private async showPolicyReport(scope: Scope, title: string, args: string[], json = false) {
+    this.requireTrust();
+    const capturedScope = { ...scope };
+    const controller = new AbortController();
+    const context: PanelContext = { mode: 'native', scope: capturedScope, controller, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      this.output.appendLine(`\n$ apm ${redact(args.join(' '))} (${capturedScope.label})`);
+      const result = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification, title, cancellable: true
+      }, async (_progress, cancellation) => {
+        const subscription = cancellation.onCancellationRequested(() => controller.abort());
+        try {
+          return await this.client(capturedScope, controller.signal).execute(args, {
+            signal: controller.signal, timeoutMs: 5 * 60_000
+          });
+        } finally { subscription.dispose(); }
+      });
+      if (controller.signal.aborted) return;
+      if (result.exitCode !== 0) throw new Error(`APM policy inspection failed: ${redact(result.stderr || result.stdout)}`);
+      let output = result.stdout.trim();
+      if (json) {
+        try { output = JSON.stringify(JSON.parse(output), null, 2); }
+        catch { throw new Error('APM returned an invalid policy status report. Review APM Output.'); }
+      }
+      if (result.stderr.trim()) output = [output, result.stderr.trim()].filter(Boolean).join('\n');
+      if (!output) throw new Error('APM returned an empty policy report. Review APM Output.');
+      await this.showTextResult(title, output);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally { this.nativeOperations.delete(context); }
   }
   async refreshDependencyTree() {
     this.requireTrust();
@@ -1264,8 +1370,14 @@ class ApmExtension implements vscode.Disposable {
     const mutating = descriptor.mutates && !options['--dry-run'] && !options['--validate'] &&
       (descriptor.id !== 'audit' || options['--strip'] === true || typeof options['--output'] === 'string');
     if (mutating) {
+      const trustMutation = descriptor.command[0] === 'approve' || descriptor.command[0] === 'deny';
+      const trustDestination = options['--user'] === true ? 'your personal APM configuration' : `the shared apm.yml in ${scope.label}`;
+      const trustAction = descriptor.command[0] === 'approve' ? 'Approve executable primitives for' : 'Deny executable primitives for';
       const confirmation = await vscode.window.showWarningMessage(
-        `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`, 'Run');
+        trustMutation
+          ? `${trustAction} ${message.args.packages} in ${trustDestination}? Host: ${this.hostLabel()}. This changes executable trust for the selected package. Only proceed for sources you trust.`
+          : `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`,
+        trustMutation ? 'Apply Trust Decision' : 'Run');
       if (!confirmation) return;
     }
     if (!inputLines && !requiresTerminal(descriptor, options) && descriptor.options.some(o => o.name === '--yes') && options['--yes'] === undefined && await client.supports(descriptor.command, ['--yes'])) {
@@ -1438,6 +1550,9 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.dependencies.refresh', () => extension.refreshDependencyTree()],
     ['apm.dependencies.why', (item?: unknown) => extension.explainDependency(item)],
     ['apm.dependencies.find', (uri?: unknown) => extension.findDependencyFile(uri)],
+    ['apm.policy.review', () => extension.reviewExecutableTrust()],
+    ['apm.policy.explain', () => extension.workflow('policy')],
+    ['apm.policy.manage', () => extension.manageExecutableTrust()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],

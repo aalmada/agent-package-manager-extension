@@ -11,6 +11,11 @@ test('utility commands stay contextual instead of cluttering the Command Palette
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
   }
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.dependencies.find')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
+  for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage']) {
+    assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
+    assert.ok(menus.commandPalette.some((entry: { command: string; when: string }) => entry.command === command && entry.when.includes('isWorkspaceTrusted')), command);
+  }
+  assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.policy.review')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
   for (const command of ['apm.settings', 'apm.refresh']) {
     assert.ok(menus['view/title'].some((entry: { command: string; when: string }) => entry.command === command && entry.when === 'view == apm.browser'), command);
   }
