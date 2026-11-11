@@ -29,6 +29,7 @@ try {
   await mkdir(join(home, '.apm'), { recursive: true });
   await writeFile(join(seeded, 'marketplace.json'), JSON.stringify({ name: 'seeded', plugins: [] }));
   await writeFile(join(legacy, 'marketplace.json'), JSON.stringify({ name: 'legacy', plugins: [] }));
+  await writeFile(join(project, 'apm.yml'), 'name: native-test\nversion: 1.0.0\ndescription: Native task test\nauthor: Example\nscripts:\n  check: echo explicit-only\n');
   await writeFile(join(home, '.apm', 'marketplaces.json'), JSON.stringify({ marketplaces: [{ name: 'seeded', url: seeded }] }));
   await writeFile(join(home, '.apm', 'config.json'), JSON.stringify({ auto_integrate: false, prefer_ssh: false }));
   await mkdir(join(userData, 'User'), { recursive: true });
@@ -37,6 +38,7 @@ try {
     'workbench.enableExperiments': false, 'telemetry.telemetryLevel': 'off',
     'task.autoDetect': 'on',
     'apm.executablePath': process.env.APM_TEST_EXECUTABLE ?? 'apm',
+    'apm.marketplaces': [],
     'apm.marketplaceEntries': [{ source: legacy, name: 'legacy-alias' }],
     'apm.config.preferSsh': true
   }));

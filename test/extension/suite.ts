@@ -80,6 +80,11 @@ async function steps() {
   assert.equal(homedir(), home, 'Extension host must not see the real home directory');
   const extension = vscode.extensions.getExtension('antao-almada.apm-package-manager');
   assert.ok(extension, 'Extension is installed in test host');
+  const nativeFolder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(nativeFolder);
+  const manifestUri = vscode.Uri.joinPath(nativeFolder.uri, 'apm.yml');
+  const nativeManifest = await readFile(manifestUri.fsPath, 'utf8');
+  assert.match(nativeManifest, /check: echo explicit-only/);
   await extension.activate();
   console.log('[suite] extension activated');
   assert.equal(apm().get('allowRemoteImages'), false);
@@ -92,11 +97,6 @@ async function steps() {
   assert.ok(!commands.includes('apm.getStarted'));
   for (const command of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!commands.includes(command), command);
   assert.equal(apm().get('tasks.includeScripts'), false);
-  const nativeFolder = vscode.workspace.workspaceFolders?.[0];
-  assert.ok(nativeFolder);
-  const manifestUri = vscode.Uri.joinPath(nativeFolder.uri, 'apm.yml');
-  const nativeManifest = 'name: native-test\nversion: 1.0.0\ndescription: Native task test\nauthor: Example\nscripts:\n  check: echo explicit-only\n';
-  await writeFile(manifestUri.fsPath, nativeManifest);
   await vscode.commands.executeCommand('apm.refresh');
   assert.ok(commands.includes('apm.browser.focus'));
   await vscode.commands.executeCommand('apm.browser.focus');
@@ -168,11 +168,13 @@ async function steps() {
   // CLI state → settings on startup.
   const seeded = pathToFileURL(join(home, 'markets', 'seeded')).href;
   const legacy = `legacy-alias=${join(home, 'markets', 'legacy')}`;
-  await until('registered marketplaces are imported', () => apm().get<string[]>('marketplaces', []).includes(seeded));
+  await until('registered marketplaces are imported', () => apm().get<string[]>('marketplaces', []).includes(seeded), 180_000,
+    async () => JSON.stringify({ settings: apm().get<string[]>('marketplaces', []), registry: await json('marketplaces.json') }));
   await until('CLI config is imported', () => apm().get('config.autoIntegrate') === false);
   await until('legacy marketplace declarations are migrated', async () =>
     apm().get<string[]>('marketplaces', []).includes(legacy) && (await registered()).includes('legacy-alias'));
   assert.equal(apm().inspect('marketplaceEntries')?.globalValue, undefined);
+  assert.deepEqual(apm().get<string[]>('marketplaces', []).sort(), [seeded, legacy].sort(), 'The test host uses only local marketplaces');
   await until('an explicit setting wins on first synchronization', async () => (await json('config.json')).prefer_ssh === true);
 
   // Settings → CLI: add, then remove an item.

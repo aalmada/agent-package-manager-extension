@@ -27,6 +27,8 @@ The workspace disables VS Code's experimental Debug Network view to avoid a [Nod
 - `npm run test:extension` runs the VS Code extension-host tests. It downloads a VS Code test build if `VSCODE_EXECUTABLE_PATH` is not set.
 - `npm run package` creates a VSIX package.
 
+The extension-host runner creates the project manifest before VS Code starts and overrides the default marketplaces with local fixtures. Keep these tests independent of remote repository access and credentials.
+
 To run the real-CLI tests, provide an isolated APM 0.35.0 executable. The tests use disposable homes and workspaces; they do not install or upgrade your CLI.
 
 ```bash
