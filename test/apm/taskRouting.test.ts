@@ -55,6 +55,7 @@ interface Harness {
   discoverMcpServers(): Promise<void>;
   installMcpServer(): Promise<void>;
   lifecycleWorkflows(): Promise<void>;
+  dependencyReports(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -64,7 +65,9 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   installed?: PackageItem[];
   marketplaces?: Marketplace[];
   tasks?: { definition: { workflow: string; script?: string }; scope: { uri: { fsPath: string } } }[];
-  output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number } } = {}) {
+  output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number };
+  savePath?: string;
+  scope?: Scope } = {}) {
   const processListeners = new Set<(event: { execution: Execution; exitCode?: number }) => void>();
   const endListeners = new Set<(event: { execution: Execution }) => void>();
   const executions: Execution[] = [], argv: string[][] = [], messages: Partial<State>[] = [];
@@ -102,7 +105,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     Task, ProcessExecution, TaskScope: { Workspace: 1, Global: 2 },
     TaskRevealKind: { Always: 1 }, TaskPanelKind: { Dedicated: 2 }, ProgressLocation: { Notification: 1 },
     QuickPickItemKind: { Separator: -1 },
-    Uri: { file: (path: string) => ({ fsPath: path }) },
+    Uri: { file: (path: string) => ({ scheme: 'file', fsPath: path }) },
     workspace: {
       isTrusted: options.trusted !== false,
       getConfiguration: () => ({ get: (key: string) => key === 'tasks.includeScripts' ? options.scriptsEnabled ?? false : 'apm' }),
@@ -117,6 +120,10 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
         const answer = inputs.shift();
         if (answer !== undefined) assert.equal(input.validateInput?.(answer), undefined);
         return answer;
+      },
+      showSaveDialog: async (input: { title: string }) => {
+        prompts.push(input.title);
+        return options.savePath ? { scheme: 'file', fsPath: options.savePath } : undefined;
       },
       showQuickPick: async (items: { label?: string }[], input: { title: string }) => {
         prompts.push(input.title); choices.push({ title: input.title, labels: Array.from(items, item => item.label ?? '') });
@@ -190,7 +197,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     loadDetails: async () => {},
     commandTasks: new Map(), queues: new Map(), panels: new Map(), subscriptions: [],
     requireTrust: () => { if (options.trusted === false) throw new Error('Trust this workspace'); },
-    scope: (panel?: Panel) => panel?.scope ?? ({ kind: 'workspace', label: 'project', path: root }),
+    scope: (panel?: Panel) => panel?.scope ?? options.scope ?? ({ kind: 'workspace', label: 'project', path: root }),
     client: (scope?: Scope) => ({
       supports: async () => true,
       getInstalled: async () => options.installed ?? [],
@@ -203,7 +210,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
         return options.output?.(args) ?? { stdout: args.join(' ') === 'compile --help' ? '  --target TEXT  Values: claude, copilot, cursor.\n  --help' : '', stderr: '', exitCode: 0 };
       }
     }),
-    serialize: async (_key: string, operation: () => Promise<void>) => { serializations++; await operation(); },
+    serialize: async <T>(_key: string, operation: () => Promise<T>): Promise<T> => { serializations++; return operation(); },
     send: (panel: Panel) => { messages.push({ ...panel.extra }); },
     scheduleRefresh: () => { refreshes++; }, refresh: async () => { refreshes++; }
   });
@@ -970,6 +977,60 @@ test('lifecycle trust changes and forced initialization use confirmed APM mutati
     assert.deepEqual(Array.from(replaced.argv[0]), ['lifecycle', 'init', '--force']);
     assert.match(replaced.confirmations[0], /Overwrite the existing lifecycle block/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('dependency reports check outdated packages and export SBOMs in both formats and scopes', async () => {
+  const outdated = harness({
+    picks: [0],
+    scope: { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' },
+    output: () => ({ stdout: 'repo  v1  v2  git', stderr: '', exitCode: 0 })
+  });
+  await outdated.extension.dependencyReports();
+  assert.deepEqual(Array.from(outdated.argv[0]), ['outdated', '--global']);
+  assert.match(outdated.previews[0].content, /repo\s+v1\s+v2/);
+  assert.equal(outdated.confirmations.length, 0);
+  assert.match(outdated.choices[0].labels[0], /network/);
+
+  const viewed = harness({
+    picks: [1, 0],
+    output: () => ({ stdout: '{"bomFormat":"CycloneDX"}', stderr: '', exitCode: 0 })
+  });
+  await viewed.extension.dependencyReports();
+  assert.deepEqual(Array.from(viewed.argv[0]), ['lock', 'export', '--format', 'cyclonedx']);
+  assert.match(viewed.previews[0].content, /CycloneDX/);
+  assert.equal(viewed.confirmations.length, 0);
+
+  const saved = harness({
+    picks: [2, 1],
+    savePath: '/home/test/.apm/reports/apm-sbom.spdx.json',
+    scope: { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' },
+    output: () => ({ stdout: 'Wrote SPDX SBOM.', stderr: '', exitCode: 0 })
+  });
+  await saved.extension.dependencyReports();
+  assert.deepEqual(Array.from(saved.argv[0]), [
+    'lock', 'export', '--global', '--format', 'spdx', '--output', '/home/test/.apm/reports/apm-sbom.spdx.json'
+  ]);
+  assert.match(saved.confirmations[0], /Write the spdx SBOM from Global \(user\) to/);
+  assert.match(saved.previews[0].content, /Wrote SPDX SBOM/);
+  assert.equal(saved.counts().refreshes, 0, 'SBOM export does not trigger an unrelated package refresh');
+
+  const failedExport = harness({
+    picks: [2, 0],
+    savePath: '/project/apm-sbom.cdx.json',
+    output: () => ({ stdout: 'partial report', stderr: 'export failed', exitCode: 2 })
+  });
+  await failedExport.extension.dependencyReports();
+  assert.match(failedExport.previews[0].content, /Exit code: 2[\s\S]*partial report[\s\S]*export failed/);
+  assert.match(failedExport.confirmations[1], /exited with code 2/);
+  assert.equal(failedExport.notices.length, 0, 'Failed exports do not show a success notification');
+
+  const cancelled = harness({ picks: [2, 0] });
+  await cancelled.extension.dependencyReports();
+  assert.equal(cancelled.argv.length, 0, 'Cancelling the file picker does not run APM');
+
+  const declined = harness({ picks: [2, 0], savePath: '/project/apm-sbom.cdx.json', cancelConfirmation: true });
+  await declined.extension.dependencyReports();
+  assert.equal(declined.argv.length, 0, 'Dismissing the SBOM write confirmation does not run APM');
 });
 
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {

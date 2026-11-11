@@ -747,6 +747,86 @@ class ApmExtension implements vscode.Disposable {
     if (!await hasProjectManifest(scope.path)) throw new Error(`Initialize an APM project in ${scope.label} before changing its lifecycle configuration.`);
     await this.runLifecycleCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
   }
+  async dependencyReports() {
+    const scope = await this.workflowScope();
+    if (!scope) return;
+    const actions = [
+      { label: 'Check outdated dependencies (network)', description: 'Run APM remote version checks for this scope', actionType: 'outdated' },
+      { label: 'View SBOM in editor', description: 'Generate CycloneDX or SPDX output without writing a file', actionType: 'view' },
+      { label: 'Save SBOM to file...', description: 'Write a CycloneDX or SPDX file to a location you choose', actionType: 'save' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Dependency reports — ${scope.label}`,
+      placeHolder: 'Choose a report; outdated checks may use the network'
+    });
+    if (!action) return;
+    if (action.actionType === 'outdated') {
+      const context: PanelContext = { mode: 'native', scope, extra: {} };
+      this.nativeOperations.add(context);
+      try { await this.runCommand({ type: 'command', id: 'outdated', args: {}, options: {} }, context); }
+      finally { this.nativeOperations.delete(context); }
+      if (!context.extra.result) return;
+      const title = `Outdated dependencies — ${scope.label}`;
+      await this.showTextResult(title, context.extra.result);
+      if (context.extra.error) throw new Error(context.extra.error);
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+      return;
+    }
+    const formats = [
+      { label: 'CycloneDX JSON', value: 'cyclonedx', filename: 'apm-sbom.cdx.json' },
+      { label: 'SPDX JSON', value: 'spdx', filename: 'apm-sbom.spdx.json' }
+    ];
+    const format = await vscode.window.showQuickPick(formats, {
+      title: 'Choose SBOM format',
+      placeHolder: 'Select a supported APM lock export format'
+    });
+    if (!format) return;
+    if (action.actionType === 'view') {
+      const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value];
+      await this.showDependencyReport(scope, `${format.label} SBOM — ${scope.label}`, args);
+      return;
+    }
+    const destination = await vscode.window.showSaveDialog({
+      title: `Save ${format.label} SBOM`,
+      defaultUri: vscode.Uri.file(join(scope.path, format.filename)),
+      filters: { [format.label]: ['json'] }
+    });
+    if (!destination) return;
+    if (destination.scheme !== 'file') throw new Error('Choose a file-system location for the SBOM.');
+    const outputPath = destination.fsPath;
+    const title = `${format.label} SBOM export — ${scope.label}`;
+    const confirmation = await vscode.window.showWarningMessage(
+      `Write the ${format.value} SBOM from ${scope.label} to ${outputPath}? Host: ${this.hostLabel()}. APM reads the selected lockfile and writes only this report file.`,
+      'Write SBOM');
+    if (confirmation !== 'Write SBOM') return;
+    const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value, '--output', outputPath];
+    const result = await this.serialize('apm-mutations', () => this.executeInspection(scope, title, args));
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned no confirmation for the SBOM file. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} exited with code ${result.exitCode}. Review the result document and APM Output.`);
+      return;
+    }
+    void vscode.window.showInformationMessage(`SBOM written to ${outputPath}.`, 'Open SBOM').then(choice => {
+      if (choice) void vscode.workspace.openTextDocument(vscode.Uri.file(outputPath))
+        .then(document => vscode.window.showTextDocument(document))
+        .then(undefined, error => this.report(error));
+    });
+  }
+  private async showDependencyReport(scope: Scope, title: string, args: string[]) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty dependency report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
   private async showLifecycleReport(scope: Scope, title: string, args: string[]) {
     const result = await this.executeInspection(scope, title, args);
     if (!result) return;
@@ -1751,6 +1831,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.mcp.discover', () => extension.discoverMcpServers()],
     ['apm.mcp.install', () => extension.installMcpServer()],
     ['apm.lifecycle', () => extension.lifecycleWorkflows()],
+    ['apm.reports.dependencies', () => extension.dependencyReports()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],

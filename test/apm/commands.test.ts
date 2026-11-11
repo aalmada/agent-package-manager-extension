@@ -11,11 +11,11 @@ test('utility commands stay contextual instead of cluttering the Command Palette
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'false', command);
   }
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.dependencies.find')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
-  for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle']) {
+  for (const command of ['apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle', 'apm.reports.dependencies']) {
     assert.ok(manifest.contributes.commands.some((entry: { command: string }) => entry.command === command), command);
     assert.ok(menus.commandPalette.some((entry: { command: string; when: string }) => entry.command === command && entry.when.includes('isWorkspaceTrusted')), command);
   }
-  for (const command of ['apm.mcp.discover', 'apm.mcp.install']) {
+  for (const command of ['apm.mcp.discover', 'apm.mcp.install', 'apm.reports.dependencies']) {
     assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === command)?.when, 'isWorkspaceTrusted');
   }
   assert.equal(menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.lifecycle')?.when, 'isWorkspaceTrusted && workspaceFolderCount != 0');
