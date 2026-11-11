@@ -764,7 +764,7 @@ class ApmExtension implements vscode.Disposable {
     }
     this.setSearch(withToken(this.search, '@marketplace:', name));
   }
-  async chooseScope(kind: 'workspace' | 'global') {
+  async chooseScope(kind: 'workspace' | 'global' | '') {
     let target: Scope | undefined;
     if (kind === 'workspace') {
       const folders = this.state.scopes.filter(s => s.kind === 'workspace');
@@ -1378,11 +1378,12 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.filter.installed', () => extension.toggleStatus('@installed')],
     ['apm.filter.updates', () => extension.toggleStatus('@updates')],
     ['apm.filter.dependencies', () => extension.toggleStatus('@dependencies')],
+    ['apm.filter.scope.all', () => extension.chooseScope('')],
     ['apm.filter.scope.workspace', () => extension.chooseScope('workspace')],
     ['apm.filter.scope.global', () => extension.chooseScope('global')],
     ['apm.filter.marketplace.all', () => extension.chooseMarketplace(true)],
     ['apm.filter.marketplace.choose', () => extension.chooseMarketplace()],
-    ...(['name', 'name-desc', 'marketplace', 'version', 'version-desc'] as const).map(order => [`apm.filter.sort.${order}`, () => extension.sortBy(order)] as const),
+    ...(['name', 'name-desc', 'marketplace'] as const).map(order => [`apm.filter.sort.${order}`, () => extension.sortBy(order)] as const),
     ['apm.output', () => extension.showOutput()]
   ] as const) {
     const handler = async (argument?: unknown) => {

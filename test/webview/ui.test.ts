@@ -137,6 +137,10 @@ test('one browser view keeps search and filter controls above all sections', () 
   assert.ok(!contributions.views.apm.some((view: { id: string }) => view.id === 'apm.dependencies'));
   assert.ok(contributions.menus['webview/context'].some((entry: { command: string }) => entry.command === 'apm.filter.dependencies'));
   assert.equal(contributions.menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.filter.dependencies').when, 'false');
+  assert.ok(contributions.commands.some((command: { command: string }) => command.command === 'apm.filter.scope.all'));
+  assert.ok(!contributions.commands.some((command: { command: string }) => command.command.startsWith('apm.filter.sort.version')));
+  const allScopes = contributions.menus['apm.filter.scope'].find((entry: { command: string }) => entry.command === 'apm.filter.scope.all.checked');
+  assert.equal(allScopes.when, "(apm.filter.scopeKind == '')");
   for (const id of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!contributions.commands.some((command: { command: string }) => command.command === id));
   assert.match(contributions.menus.commandPalette.find((entry: { command: string }) => entry.command === 'apm.runScript').when, /config\.apm\.tasks\.includeScripts/);
 });
@@ -159,7 +163,7 @@ test('title actions use native overflow with Views before Settings', () => {
 test('all toggle menus use complementary checked and unchecked native entries', () => {
   const contributions = JSON.parse(readFileSync('package.json', 'utf8')).contributes;
   const checked = contributions.commands.filter((item: { command: string }) => item.command.endsWith('.checked'));
-  assert.equal(checked.length, 15);
+  assert.equal(checked.length, 14);
   for (const command of checked) {
     const base = command.command.slice(0, -8);
     const original = contributions.commands.find((item: { command: string }) => item.command === base);
@@ -707,9 +711,9 @@ test('dependency mode groups current-scope packages in the browser and supports 
     page.state.browserSearch = '@dependencies @marketplace:two'; page.update();
     assert.equal(page.document.querySelectorAll('.package-row').length, 1);
     page.state.browserSearch = '@dependencies'; page.update();
-    search('child @dependencies @sort:version-desc');
+    search('child @dependencies @sort:name-desc');
     [...page.document.querySelectorAll('button')].find(button => button.textContent === 'Back to packages')!.click();
-    assert.equal(page.document.querySelector<HTMLInputElement>('#search')?.value, 'child @sort:version-desc');
+    assert.equal(page.document.querySelector<HTMLInputElement>('#search')?.value, 'child @sort:name-desc');
     assert.equal(page.document.querySelector('.dependency-summary'), null);
     search('@dependencies');
     page.state.scopeKey = 'global:/user/.apm'; page.state.scopes.push({ kind: 'global', label: 'Global (user)', path: '/user/.apm' });

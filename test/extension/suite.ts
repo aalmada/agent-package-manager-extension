@@ -154,7 +154,9 @@ async function steps() {
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
   await unlink(manifestUri.fsPath);
   await unlink(instructionPath);
-  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name', 'apm.filter.sort.version-desc']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.all', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name']) assert.ok(commands.includes(command), command);
+  assert.ok(!commands.includes('apm.filter.sort.version'));
+  assert.ok(!commands.includes('apm.filter.sort.version-desc'));
 
   // Settings editor, not a custom page.
   await vscode.commands.executeCommand('apm.marketplaces');

@@ -113,6 +113,8 @@
       { "command": "apm.filter.updates.checked", "title": "✓ Updates", "category": "APM Filter" },
       { "command": "apm.filter.dependencies", "title": "Dependencies", "category": "APM Filter" },
       { "command": "apm.filter.dependencies.checked", "title": "✓ Dependencies", "category": "APM Filter" },
+      { "command": "apm.filter.scope.all", "title": "All Scopes", "category": "APM Filter" },
+      { "command": "apm.filter.scope.all.checked", "title": "✓ All Scopes", "category": "APM Filter" },
       { "command": "apm.filter.scope.workspace", "title": "Workspace", "category": "APM Filter" },
       { "command": "apm.filter.scope.workspace.checked", "title": "✓ Workspace", "category": "APM Filter" },
       { "command": "apm.filter.scope.global", "title": "Global (user)", "category": "APM Filter" },
@@ -126,11 +128,7 @@
       { "command": "apm.filter.sort.name-desc", "title": "Name (Z-A)", "category": "APM Filter" },
       { "command": "apm.filter.sort.name-desc.checked", "title": "✓ Name (Z-A)", "category": "APM Filter" },
       { "command": "apm.filter.sort.marketplace", "title": "Marketplace", "category": "APM Filter" },
-      { "command": "apm.filter.sort.marketplace.checked", "title": "✓ Marketplace", "category": "APM Filter" },
-      { "command": "apm.filter.sort.version", "title": "Version (Ascending)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.version.checked", "title": "✓ Version (Ascending)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.version-desc", "title": "Version (Descending)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.version-desc.checked", "title": "✓ Version (Descending)", "category": "APM Filter" }
+      { "command": "apm.filter.sort.marketplace.checked", "title": "✓ Marketplace", "category": "APM Filter" }
     ],
     "menus": {
       "editor/title": [
@@ -191,10 +189,12 @@
         }
       ],
       "apm.filter.scope": [
-        { "command": "apm.filter.scope.workspace", "group": "1@1", "when": "!(apm.filter.scopeKind == 'workspace')" },
-        { "command": "apm.filter.scope.workspace.checked", "group": "1@1", "when": "(apm.filter.scopeKind == 'workspace')" },
-        { "command": "apm.filter.scope.global", "group": "1@2", "when": "!(apm.filter.scopeKind == 'global')" },
-        { "command": "apm.filter.scope.global.checked", "group": "1@2", "when": "(apm.filter.scopeKind == 'global')" }
+        { "command": "apm.filter.scope.all", "group": "1@1", "when": "!(apm.filter.scopeKind == '')" },
+        { "command": "apm.filter.scope.all.checked", "group": "1@1", "when": "(apm.filter.scopeKind == '')" },
+        { "command": "apm.filter.scope.workspace", "group": "1@2", "when": "!(apm.filter.scopeKind == 'workspace')" },
+        { "command": "apm.filter.scope.workspace.checked", "group": "1@2", "when": "(apm.filter.scopeKind == 'workspace')" },
+        { "command": "apm.filter.scope.global", "group": "1@3", "when": "!(apm.filter.scopeKind == 'global')" },
+        { "command": "apm.filter.scope.global.checked", "group": "1@3", "when": "(apm.filter.scopeKind == 'global')" }
       ],
       "apm.filter.marketplace": [
         { "command": "apm.filter.marketplace.all", "group": "1@1", "when": "!(apm.filter.marketplace == '')" },
@@ -208,11 +208,7 @@
         { "command": "apm.filter.sort.name-desc", "group": "1@2", "when": "!(apm.filter.sort == 'name-desc')" },
         { "command": "apm.filter.sort.name-desc.checked", "group": "1@2", "when": "(apm.filter.sort == 'name-desc')" },
         { "command": "apm.filter.sort.marketplace", "group": "1@3", "when": "!(apm.filter.sort == 'marketplace')" },
-        { "command": "apm.filter.sort.marketplace.checked", "group": "1@3", "when": "(apm.filter.sort == 'marketplace')" },
-        { "command": "apm.filter.sort.version", "group": "1@4", "when": "!(apm.filter.sort == 'version')" },
-        { "command": "apm.filter.sort.version.checked", "group": "1@4", "when": "(apm.filter.sort == 'version')" },
-        { "command": "apm.filter.sort.version-desc", "group": "1@5", "when": "!(apm.filter.sort == 'version-desc')" },
-        { "command": "apm.filter.sort.version-desc.checked", "group": "1@5", "when": "(apm.filter.sort == 'version-desc')" }
+        { "command": "apm.filter.sort.marketplace.checked", "group": "1@3", "when": "(apm.filter.sort == 'marketplace')" }
       ],
       "commandPalette": [
         { "command": "apm.views.catalog", "when": "false" },
@@ -247,6 +243,11 @@
         },
         { "command": "apm.filter.dependencies.checked", "when": "false" },
         {
+          "command": "apm.filter.scope.all",
+          "when": "false"
+        },
+        { "command": "apm.filter.scope.all.checked", "when": "false" },
+        {
           "command": "apm.filter.scope.workspace",
           "when": "false"
         },
@@ -280,17 +281,7 @@
           "command": "apm.filter.sort.marketplace",
           "when": "false"
         },
-        { "command": "apm.filter.sort.marketplace.checked", "when": "false" },
-        {
-          "command": "apm.filter.sort.version",
-          "when": "false"
-        },
-        { "command": "apm.filter.sort.version.checked", "when": "false" },
-        {
-          "command": "apm.filter.sort.version-desc",
-          "when": "false"
-        },
-        { "command": "apm.filter.sort.version-desc.checked", "when": "false" }
+        { "command": "apm.filter.sort.marketplace.checked", "when": "false" }
       ]
     },
     "configuration": [

@@ -12,28 +12,8 @@ export function sectionPackages(section: BrowserSection, state: Pick<State, 'cat
   }
 }
 
-export type Ordering = 'name' | 'name-desc' | 'marketplace' | 'version' | 'version-desc';
+export type Ordering = 'name' | 'name-desc' | 'marketplace';
 export interface Filters { text: string; marketplace: string; status: string; sort: Ordering }
-
-function versionParts(value: string): { numbers: number[]; pre: string[] } | undefined {
-  const match = value.match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
-  return match ? { numbers: match.slice(1, 4).map(Number), pre: match[4]?.split('.') ?? [] } : undefined;
-}
-
-export function compareVersions(a: string, b: string): number {
-  const left = versionParts(a), right = versionParts(b);
-  if (!left || !right) return left ? -1 : right ? 1 : a.localeCompare(b);
-  for (let i = 0; i < 3; i++) if (left.numbers[i] !== right.numbers[i]) return left.numbers[i] - right.numbers[i];
-  if (!left.pre.length || !right.pre.length) return left.pre.length ? -1 : right.pre.length ? 1 : 0;
-  for (let i = 0; i < Math.max(left.pre.length, right.pre.length); i++) {
-    const x = left.pre[i], y = right.pre[i];
-    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
-    if (x === y) continue;
-    const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y);
-    return xn && yn ? Number(x) - Number(y) : xn ? -1 : yn ? 1 : x.localeCompare(y);
-  }
-  return 0;
-}
 
 export function filterPackages(items: PackageItem[], filters: Filters): PackageItem[] {
   let marketplace = filters.marketplace, status = filters.status, sort = filters.sort;
@@ -45,7 +25,10 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
     else if (token === '@updates') status = 'updates';
     else if (token === '@dependencies') status = 'dependencies';
     else if (/^@scope:(workspace|global)$/.test(token)) scope = token.slice(7);
-    else if (token.startsWith('@sort:') && ['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(token.slice(6))) sort = token.slice(6) as Ordering;
+    else if (token.startsWith('@sort:')) {
+      const requested = token.slice(6);
+      if (['name', 'name-desc', 'marketplace'].includes(requested)) sort = requested as Ordering;
+    }
     else terms.push(token.replaceAll('"', '').toLowerCase());
   }
   return items.filter(item => (!marketplace || item.marketplace === marketplace) &&
@@ -58,10 +41,7 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
     .sort((a, b) => {
       let order = 0;
       if (sort === 'marketplace') order = a.marketplace.localeCompare(b.marketplace);
-      else if (sort.startsWith('version')) {
-        const validA = !!versionParts(a.version), validB = !!versionParts(b.version);
-        order = validA !== validB ? (validA ? -1 : 1) : compareVersions(a.version, b.version) * (sort === 'version-desc' ? -1 : 1);
-      } else order = a.name.localeCompare(b.name) * (sort === 'name-desc' ? -1 : 1);
+      else order = a.name.localeCompare(b.name) * (sort === 'name-desc' ? -1 : 1);
       return order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
     });
 }
@@ -73,7 +53,7 @@ export function filterTokens(search: string): FilterTokens {
   return {
     marketplace: search.match(/@marketplace:("[^"]*"|\S+)/)?.[1]?.replaceAll('"', '') ?? '',
     scope: search.match(/(?:^|\s)@scope:(workspace|global)(?=\s|$)/)?.[1] ?? '',
-    sort: (['name', 'name-desc', 'marketplace', 'version', 'version-desc'].includes(sort) ? sort : 'name') as Ordering,
+    sort: (['name', 'name-desc', 'marketplace'].includes(sort) ? sort : 'name') as Ordering,
     installed: /(?:^|\s)@installed(?=\s|$)/.test(search),
     updates: /(?:^|\s)@updates(?=\s|$)/.test(search),
     dependencies: /(?:^|\s)@dependencies(?=\s|$)/.test(search)
