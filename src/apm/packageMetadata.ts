@@ -170,6 +170,33 @@ async function localContents(root: string, notices: string[]): Promise<ContentGr
   return mergeContents(groups);
 }
 
+export function deployedContentKind(original: string): ContentKind | undefined {
+  const path = original.replace(/\\/g, '/');
+  const folder = contentFolders.find(folder => {
+    if (!path.startsWith(`${folder.path}/`)) return false;
+    const parts = path.slice(folder.path.length + 1).split('/');
+    return folder.marker ? parts.length === 2 && folder.marker.test(parts[1]) :
+      parts.length === 1 && folder.extension.test(parts[0]);
+  });
+  return folder?.kind ?? (/^[^/]+\.prompt\.md$/i.test(path) ? 'prompts' : undefined);
+}
+
+/** Inspect only this package's verified deployment files, not other workspace contents. */
+export async function inspectDeployedPackage(root: string, paths: readonly string[]): Promise<PackageMetadata> {
+  const notices: string[] = [], groups: ContentGroup[] = [];
+  for (const path of paths) {
+    const kind = deployedContentKind(path);
+    if (!kind) continue;
+    const item = await localItem(root, path, notices);
+    if (item) groups.push({ kind, items: [item] });
+  }
+  return {
+    localRoot: await resolveContained(root, '.'),
+    contents: mergeContents(groups), notices,
+    notes: ['This package is installed in its deployment directories but is not listed by the CLI. Only its verified deployed contents are shown; the package cache and README are unavailable.']
+  };
+}
+
 interface RepositoryView {
   exists(path: string): Promise<boolean>;
   read(file: string): Promise<string | undefined>;

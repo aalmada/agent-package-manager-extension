@@ -829,7 +829,8 @@ class ApmExtension implements vscode.Disposable {
       if (request !== entry.detailsRequest) return;
       const groups = details.contents as ContentGroup[] | undefined;
       entry.navigation = typeof details.localContentRoot === 'string' && Array.isArray(groups)
-        ? await contentNavigation(details.localContentRoot, groups, item.installed, typeof item.metadata?.deployedSkillPath === 'string') : new Map();
+        ? await contentNavigation(details.localContentRoot, groups, item.installed,
+          typeof item.metadata?.deployedSkillPath === 'string' || Array.isArray(item.metadata?.deployedPackagePaths)) : new Map();
       delete details.localContentRoot;
       if (request !== entry.detailsRequest) return;
       entry.extra.details = safePayload(details) as Record<string, unknown>;

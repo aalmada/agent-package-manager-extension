@@ -134,6 +134,21 @@ test('lockfile hosts and marketplace-qualified dependencies contribute authentic
   });
 });
 
+test('local lockfile identities never contribute CLI repository credentials', async () => {
+  await fixture(async home => {
+    await writeFile(join(home, 'apm.yml'), 'dependencies:\n  apm:\n    - team/repo-a/plugins/example\n');
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [
+      { source: 'local', repo_url: '_local/example', local_path: '/old/example' },
+      { source: 'local', host: 'github.com', repo_url: 'team/local-copy', local_path: '/old/copy' },
+      { host: 'github.com', repo_url: '_local/legacy' },
+      { host: 'github.com', repo_url: 'team/repo-a', is_virtual: true, virtual_path: 'plugins/example' }
+    ] }));
+    const { auth, calls } = authentication([credential('team/repo-a', 'opaque-account-token')]);
+    assert.deepEqual(await cliEnvironment(auth, ['outdated'], home, home), { GITHUB_APM_PAT: 'opaque-account-token' });
+    assert.deepEqual(calls, [[repository('team/repo-a')]]);
+  });
+});
+
 test('public and unmanaged repositories preserve CLI authentication fallback', async () => {
   await fixture(async home => {
     const { auth } = authentication();

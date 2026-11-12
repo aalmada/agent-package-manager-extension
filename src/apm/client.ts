@@ -7,7 +7,7 @@ import { parseCatalog, parseInstalled, parseOutdated, parseVariablePrompt, recor
 import { baseline, descriptors } from './commands';
 import { declaredContents, mergeContents } from './contents';
 import { marketplaceManifest, readMarketplaces, resolveContained } from './manifest';
-import { remoteSource, inspectBarePackage, inspectRemotePackage, inspectLocalPackage, type PackageMetadata } from './packageMetadata';
+import { remoteSource, inspectBarePackage, inspectRemotePackage, inspectLocalPackage, inspectDeployedPackage, deployedContentKind, type PackageMetadata } from './packageMetadata';
 import { containsUrlCredentials } from './redact';
 import type { RepositoryHost } from '../auth/repositories';
 import type { ExecutionResult, Marketplace, PackageItem, Probe, Scope, UpdateRow } from './types';
@@ -200,24 +200,30 @@ export class ApmClient {
     const dependencies: Record<string, unknown>[] = record(lock) && Array.isArray(lock.dependencies) ? lock.dependencies.filter(record) : [];
     const deployments = record(lock) && Array.isArray(lock.deployments) ? lock.deployments.filter(record) : [];
     for (const dep of dependencies) {
-      if (dep.package_type !== 'claude_skill' || !Array.isArray(dep.deployed_files) || items.some(item => matchesDependency(item.name, dep))) continue;
+      if (!['claude_skill', 'skill_bundle', 'marketplace_plugin'].includes(String(dep.package_type)) ||
+        !Array.isArray(dep.deployed_files) || items.some(item => matchesDependency(item.name, dep))) continue;
       const identity = dependencyIdentity(dep);
       if (!identity) continue;
+      const standalone = dep.package_type === 'claude_skill';
+      const paths: string[] = [];
       for (const path of dep.deployed_files) {
-        if (typeof path !== 'string' || !/[\\/]SKILL\.md$/i.test(path)) continue;
+        if (typeof path !== 'string' || (standalone && !/[\\/]SKILL\.md$/i.test(path))) continue;
+        if (!standalone && !deployedContentKind(path)) continue;
         const deployment = deployments.find(entry => entry.kind === 'project-relative' && entry.value === path);
         if (deployment && deployment.active_owner !== identity) continue;
         const actual = await resolveContained(scope.path, path);
         if (!actual || !(await stat(actual)).isFile()) continue;
-        const cliIdentity = typeof dep.alias === 'string' && dep.alias ? dep.alias : identity;
-        items.push({
-          id: `installed::${cliIdentity}`, name: cliIdentity, marketplace: '', installed: true,
-          version: typeof dep.version === 'string' && dep.version !== 'unknown' ? dep.version : 'Not specified',
-          updateStatus: 'unchecked',
-          metadata: { cliIdentity, deployedSkillPath: path }
-        });
-        break;
+        paths.push(path);
+        if (standalone) break;
       }
+      if (!paths.length) continue;
+      const cliIdentity = typeof dep.alias === 'string' && dep.alias ? dep.alias : identity;
+      items.push({
+        id: `installed::${cliIdentity}`, name: cliIdentity, marketplace: '', installed: true,
+        version: typeof dep.version === 'string' && dep.version !== 'unknown' ? dep.version : 'Not specified',
+        updateStatus: 'unchecked',
+        metadata: { cliIdentity, ...(standalone ? { deployedSkillPath: paths[0] } : { deployedPackagePaths: paths }) }
+      });
     }
     return items.map(item => {
       const matching = dependencies.filter(dep => matchesDependency(item.name, dep));
@@ -259,7 +265,9 @@ export class ApmClient {
   async getDetails(item: PackageItem, scope: Scope): Promise<Record<string, unknown>> {
     const identity = item.installed ? String(item.metadata?.cliIdentity ?? item.name) : item.marketplace ? `${item.name}@${item.marketplace}` : item.name;
     const deployedSkillPath = item.installed && typeof item.metadata?.deployedSkillPath === 'string' ? item.metadata.deployedSkillPath : undefined;
-    const result = deployedSkillPath || (!item.installed && item.marketplace) ? undefined :
+    const deployedPackagePaths = item.installed && Array.isArray(item.metadata?.deployedPackagePaths)
+      ? item.metadata.deployedPackagePaths.filter((path): path is string => typeof path === 'string') : undefined;
+    const result = deployedSkillPath || deployedPackagePaths || (!item.installed && item.marketplace) ? undefined :
       await this.checked(['view', identity, ...(scope.kind === 'global' ? ['--global'] : [])], scope.kind === 'global' ? this.home : scope.path);
     const metadata: Record<string, unknown> = { ...item.metadata, identity, ...(result ? { rawOutput: result.stdout } : {}) };
     let plugin = record(item.metadata?.plugin) ? item.metadata.plugin : undefined;
@@ -304,6 +312,8 @@ export class ApmClient {
         'This skill is installed in its deployment directory but is not listed by the CLI. Contents are read from the deployed skill, not the package cache.',
         ...(packageMetadata.notes ?? [])
       ];
+    } else if (deployedPackagePaths) {
+      packageMetadata = await inspectDeployedPackage(scope.path, deployedPackagePaths);
     } else if (item.installed && installPath) {
       const allowedRoot = await realpath(join(scope.path, 'apm_modules'));
       const candidate = await realpath(isAbsolute(installPath) ? installPath : resolve(await realpath(scope.path), installPath));
@@ -312,7 +322,7 @@ export class ApmClient {
         packageMetadata = await inspectLocalPackage(allowedRoot, rel);
       } else throw new ApmError('APM reported an installation path outside the selected package store.');
     }
-    if (item.installed && !installPath && !deployedSkillPath) metadata.contentsNotice = 'APM did not report an installation path; package contents may be incomplete.';
+    if (item.installed && !installPath && !deployedSkillPath && !deployedPackagePaths) metadata.contentsNotice = 'APM did not report an installation path; package contents may be incomplete.';
     if (packageMetadata?.pluginManifest) metadata.packageManifest = packageMetadata.pluginManifest;
     if (packageMetadata?.manifest) metadata.manifest = packageMetadata.manifest;
     if (packageMetadata?.readme !== undefined) metadata.readme = packageMetadata.readme;

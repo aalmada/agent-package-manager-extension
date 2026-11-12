@@ -170,11 +170,16 @@ test('repository picker cancellation never requests credentials or probes access
   assert.equal(host.secrets.size, 0);
 });
 
-test('repository picker discovers manifest and lockfile dependencies locally', async () => {
+test('repository picker discovers remote dependencies but excludes local lockfile identities', async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-auth-picker-'));
   try {
     await writeFile(join(home, 'apm.yml'), 'dependencies:\n  apm:\n    - org/direct/plugins/one#main\n    - plugin@market\n');
-    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [{ host: 'github.com', repo_url: 'org/locked' }] }));
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [
+      { host: 'github.com', repo_url: 'org/locked' },
+      { source: 'local', repo_url: '_local/plugin', local_path: '/old/plugin' },
+      { source: 'local', host: 'github.com', repo_url: 'org/local-copy', local_path: '/old/copy' },
+      { host: 'github.com', repo_url: '_local/legacy' }
+    ] }));
     const host = harness();
     host.state.picks.push('Connect GitHub account', undefined);
     await host.auth.manage(undefined, home);

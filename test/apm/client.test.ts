@@ -203,3 +203,100 @@ test('deployed-skill recovery excludes inactive owners and rejects escaping path
     await assert.rejects(client.getInstalled(scope), /symlink escapes/);
   } finally { await rm(home, { recursive: true }); }
 });
+
+test('installed list recovers four deployed private bundles without authentication or stale plugin duplicates', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-deployed-bundles-test-'));
+  try {
+    const names = ['development', 'analysis', 'automation', 'integration'];
+    const dependencies = names.map(name => ({
+      repo_url: 'team/private', name, virtual_path: `plugins/${name}`, is_virtual: true,
+      package_type: 'skill_bundle', version: '1.2.3', discovered_via: 'catalog', marketplace_plugin_name: name,
+      deployed_files: [`.agents/skills/${name}/SKILL.md`, `.github/agents/${name}.agent.md`]
+    }));
+    for (const dep of dependencies) {
+      for (const path of dep.deployed_files) {
+        await mkdir(join(home, path, '..'), { recursive: true });
+        await writeFile(join(home, path), `---\nname: ${dep.name}\ndescription: ${dep.name} description\n---\n`);
+      }
+    }
+    const reference = '.agents/skills/development/references/old.md';
+    await mkdir(join(home, reference, '..'), { recursive: true });
+    await writeFile(join(home, reference), '# Old reference');
+    await mkdir(join(home, '.agents/skills/unrelated'), { recursive: true });
+    await writeFile(join(home, '.agents/skills/unrelated/SKILL.md'), '# Unrelated');
+    const deployments = dependencies.flatMap(dep => dep.deployed_files.map(value => ({
+      kind: 'project-relative', value, active_owner: `${dep.repo_url}/${dep.virtual_path}`
+    })));
+    await writeFile(join(home, 'apm.yml'), 'dependencies:\n  apm:\n  - team/private/plugins/not-installed\n');
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({
+      dependencies: [
+        { repo_url: '_local/development', name: 'development', source: 'local', local_path: '/old/development',
+          package_type: 'marketplace_plugin', deployed_files: [...dependencies[0].deployed_files, reference] },
+        ...dependencies,
+        { repo_url: 'team/missing', package_type: 'skill_bundle', deployed_files: ['.agents/skills/missing/SKILL.md'] }
+      ], deployments
+    }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home,
+      fetcher: async () => assert.fail('Deployed contents must not require private repository access'),
+      environment: async () => assert.fail('Local discovery must not request credentials') });
+    const execute = t.mock.method(client, 'execute', async (args: string[]) => {
+      assert.deepEqual(args, ['deps', 'list']);
+      return { stdout: 'No APM dependencies installed (Project scope)', stderr: '', exitCode: 0 };
+    });
+    const scope = { kind: 'workspace' as const, path: home, label: 'project' };
+    const items = await client.getInstalled(scope);
+    assert.deepEqual(items.map(item => item.name), names);
+    for (const item of items) {
+      assert.equal(item.id, `catalog::${item.name}`);
+      assert.equal(item.version, '1.2.3');
+      assert.equal(item.metadata?.cliIdentity, `team/private/plugins/${item.name}`);
+      assert.equal(item.metadata?.installExpression, `${item.name}@catalog`);
+      const details = await client.getDetails(item, scope);
+      assert.deepEqual(details.contents, [
+        { kind: 'skills', items: [{ name: item.name, path: `.agents/skills/${item.name}/SKILL.md`, description: `${item.name} description` }] },
+        { kind: 'agents', items: [{ name: item.name, path: `.github/agents/${item.name}.agent.md`, description: `${item.name} description` }] }
+      ]);
+      assert.equal(details.localContentRoot, home);
+      assert.match(JSON.stringify(details.contentsNotes), /verified deployed contents/);
+    }
+    assert.equal(execute.mock.callCount(), 1);
+    execute.mock.mockImplementation(async () => ({
+      stdout: '| Package | Version | Source |\n' + dependencies.map(dep =>
+        `| ${dep.repo_url}/${dep.virtual_path} | 1.2.3 | github |`).join('\n'), stderr: '', exitCode: 0
+    }));
+    const listed = await client.getInstalled(scope);
+    assert.equal(listed.length, 4);
+    assert.ok(listed.every(item => item.metadata?.deployedPackagePaths === undefined));
+  } finally { await rm(home, { recursive: true }); }
+});
+
+test('deployed plugin recovery supports global agent-only packages and rejects escaping symlinks', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-deployed-plugin-test-'));
+  try {
+    const root = join(home, '.apm'), path = '.github/agents/review.agent.md';
+    await mkdir(join(root, path, '..'), { recursive: true });
+    await writeFile(join(root, path), '# Review');
+    const lock = { dependencies: [{
+      repo_url: 'team/review', name: 'review', alias: 'review-alias', package_type: 'marketplace_plugin', deployed_files: [path]
+    }] };
+    await writeFile(join(root, 'apm.lock.yaml'), JSON.stringify(lock));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async (args: string[], options: { cwd?: string }) => {
+      assert.deepEqual(args, ['deps', 'list', '--global']);
+      assert.equal(options.cwd, home);
+      return { stdout: 'No dependencies installed.', stderr: '', exitCode: 0 };
+    });
+    const scope = { kind: 'global' as const, path: root, label: 'Global' };
+    const items = await client.getInstalled(scope);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].metadata?.cliIdentity, 'review-alias');
+    assert.equal(items[0].metadata?.lockIdentity, 'team/review');
+    const details = await client.getDetails(items[0], scope);
+    assert.deepEqual(details.contents, [{ kind: 'agents', items: [{ name: 'review', path }] }]);
+    await writeFile(join(home, 'outside.agent.md'), '# Outside');
+    await symlink(join(home, 'outside.agent.md'), join(root, '.github/agents/outside.agent.md'));
+    lock.dependencies[0].deployed_files = ['.github/agents/outside.agent.md'];
+    await writeFile(join(root, 'apm.lock.yaml'), JSON.stringify(lock));
+    await assert.rejects(client.getInstalled(scope), /symlink escapes/);
+  } finally { await rm(home, { recursive: true }); }
+});

@@ -17,6 +17,7 @@ export async function dependencyExpressions(root: string): Promise<string[]> {
     for (const value of entries) {
       if (typeof value === 'string') expressions.push(value);
       else if (record(value)) {
+        if (value.source === 'local' || (typeof value.repo_url === 'string' && value.repo_url.startsWith('_local/'))) continue;
         if (typeof value.host === 'string' && typeof value.repo_url === 'string') expressions.push(`https://${value.host}/${value.repo_url}`);
         else for (const field of ['git', 'repo', 'repository', 'url', 'repo_url']) {
           if (typeof value[field] === 'string') expressions.push(value[field]);
