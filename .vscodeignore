@@ -12,6 +12,7 @@ apm_modules/**
 apm.yml
 apm.lock.yaml
 AGENTS.md
+docs/**
 .gitignore
 test-results/**
 playwright-report/**

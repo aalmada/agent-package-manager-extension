@@ -37,6 +37,12 @@ APM_TEST_EXECUTABLE=/path/to/apm-0.35.0 npm test
 
 An optional legacy CLI executable can be provided with `APM_LEGACY_EXECUTABLE` for compatibility tests.
 
+To opt into the isolated private direct-install test, set `APM_TEST_EXECUTABLE` to APM 0.35.0, `APM_PRIVATE_TEST_SOURCE` to a private GitHub.com package source, and `APM_PRIVATE_TEST_TOKEN` to a token with access to it. The test writes to a temporary home and project and performs a real installation. Never commit the token.
+
+```bash
+npx tsx --test test/apm/privateLive.test.ts
+```
+
 Commit `apm.yml`, `apm.lock.yaml`, and APM-deployed agent files, including `.agents/skills/`, so dependency changes are reviewable and skills are available immediately after cloning. Keep the `apm_modules/` dependency cache gitignored. Update deployed files through APM, not by hand; review and commit them alongside manifest and lockfile changes. See [APM's commit guidance](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/consumer/install-packages.md#what-to-commit).
 
 ## Publishing
@@ -51,6 +57,19 @@ Before the first release, create a Trusted Publishing policy for the `antao-alma
 - Environment: leave empty
 
 To release, update the version in `package.json` and `package-lock.json` with `npm version <version> --no-git-tag-version`, update [CHANGELOG.md](CHANGELOG.md), and merge the changes into the default branch. Then run **Publish to VS Code Marketplace** from the repository's Actions tab. The workflow accepts only the default branch and reports a failure if validation or publishing fails.
+
+## Documentation
+
+The [user guide](docs/user-guide.md) is the root of the user documentation; each topic has its own page in [`docs/`](docs/). When a change adds or moves an operation, update every entry point it lists: the APM view, Command Palette, context menus, More APM Actions, settings, and tasks. Update [Commands](docs/commands.md) and [Settings](docs/settings.md) when changing `package.json` contributions.
+
+Screenshots in [`docs/images/`](docs/images/) are rendered from the built webview with fictional fixture data, so they never contain private packages or credentials. After changing the webview, regenerate them:
+
+```bash
+npm run build
+npm run docs:screenshots
+```
+
+Pass `-- --output <directory>` to write the images elsewhere for comparison. Install Chromium first with `npx playwright install chromium`. The `docs/` folder is excluded from the VSIX; the Marketplace resolves the README's relative image links against the GitHub repository.
 
 ## Updating the visual command contract
 

@@ -16,6 +16,7 @@ This repository is a TypeScript VS Code extension for Microsoft's Agent Package 
 - Keep lifecycle listing, validation, and dry-run tests read-only; route test execution, trust changes, and lifecycle block writes through explicit confirmation. Lifecycle operations require a selected workspace project and never run during discovery.
 - Run outdated dependency checks only after an explicit user action; label their network behavior and do not invalidate cached package-update results. Export SBOMs from the selected workspace or global lockfile, and require confirmation only when writing a chosen output file.
 - [`scripts/`](scripts/) builds and generates the CLI contract; [`test/`](test/) contains unit, browser, and extension-host tests.
+- [`docs/user-guide.md`](docs/user-guide.md) is the root of the user documentation and links one page per topic. Document every entry point for an operation (view, Command Palette, context menus, More APM Actions, settings, tasks) and keep [`docs/commands.md`](docs/commands.md) and [`docs/settings.md`](docs/settings.md) aligned with `package.json`.
 
 ## Development
 
@@ -28,6 +29,7 @@ CI uses Node.js 22 and tests the baseline APM CLI on Linux, Windows, and macOS. 
 - `npx tsx --test test/apm/commands.test.ts`: run one unit-test file.
 - `npm run build`: bundle the extension, webview, and extension-host test; copy CSS and collect production licenses.
 - `npm run test:browser`: after building, run Playwright tests with Chromium. Results go to `test-results/`; pass `-- --output <directory>` to preserve existing results.
+- `npm run docs:screenshots`: after building, regenerate `docs/images/` from fixture data with Chromium; pass `-- --output <directory>` to write elsewhere.
 - `npm run test:extension`: after building, run the VS Code host tests with an APM executable available. The runner resolves or downloads VS Code unless `VSCODE_EXECUTABLE_PATH` is set; Linux CI uses Xvfb.
 - `npm run package`: build and create a VSIX. The manual [publishing workflow](.github/workflows/publish.yml) validates it and uses Marketplace Trusted Publishing; see [release instructions](CONTRIBUTING.md#publishing).
 
