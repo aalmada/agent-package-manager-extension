@@ -15,6 +15,14 @@ async function postMessage(page: Page, message: { type: 'state'; state: State } 
   }), message);
 }
 
+async function expectBorderlessBadges(page: Page) {
+  for (const badge of await page.locator('.badge, .count-badge, .content-count').all()) {
+    await expect(badge).toHaveCSS('border-width', '0px');
+    await expect(badge).toHaveCSS('box-shadow', 'none');
+    await expect(badge).toHaveCSS('outline-style', 'none');
+  }
+}
+
 for (const theme of ['dark', 'light', 'high-contrast']) {
   test(`sidebar is functional at a narrow width in ${theme}`, async ({ page }, testInfo) => {
     const dark = theme !== 'light';
@@ -81,18 +89,21 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(await page.locator('.count-badge').first().evaluate(element => getComputedStyle(element).borderRadius)).toBe('11px');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`sidebar-${theme}.png`), fullPage: true });
-    const workspace = { ...state.installed[0], scope: state.scopes[0] };
-    const global = { ...state.installed[0], scope: state.scopes[1], version: '1.0.0' };
-    const mixed = { ...state, installed: [global, workspace], catalog: withInstallations(state.catalog, [global, workspace]) };
+    const sourceIdentity = 'code-review-source';
+    const workspace = { ...state.installed[0], id: 'installed::team/plugins/code-review', marketplace: '', sourceIdentity, scope: state.scopes[0] };
+    const global = { ...state.installed[0], sourceIdentity, scope: state.scopes[1], version: '1.0.0' };
+    const mixed = { ...state, installed: [global, workspace],
+      catalog: withInstallations(state.catalog.map(item => item.id === global.id ? { ...item, sourceIdentity } : item), [global, workspace]) };
     await postMessage(page, { type: 'state', state: mixed });
     await expect(page.locator('.count-badge')).toHaveText(['2', '2', '2']);
-    await expect(page.locator('#section-body-catalog').getByText('Installed globally', { exact: true })).toBeVisible();
-    await expect(page.locator('#section-body-catalog').getByText('Installed in workspace', { exact: true })).toBeVisible();
+    await expect(page.locator('#section-body-catalog .package-row').first().locator('.badge'))
+      .toHaveText(['Global: Update available', 'Workspace: Update available']);
     const installedRows = page.locator('#section-body-installed .package-row');
     const updateRows = page.locator('#section-body-updates .package-row');
-    await expect(installedRows.nth(0).locator('.badge')).toHaveText(['Update available', 'Global']);
-    await expect(installedRows.nth(1).locator('.badge')).toHaveText(['Update available', 'Workspace']);
+    await expect(installedRows.nth(0).locator('.badge')).toHaveText(['Global: Update available']);
+    await expect(installedRows.nth(1).locator('.badge')).toHaveText(['Workspace: Update available']);
     await expect(updateRows.locator('.badge')).toHaveText(['Global', 'Workspace']);
+    await expectBorderlessBadges(page);
     await page.screenshot({ path: testInfo.outputPath(`dual-scope-${theme}.png`), fullPage: true });
     await installedRows.first().click();
     await expect(page.locator('html')).toHaveAttribute('data-last-message', JSON.stringify({
@@ -113,8 +124,8 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       catalog: withInstallations(state.catalog, [global]) } });
     await expect(page.locator('#search')).toBeVisible();
     await expect(page.locator('.count-badge')).toHaveText(['2', '1', '1']);
-    await expect(page.locator('#section-body-installed').getByText('Global', { exact: true })).toBeVisible();
-    await expect(page.locator('#section-body-catalog').getByText('Installed in workspace', { exact: true })).toHaveCount(0);
+    await expect(page.locator('#section-body-installed .badge')).toHaveText(['Global: Update available']);
+    await expect(page.locator('#section-body-catalog').getByText(/^Workspace:/)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const crowded = { ...state, catalog: Array.from({ length: 60 }, (_, i) => ({ ...state.catalog[0], id: `catalog-${i}`, name: `Package ${i}` })) };
     await postMessage(page, { type: 'state', state: crowded });
@@ -187,7 +198,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await postMessage(page, { type: 'setSearch', search: '@dependencies' });
     await expect(page.getByRole('heading', { name: 'Installed dependencies', exact: true })).toBeVisible();
     await expect(page.getByLabel('More APM actions')).toHaveCount(0);
-    await expect(page.locator('.dependency-summary')).toContainText('Workspace: My agent project');
+    await expect(page.locator('.dependency-summary')).toContainText('Workspace — Remote: ssh-remote');
     await page.getByRole('button', { name: 'View dependency tree' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"dependencyTree"}');
     await expect(page.locator('.package-row')).toHaveCount(2);
@@ -277,6 +288,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       --vscode-editor-background:${dark ? '#1e1e1e' : '#fff'};
       --vscode-sideBar-background:${dark ? '#181818' : '#f3f3f3'};
       --vscode-input-border:${theme === 'high-contrast' ? '#fff' : '#808080'};
+      --vscode-contrastBorder:${theme === 'high-contrast' ? '#fff' : 'transparent'};
       --vscode-button-background:#0078d4; --vscode-button-foreground:white;
       --vscode-button-hoverBackground:#026ec1; --vscode-descriptionForeground:${dark ? '#aaa' : '#555'};
       --vscode-badge-background:${dark ? '#444' : '#d6d6d6'}; --vscode-badge-foreground:${dark ? '#fff' : '#111'};
@@ -291,7 +303,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await page.addScriptTag({ path: 'dist/webview.js' });
     const item = {
       id: 'awesome-copilot::azure-cost-health-check', name: 'azure-cost-health-check', marketplace: 'awesome-copilot',
-      description: 'Read-only Azure cost, forecasts and budget alerts.', version: '0.4.5', installed: false
+      description: 'Read-only Azure cost, forecasts and budget alerts.', version: '0.4.5', installed: false, sourceIdentity: 'cost-health-source'
     };
     const state: State = {
       mode: 'details', trusted: true, busy: false, errors: [], version: '0.35.0',
@@ -309,7 +321,11 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       readmeHtml: '<h2>Overview</h2><p>Package documentation.</p>'
     };
     await postMessage(page, { type: 'state', state });
-    await expect(page.locator('.detail-tag')).toHaveCount(3);
+    await expect(page.locator('.detail-tag.badge')).toHaveText(['azure', 'cost-management', 'monitoring']);
+    await expect(page.locator('.installation-tags')).toHaveCount(0);
+    await expect(page.locator('.scope-summary')).toHaveCount(0);
+    await expect(page.locator('#app')).not.toContainText('Workspace — Local');
+    await expect(page.locator('#app')).not.toContainText('My project');
     await expect(page.locator('.content-item')).toHaveCount(2);
     await expect(page.getByText('Review Azure costs and forecasts.')).toBeVisible();
     await expect(page.locator('.content-icon, .content-path')).toHaveCount(0);
@@ -320,6 +336,51 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await page.screenshot({ path: testInfo.outputPath(`plugin-details-${theme}.png`), fullPage: true });
     await page.getByRole('link', { name: 'Example author' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"external","url":"https://example.com/author"}');
+
+    state.scopes.push({ kind: 'global', label: 'Global (user)', path: '/home/user/.apm' });
+    state.installed = [
+      { ...item, id: 'installed::microsoft/azure-dev-tools/plugins/cost-health', marketplace: '', source: 'microsoft/azure-dev-tools',
+        installed: true, scope: state.scopes[0], updateStatus: 'outdated', updateStale: true },
+      { ...item, installed: true, scope: state.scopes[1], updateStatus: 'current', version: '0.4.4' }
+    ];
+    state.item = state.installed[0];
+    await postMessage(page, { type: 'state', state });
+    const installationTags = page.getByRole('group', { name: 'Package installations' }).getByRole('button');
+    await expect(installationTags).toHaveText(['Workspace: Update available (cached)', 'Global: Installed']);
+    await expect(installationTags.first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(installationTags.last()).toHaveAttribute('title', 'Global: 0.4.4');
+    await expect(installationTags.first()).toHaveCSS('border-radius', '10px');
+    await expect(page.locator('.detail-tag').first()).toHaveCSS('border-radius', '10px');
+    await expectBorderlessBadges(page);
+    await installationTags.first().hover();
+    await expectBorderlessBadges(page);
+    await expect(installationTags.first()).toHaveCSS('font-weight', '600');
+    await expect(page.locator('#app')).not.toContainText('My project');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`plugin-installations-${theme}.png`), fullPage: true });
+    await installationTags.first().focus();
+    await page.keyboard.press('Tab');
+    await expect(installationTags.last()).toBeFocused();
+    await expect(installationTags.last()).toHaveCSS('outline-style', 'solid');
+    await expect(installationTags.last()).toHaveCSS('outline-width', '1px');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', JSON.stringify({
+      type: 'details', id: item.id, scopeKey: 'global:/home/user/.apm'
+    }));
+    state.scopeKey = 'global:/home/user/.apm'; state.item = state.installed[1];
+    await postMessage(page, { type: 'state', state });
+    await expect(installationTags.last()).toBeFocused();
+    await expect(installationTags.last()).toHaveAttribute('aria-pressed', 'true');
+    await expect(installationTags.first()).toHaveAttribute('aria-pressed', 'false');
+    await expect(installationTags.last()).toHaveCSS('font-weight', '600');
+    await expect(installationTags.first()).not.toHaveCSS('font-weight', '600');
+    await expect(page.locator('.scope-summary')).toHaveCount(0);
+    await expect(page.locator('#app')).not.toContainText('Global — Local');
+    await page.emulateMedia({ forcedColors: 'active' });
+    for (const badge of await page.locator('.badge, .content-count').all()) {
+      await expect(badge).toHaveCSS('border-width', '1px');
+    }
+    await page.emulateMedia({ forcedColors: 'none' });
 
     state.actionResult = {
       action: 'audit', title: 'Audit package', status: 'failed', command: 'apm audit sample --format json',

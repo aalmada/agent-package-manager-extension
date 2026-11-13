@@ -1,4 +1,5 @@
 import type { PackageItem } from '../apm/types';
+import { marketplaceLabel } from '../apm/packageState';
 import type { BrowserSection, State } from '../protocol';
 import { compareVersions } from '../apm/versions';
 
@@ -34,16 +35,16 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
     }
     else terms.push(token.replaceAll('"', '').toLowerCase());
   }
-  return items.filter(item => (!marketplace || item.marketplace === marketplace) &&
+  return items.filter(item => (!marketplace || marketplaceLabel(item) === marketplace) &&
     (!scope || item.scope?.kind === scope || item.installations?.some(installation => installation.scope?.kind === scope)) &&
     (!['installed', 'dependencies'].includes(status) || item.installed) &&
     (status !== 'updates' || (scope && item.installations
       ? item.installations.some(installation => installation.scope?.kind === scope && installation.updateStatus === 'outdated')
       : item.updateStatus === 'outdated')) &&
-    terms.every(term => `${item.name} ${item.description ?? ''} ${item.marketplace}`.toLowerCase().includes(term)))
+    terms.every(term => `${item.name} ${item.description ?? ''} ${marketplaceLabel(item)}`.toLowerCase().includes(term)))
     .sort((a, b) => {
       let order = 0;
-      if (sort === 'marketplace') order = a.marketplace.localeCompare(b.marketplace);
+      if (sort === 'marketplace') order = marketplaceLabel(a).localeCompare(marketplaceLabel(b));
       else order = a.name.localeCompare(b.name) * (sort === 'name-desc' ? -1 : 1);
       return order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
     });

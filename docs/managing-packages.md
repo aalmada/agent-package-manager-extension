@@ -29,7 +29,7 @@ A package installed in both scopes appears as two separate entries, each with it
 
 When installation finishes, choose **Open Package** in the notification to open the package page.
 
-To install a package that is already installed in one scope into another, choose **Install in…** on its page. The page also links to each existing installation.
+To install a package that is already installed in one scope into another, choose **Install in…** on its page. Select a **Workspace** or **Global** installation badge to switch between existing installations; hover over a badge to see its installed version.
 
 Installs leave target selection to APM and the project's `apm.yml`; the extension does not pass target overrides. To change the default targets, see [Deployment targets](projects.md#deployment-targets).
 

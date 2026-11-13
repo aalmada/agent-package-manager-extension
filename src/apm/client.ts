@@ -9,6 +9,7 @@ import { declaredContents, mergeContents } from './contents';
 import { marketplaceManifest, readMarketplaces, resolveContained } from './manifest';
 import { remoteSource, inspectBarePackage, inspectRemotePackage, inspectLocalPackage, inspectDeployedPackage, deployedContentKind, type PackageMetadata } from './packageMetadata';
 import { containsUrlCredentials } from './redact';
+import { remotePackageIdentity } from './remoteMetadata';
 import type { RepositoryHost } from '../auth/repositories';
 import type { ExecutionResult, Marketplace, PackageItem, Probe, Scope, UpdateRow } from './types';
 
@@ -176,6 +177,7 @@ export class ApmClient {
               id: `${marketplace.name}::${plugin.name}`, name: plugin.name, marketplace: marketplace.name,
               version: typeof plugin.version === 'string' && plugin.version ? plugin.version : 'Not specified',
               description: typeof plugin.description === 'string' ? plugin.description : undefined,
+              sourceIdentity: remotePackageIdentity(remoteSource(plugin.source, marketplace, this.config.repositoryHosts?.())),
               installed: false, metadata: { plugin, installExpression: `${plugin.name}@${marketplace.name}` }
             });
           }
@@ -250,8 +252,13 @@ export class ApmClient {
       const local = dep.source === 'local' && typeof dep.local_path === 'string' ? dep.local_path : undefined;
       const lockIdentity = dependencyIdentity(dep) ?? item.name;
       const installExpression = marketplace ? `${name}@${marketplace}` : local ?? lockIdentity;
+      const sourceIdentity = dep.source !== 'local' && typeof dep.repo_url === 'string'
+        ? remotePackageIdentity(remoteSource(dep.is_virtual ? dep.virtual_path : '.', {
+          name: '', source: dep.repo_url, host: typeof dep.host === 'string' ? dep.host : undefined
+        }, this.config.repositoryHosts?.())) : undefined;
       return {
         ...item, id: marketplace ? `${marketplace}::${name}` : item.id, name, marketplace,
+        sourceIdentity,
         direct: dep.depth === undefined || dep.depth === 1,
         source: local ?? (typeof dep.repo_url === 'string' ? dep.repo_url : item.source),
         metadata: { ...item.metadata, lock: dep, lockIdentity, installExpression }

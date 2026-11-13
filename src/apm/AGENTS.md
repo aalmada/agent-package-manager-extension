@@ -19,6 +19,8 @@ Follow the [root guidance](../../AGENTS.md) for shared commands and safety rules
 
 - Treat CLI lockfiles and caches as read-only. Use the existing containment checks for marketplace paths and symlinks, and retain errors when metadata cannot be read safely.
 - Preserve marketplace-qualified package identities and distinguish unknown, non-comparable, failed, and stale update results from confirmed current results.
+- Match direct Git installations to catalog entries by resolved repository and subdirectory, not names. Use `sourceIdentity` for display matching and scoped details reuse; preserve CLI and lock identities for mutations.
+- Label a direct installation with `catalogMarketplace` only when its source matches one marketplace. Use `marketplaceLabel` for display, search, filtering, and sorting; never pass `catalogMarketplace` to APM or use it for update comparisons.
 - Keep credential redaction on output and webview payloads; do not clone arbitrary repositories merely to display documentation.
 - Only locally verified package roots may produce file navigation identities. Recheck realpath containment when opening links.
 

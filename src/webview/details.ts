@@ -165,7 +165,7 @@ export function renderDetailSections(item: PackageItem, details: Record<string, 
     section.append(el('h2', '', 'Tags'));
     const list = el('ul', 'detail-tags');
     for (const tag of tagValues) {
-      const element = el('li', 'detail-tag', tag);
+      const element = el('li', 'detail-tag badge', tag);
       list.append(element);
     }
     section.append(list);

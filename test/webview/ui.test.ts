@@ -7,7 +7,7 @@ import { descriptors } from '../../src/apm/commands';
 import type { BrowserSection, State, Message } from '../../src/protocol';
 import { renderMarkdown } from '../../src/views/markdown';
 import { parseOutdated } from '../../src/apm/adapters';
-import { applyUpdateRows, getUpdateBadge, reconcileDetailContexts, withInstallations } from '../../src/apm/packageState';
+import { applyUpdateRows, getUpdateBadge, reconcileDetailContexts, withCatalogInfo, withInstallations } from '../../src/apm/packageState';
 
 const bundle = buildSync({ entryPoints: ['src/webview/main.ts'], bundle: true, write: false, platform: 'browser', format: 'iife' }).outputFiles[0].text;
 function browser(section?: BrowserSection, persisted?: unknown) {
@@ -48,7 +48,8 @@ test('sidebar has no duplicate scope control, onboarding or deployment sections'
     for (const mode of ['details'] as const) {
       page.state.mode = mode; page.state.item = page.state.catalog[1]; page.update();
       assert.equal(page.document.querySelector('.target-summary'), null);
-      assert.equal(page.document.querySelector('.scope-summary')?.textContent, 'Workspace: project — Remote: ssh-remote');
+      assert.equal(page.document.querySelector('.scope-summary'), null);
+      assert.doesNotMatch(page.document.body.textContent ?? '', /Workspace: project|Remote: ssh-remote/);
     }
     page.state.mode = 'browser'; page.update();
     const row = page.document.querySelector<HTMLButtonElement>('.package-row')!;
@@ -70,15 +71,12 @@ test('dual installations have two catalog tags, separate scoped rows and unambig
     page.state.catalog = withInstallations(page.state.catalog, page.state.installed);
     page.update();
     const catalog = page.document.querySelector('#section-body-catalog .package-row')!;
-    assert.match(catalog.textContent ?? '', /Installed globally/);
-    assert.match(catalog.textContent ?? '', /Installed in workspace/);
-    assert.match(catalog.textContent ?? '', /Global: Update available/);
-    assert.match(catalog.textContent ?? '', /Workspace: Update available/);
+    assert.deepEqual([...catalog.querySelectorAll('.badge')].map(badge => badge.textContent), ['Global: Update available', 'Workspace: Update available']);
     const installedRows = [...page.document.querySelectorAll<HTMLButtonElement>('#section-body-installed .package-row')];
     assert.equal(installedRows.length, 2);
     assert.equal(new Set(installedRows.map(row => row.id)).size, 2);
-    assert.deepEqual([...installedRows[0].querySelectorAll('.badge')].map(badge => badge.textContent), ['Update available', 'Global']);
-    assert.deepEqual([...installedRows[1].querySelectorAll('.badge')].map(badge => badge.textContent), ['Update available', 'Workspace']);
+    assert.deepEqual([...installedRows[0].querySelectorAll('.badge')].map(badge => badge.textContent), ['Global: Update available']);
+    assert.deepEqual([...installedRows[1].querySelectorAll('.badge')].map(badge => badge.textContent), ['Workspace: Update available']);
     installedRows[0].click();
     assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: user.id, scopeKey: 'global:/user/.apm' }));
     installedRows[1].click();
@@ -95,19 +93,115 @@ test('dual installations have two catalog tags, separate scoped rows and unambig
     page.state.errors = ['Installed: Global (user): unavailable']; page.update();
     const dependencyRow = page.document.querySelector<HTMLButtonElement>('#section-body-direct .package-row');
     assert.ok(dependencyRow, 'One scope failing must not hide dependencies from the other');
-    assert.equal([...dependencyRow.querySelectorAll('.badge')].at(-1)?.textContent, 'Workspace');
+    assert.equal([...dependencyRow.querySelectorAll('.badge')].at(-1)?.textContent, 'Workspace: Update available');
     dependencyRow.click();
     assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
     page.state.errors = [];
     page.state.browserSearch = ''; page.state.mode = 'details'; page.state.item = project; page.update();
-    assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Global (0.8.0)'));
-    assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Workspace: project (0.9.0)'));
+    const installationTags = [...page.document.querySelectorAll<HTMLButtonElement>('.installation-tags button')];
+    assert.deepEqual(installationTags.map(tag => tag.textContent), ['Global: Update available', 'Workspace: Update available']);
+    assert.deepEqual(installationTags.map(tag => tag.title), ['Global: 0.8.0', 'Workspace: 0.9.0']);
+    assert.deepEqual(installationTags.map(tag => tag.getAttribute('aria-pressed')), ['false', 'true']);
+    assert.doesNotMatch(page.document.body.textContent ?? '', /Workspace: project|Scope: project/);
+    installationTags[0].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: user.id, scopeKey: 'global:/user/.apm' }));
+    installationTags[1].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
     assert.ok([...page.document.querySelectorAll('button')].some(button => button.textContent === 'Install in…'));
     page.state.mode = 'browser'; page.state.projectPresent = false; page.state.installed = [user];
     page.state.catalog = withInstallations(page.state.catalog, [user]); page.update();
     assert.ok(page.document.querySelector('#search'));
     assert.match(page.document.querySelector('#section-body-installed')?.textContent ?? '', /Global/);
-    assert.doesNotMatch(page.document.querySelector('#section-body-catalog')?.textContent ?? '', /Installed in workspace/);
+    assert.deepEqual([...page.document.querySelectorAll('#section-body-catalog .badge')].map(badge => badge.textContent), ['Global: Update available']);
+  } finally { page.dom.window.close(); }
+});
+test('scope tags fold installation and update-check status without repeating the scope', () => {
+  const page = browser();
+  try {
+    const workspace = page.state.scopes[0];
+    const global = { kind: 'global' as const, label: 'Global (user)', path: '/user/.apm' };
+    page.state.scopes.push(global);
+    const project = { ...page.state.installed[0], scope: workspace, updateStatus: 'current' as const };
+    const user = { ...project, scope: global, updateStatus: 'failed' as const };
+    page.state.installed = [user, project];
+    page.state.catalog = withInstallations(page.state.catalog, page.state.installed);
+    page.update();
+    const tags = (selector: string) => [...page.document.querySelectorAll(`${selector} .package-row`)]
+      .map(row => [...row.querySelectorAll('.badge')].map(badge => badge.textContent));
+    assert.deepEqual(tags('#section-body-catalog'), [['Global: Could not check for updates', 'Workspace: Installed'], []]);
+    assert.deepEqual(tags('#section-body-installed'), [['Global: Could not check for updates'], ['Workspace']]);
+    page.state.browserSearch = '@scope:workspace'; page.update();
+    assert.deepEqual(tags('#section-body-catalog'), [['Workspace: Installed']]);
+    page.state.browserSearch = '';
+    page.state.installed = [{ ...user, updateStatus: 'unchecked' }, { ...project, updateStatus: 'outdated', updateStale: true }];
+    page.state.catalog = withInstallations(page.state.catalog, page.state.installed);
+    page.update();
+    assert.deepEqual(tags('#section-body-catalog'), [['Global: Installed', 'Workspace: Update available (cached)'], []]);
+    assert.deepEqual(tags('#section-body-installed'), [['Global'], ['Workspace: Update available (cached)']]);
+    assert.deepEqual(tags('#section-body-updates'), [['Workspace: Cached']]);
+  } finally { page.dom.window.close(); }
+});
+test('catalog and details show both direct and marketplace installations of the same source', () => {
+  const page = browser();
+  try {
+    const global = { kind: 'global' as const, label: 'Global (user)', path: '/user/.apm' };
+    page.state.scopes.push(global);
+    const catalog = { ...page.state.catalog[0], installed: false, sourceIdentity: 'sample-source' };
+    const direct = { ...page.state.installed[0], id: 'installed::org/plugins/sample', marketplace: '', source: 'org/plugins',
+      sourceIdentity: catalog.sourceIdentity, scope: page.state.scopes[0] };
+    const user = { ...page.state.installed[0], scope: global, sourceIdentity: catalog.sourceIdentity };
+    page.state.installed = withCatalogInfo([direct, user], [catalog]);
+    page.state.catalog = withInstallations([catalog], page.state.installed);
+    page.update();
+    const origins = (section: string) => [...page.document.querySelectorAll(`#section-body-${section} .marketplace`)].map(node => node.textContent);
+    assert.deepEqual(origins('catalog'), [catalog.marketplace]);
+    assert.deepEqual(origins('installed'), [catalog.marketplace, catalog.marketplace]);
+    assert.deepEqual(origins('updates'), [catalog.marketplace, catalog.marketplace]);
+    assert.deepEqual([...page.document.querySelectorAll('#section-body-catalog .badge')].map(tag => tag.textContent),
+      ['Workspace: Update available', 'Global: Update available']);
+    page.state.browserSearch = '@scope:workspace'; page.update();
+    assert.deepEqual([...page.document.querySelectorAll('#section-body-catalog .badge')].map(tag => tag.textContent), ['Workspace: Update available']);
+    page.state.mode = 'details'; page.state.item = page.state.installed[0]; page.update();
+    assert.ok([...page.document.querySelectorAll('p.muted')].some(node => node.textContent === `${catalog.marketplace} • ${direct.version}`));
+    const tags = [...page.document.querySelectorAll<HTMLButtonElement>('.installation-tags button')];
+    assert.deepEqual(tags.map(tag => tag.textContent), ['Workspace: Update available', 'Global: Update available']);
+    tags[1].click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: user.id, scopeKey: 'global:/user/.apm' }));
+    assert.ok(page.document.querySelector('#package-action-update'));
+    assert.equal(page.document.querySelector('#package-action-install')?.textContent, 'Install in…');
+    assert.doesNotMatch(page.document.body.textContent ?? '', /Not installed in this scope/);
+  } finally { page.dom.window.close(); }
+});
+test('package details share catalog badges for current, cached and uncertain installation status', () => {
+  const page = browser();
+  try {
+    const cases: { status: State['installed'][number]['updateStatus']; stale?: boolean; label: string }[] = [
+      { status: 'current', label: 'Installed' },
+      { status: 'unchecked', label: 'Installed' },
+      { status: 'outdated', label: 'Update available' },
+      { status: 'outdated', stale: true, label: 'Update available (cached)' },
+      { status: 'current', stale: true, label: 'Showing saved update status' },
+      { status: 'failed', label: 'Could not check for updates' },
+      { status: 'unknown', label: 'Could not check for updates' },
+      { status: 'not-comparable', label: 'Version could not be compared' }
+    ];
+    for (const { status, stale, label } of cases) {
+      const item = { ...page.state.installed[0], scope: page.state.scopes[0], updateStatus: status, updateStale: stale };
+      page.state.installed = [item];
+      page.state.catalog = withInstallations(page.state.catalog, [item]);
+      page.state.mode = 'browser'; page.update();
+      const catalog = page.document.querySelector('#section-body-catalog .package-row .badge')!;
+      page.state.mode = 'details'; page.state.item = item; page.update();
+      const tags = [...page.document.querySelectorAll<HTMLButtonElement>('.installation-tags .badge')];
+      assert.deepEqual(tags.map(tag => tag.textContent), [`Workspace: ${label}`]);
+      assert.equal(tags[0].textContent, catalog.textContent);
+      assert.doesNotMatch(page.document.body.textContent ?? '', /Workspace: project|Scope: project/);
+    }
+    page.state.installed = [];
+    page.state.item = { ...page.state.item!, installed: false, updateStatus: undefined, updateStale: undefined };
+    page.update();
+    assert.equal(page.document.querySelector('.installation-tags'), null);
+    assert.match(page.document.body.textContent ?? '', /Not installed in this scope/);
   } finally { page.dom.window.close(); }
 });
 test('busy views leave progress to VS Code without refresh buttons or working banners', () => {
@@ -704,7 +798,7 @@ test('dependency mode groups current-scope packages in the browser and supports 
     page.update();
     const search = (value: string) => page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message', { data: { type: 'setSearch', search: value } }));
     search('@dependencies');
-    assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Workspace: project.*Remote: ssh-remote/);
+    assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Workspace — Remote: ssh-remote/);
     assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Installed dependencies/);
     assert.equal(page.document.querySelector('[aria-label="More APM actions"]'), null);
     assert.equal(page.document.querySelectorAll('.searchbar button').length, 2);
@@ -730,7 +824,7 @@ test('dependency mode groups current-scope packages in the browser and supports 
     search('@dependencies');
     page.state.scopeKey = 'global:/user/.apm'; page.state.scopes.push({ kind: 'global', label: 'Global (user)', path: '/user/.apm' });
     page.state.installed = []; page.state.busy = true; page.update();
-    assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Global \(user\)/);
+    assert.match(page.document.querySelector('.dependency-summary')?.textContent ?? '', /Global — Remote: ssh-remote/);
     page.state.busy = false; page.state.browserSearch = '@dependencies'; page.update();
     assert.match(page.document.body.textContent ?? '', /No dependencies in this group/);
     page.state.errors = ['Installed: CLI failed'];

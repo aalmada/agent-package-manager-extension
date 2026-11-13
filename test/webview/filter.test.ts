@@ -16,6 +16,14 @@ test('shared filters match text, marketplace tokens and confirmed updates', () =
   assert.deepEqual(filterPackages(packages, { ...base, text: 'review @dependencies @marketplace:b' }).map(p => p.id), ['b::sample']);
   assert.deepEqual(filterPackages(packages, { ...base, text: '@marketplace:a @sort:version-desc' }).map(p => p.id), ['a::other', 'a::sample']);
 });
+test('direct installations filter, search and sort by their catalog marketplace', () => {
+  const direct: PackageItem = { id: 'installed::org/plugins/direct', name: 'direct', marketplace: '', catalogMarketplace: 'team-market',
+    source: 'org/plugins', version: '1.0.0', installed: true };
+  const items = [...packages, direct];
+  assert.deepEqual(filterPackages(items, { ...base, text: '@marketplace:team-market' }).map(p => p.id), [direct.id]);
+  assert.deepEqual(filterPackages(items, { ...base, text: 'team-market' }).map(p => p.id), [direct.id]);
+  assert.deepEqual(filterPackages(items, { ...base, text: '@sort:marketplace' }).map(p => p.id), ['a::other', 'a::sample', 'b::sample', direct.id]);
+});
 test('unsupported sort tokens do not sort by version', () => {
   assert.equal(filterTokens('@sort:version-desc').sort, 'name');
   assert.deepEqual(filterPackages(packages, base).filter(p => p.name === 'sample').map(p => p.id), ['a::sample', 'b::sample']);

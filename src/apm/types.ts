@@ -14,6 +14,10 @@ export interface PackageItem {
   latestVersion?: string;
   updateStale?: boolean;
   source?: string;
+  /** Repository/subdirectory identity for display matching, never a CLI argument. */
+  sourceIdentity?: string;
+  /** Marketplace of the only catalog entry matching a direct installation; for display and filtering, never a CLI argument. */
+  catalogMarketplace?: string;
   metadata?: Record<string, unknown>;
 }
 export interface Marketplace {

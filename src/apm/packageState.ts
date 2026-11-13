@@ -16,8 +16,29 @@ export function getUpdateBadge(state: { trusted: boolean; version?: string; warn
   return { value, tooltip: `${parts.join(' and ')} available${cached}` };
 }
 
-function samePackage(a: PackageItem, b: PackageItem): boolean {
-  return a.id === b.id || (!!a.marketplace && a.marketplace === b.marketplace && a.name === b.name);
+export function samePackage(a: PackageItem, b: PackageItem): boolean {
+  return a.id === b.id || (!!a.sourceIdentity && a.sourceIdentity === b.sourceIdentity) ||
+    (!!a.marketplace && a.marketplace === b.marketplace && a.name === b.name);
+}
+
+/** Display name of a package's marketplace, including the catalog marketplace of a matching direct installation. */
+export function marketplaceLabel(item: PackageItem): string {
+  return item.marketplace || item.catalogMarketplace || '';
+}
+
+/** Adds catalog descriptions and display-only marketplace names to installed packages without changing their CLI identity. */
+export function withCatalogInfo(installed: readonly PackageItem[], catalog: readonly PackageItem[]): PackageItem[] {
+  return installed.map(source => {
+    const item: PackageItem = { ...source };
+    delete item.catalogMarketplace;
+    const matches = catalog.filter(entry => samePackage(entry, item));
+    const description = item.description || matches.find(entry => entry.description)?.description;
+    if (description) item.description = description;
+    const marketplaces = new Set(matches.map(entry => entry.marketplace));
+    // An ambiguous source keeps its repository label rather than naming one of several marketplaces.
+    if (!item.marketplace && marketplaces.size === 1) item.catalogMarketplace = [...marketplaces][0];
+    return item;
+  });
 }
 
 function sameScope(a: Scope | undefined, b: Scope | undefined): boolean {

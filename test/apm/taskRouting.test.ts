@@ -12,6 +12,7 @@ import type { PackageAction } from '../../src/apm/actions';
 import type { Marketplace, PackageItem, Probe, Scope, UpdateRow } from '../../src/apm/types';
 import type { Workflow, CommandRequest } from '../../src/apm/workflows';
 import { parseMessage } from '../../src/protocol';
+import { withCatalogInfo } from '../../src/apm/packageState';
 
 const bundle = buildSync({
   stdin: { contents: `${readFileSync('src/extension.ts', 'utf8')}\nexport { ApmExtension };`, resolveDir: resolve('src'), loader: 'ts' },
@@ -104,7 +105,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       commands.push(id);
       if (id === 'setContext' && key) contexts.set(key, value);
     } },
-    Task, ProcessExecution, TaskScope: { Workspace: 1, Global: 2 },
+    Task, ProcessExecution, TaskScope: { Workspace: 1, Global: 2 }, ViewColumn: { Active: 1 },
     TaskRevealKind: { Always: 1 }, TaskPanelKind: { Dedicated: 2 }, ProgressLocation: { Notification: 1 },
     QuickPickItemKind: { Separator: -1 },
     Uri: { file: (path: string) => ({ scheme: 'file', fsPath: path }) },
@@ -219,7 +220,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   const run = (id: string, commandOptions: Record<string, unknown> = {}) =>
     extension.runCommand({ type: 'command', id, args: {}, options: commandOptions }, panel);
   return {
-    extension, panel, run, finish, executions, argv, executionInputs, executionScopes, choices, messages, confirmations, confirmationDetails, progressLocations, pickers, prompts, notices, errors, previews, opened, commands, contexts, saved,
+    extension, panel, run, finish, executions, argv, executionInputs, executionScopes, choices, messages, confirmations, confirmationDetails, progressLocations, pickers, prompts, notices, errors, previews, opened, commands, contexts, saved, vscode,
     counts: () => ({ serializations, refreshes, terminations, processListeners: processListeners.size, endListeners: endListeners.size })
   };
 }
@@ -1255,10 +1256,13 @@ test('refresh lists and checks both scopes independently and keeps global result
   const item: PackageItem = { id: 'one::sample', name: 'sample', marketplace: 'one', version: '1', installed: true,
     metadata: { cliIdentity: 'org/sample' } };
   const reads: string[] = [], checks: string[] = [];
+  const published: { catalog: PackageItem[]; installed: PackageItem[]; busy: boolean }[] = [];
   let failGlobal = false;
   Reflect.set(host.extension, 'serialize', prototype.serialize);
   Reflect.set(host.extension, 'settingsSync', { sync: async () => {} });
-  Reflect.set(host.extension, 'broadcast', () => {});
+  Reflect.set(host.extension, 'broadcast', () => {
+    published.push({ catalog: host.extension.state.catalog, installed: host.extension.state.installed, busy: host.extension.state.busy });
+  });
   Reflect.set(host.extension, 'epoch', 0);
   Reflect.set(host.extension, 'client', (scope: Scope) => ({
     probe: async () => ({ version: '0.35.0', commands: [] }),
@@ -1284,6 +1288,8 @@ test('refresh lists and checks both scopes independently and keeps global result
     assert.deepEqual(Array.from(host.extension.state.installed, item => [item.scope?.kind, item.version, item.updateStatus]),
       [['global', '1', 'outdated'], ['workspace', '2', 'current']]);
     assert.equal(host.extension.state.catalog[0].installations?.length, 2);
+    assert.ok(published.some(snapshot => snapshot.busy && snapshot.installed.length === 2),
+      'Installation data is published while update checks are pending');
     const opened: Scope[] = [];
     Reflect.set(host.extension, 'openPackageDetails', async (_item: PackageItem, scope: Scope) => { opened.push(scope); });
     await host.extension.handle({ type: 'details', id: item.id, scopeKey: 'global:/home/test/.apm' }, { mode: 'browser', extra: {} });
@@ -1314,7 +1320,76 @@ test('refresh lists and checks both scopes independently and keeps global result
     await prototype.doRefresh.call(host.extension);
     assert.deepEqual(reads, ['global']);
     assert.equal(host.extension.state.installed.length, 1);
+    for (const snapshot of published) {
+      const catalogItem = snapshot.catalog.find(entry => entry.id === item.id);
+      assert.ok(catalogItem);
+      const expected = snapshot.installed.filter(entry => entry.id === item.id);
+      assert.equal(catalogItem.installed, expected.length > 0,
+        'Every published catalog reflects the currently known installations');
+      assert.deepEqual(Array.from(catalogItem.installations ?? [], entry => [entry.scope?.kind, entry.version, entry.updateStatus, entry.updateStale]),
+        Array.from(expected, entry => [entry.scope?.kind, entry.version, entry.updateStatus, entry.updateStale]),
+        'Catalog badges stay aligned during refresh, failed checks, and scope changes');
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('catalog and direct-install entries open the same scoped details panel and preserve mutation identities', async () => {
+  const host = harness();
+  const workspace = host.extension.state.scopes[0], global = host.extension.state.scopes[2];
+  const catalog: PackageItem = {
+    id: 'catalog::authoring', name: 'authoring', marketplace: 'catalog', installed: false,
+    version: '1.2.0', sourceIdentity: 'authoring-source', description: 'Author coding agents',
+    metadata: { installExpression: 'authoring@catalog' }
+  };
+  const direct: PackageItem = {
+    id: 'installed::team/catalog/plugins/authoring', name: 'authoring', marketplace: '', installed: true,
+    version: '1.1.0', sourceIdentity: catalog.sourceIdentity, scope: workspace, updateStatus: 'outdated',
+    metadata: { cliIdentity: 'team/catalog/plugins/authoring', installExpression: 'team/catalog/plugins/authoring' }
+  };
+  const user = { ...direct, id: 'installed::authoring-alias', scope: global };
+  host.extension.state.catalog = [catalog];
+  host.extension.state.installed = withCatalogInfo([user, direct], [catalog]);
+  assert.equal(host.extension.state.installed[1].description, catalog.description);
+  assert.equal(host.extension.state.installed[1].catalogMarketplace, catalog.marketplace);
+  assert.equal(host.extension.state.installed[1].marketplace, '');
+  let created = 0, revealed = 0;
+  const dispose: (() => void)[] = [], loaded: Panel[] = [];
+  Reflect.set(host.vscode.window, 'createWebviewPanel', (type: string) => {
+    assert.equal(type, 'apm.details'); created++;
+    return { webview: {}, reveal: () => { revealed++; }, onDidDispose: (listener: () => void) => { dispose.push(listener); } };
+  });
+  Reflect.set(host.extension, 'attach', (_webview: unknown, mode: 'details', panel: unknown) => ({ mode, panel, extra: {} }));
+  Reflect.set(host.extension, 'loadDetails', async (panel: Panel) => { loaded.push(panel); });
+  const browser: Panel = { mode: 'browser', extra: {} };
+  await host.extension.handle({ type: 'details', id: catalog.id }, browser);
+  const workspacePanel = loaded[0];
+  assert.equal(workspacePanel.item, host.extension.state.installed[1]);
+  await host.extension.handle({ type: 'details', id: direct.id, scopeKey: `workspace:${workspace.path}` }, browser);
+  assert.equal(loaded[1], workspacePanel);
+  assert.equal(created, 1);
+  assert.equal(revealed, 2);
+  assert.equal(host.extension.panels.size, 1);
+
+  await host.extension.handle({ type: 'details', id: user.id, scopeKey: `global:${global.path}` }, browser);
+  const globalPanel = loaded[2];
+  await host.extension.handle({ type: 'details', id: catalog.id, scopeKey: `global:${global.path}` }, browser);
+  assert.equal(loaded[3], globalPanel);
+  assert.equal(globalPanel.item, host.extension.state.installed[0]);
+  assert.equal(created, 2, 'Global and workspace operations retain separate scopes');
+
+  host.extension.state.installed = [];
+  await host.extension.handle({ type: 'details', id: catalog.id }, browser);
+  assert.equal(loaded[4], workspacePanel, 'An uninstalled package keeps its existing details page');
+  assert.equal(workspacePanel.item?.installed, false);
+  host.extension.state.installed = [direct];
+  await host.extension.handle({ type: 'details', id: direct.id, scopeKey: `workspace:${workspace.path}` }, browser);
+  assert.equal(loaded[5], workspacePanel);
+  assert.equal(created, 2);
+  await host.extension.packageAction('uninstall', workspacePanel);
+  assert.deepEqual(Array.from(host.argv[0]), ['uninstall', 'team/catalog/plugins/authoring']);
+  assert.equal(host.executionScopes[0]?.path, workspace.path);
+  dispose.forEach(close => close());
+  assert.equal(host.extension.panels.size, 0);
 });
 
 test('updating a global duplicate verifies only that installation and invalidates only its update cache', async () => {

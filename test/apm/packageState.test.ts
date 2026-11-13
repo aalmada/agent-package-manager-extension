@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from '../../src/apm/packageState';
+import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, marketplaceLabel, reconcileDetailContexts, retainUpdateResults, withCatalogInfo, withInstallations } from '../../src/apm/packageState';
 import type { PackageItem, Scope, UpdateRow } from '../../src/apm/types';
 
 const workspace: Scope = { kind: 'workspace', path: '/project', label: 'project' };
@@ -25,6 +25,27 @@ test('one catalog package retains both independent installations and update stat
   assert.equal(withInstallations([catalog], [{ ...user, updateStatus: 'failed' }])[0].updateStatus, 'failed');
   assert.equal(withInstallations([catalog], [])[0].installed, false);
   assert.equal(getUpdateBadge({ trusted: true, version: '0.35.0', installed: [project, { ...project, scope: global }] })?.value, 2);
+});
+
+test('direct installations show the marketplace of a unique catalog source without changing their identity', () => {
+  const entry: PackageItem = { ...catalog, sourceIdentity: 'sample-source', description: 'Sample skills' };
+  const metadata = { cliIdentity: 'org/plugins/sample', installExpression: 'org/plugins/sample' };
+  const direct: PackageItem = { id: 'installed::org/plugins/sample', name: 'sample', marketplace: '', version: '1.0', installed: true,
+    source: 'org/plugins', sourceIdentity: entry.sourceIdentity, metadata };
+  const [labelled] = withCatalogInfo([direct], [entry]);
+  assert.equal(marketplaceLabel(labelled), 'market');
+  assert.equal(labelled.description, 'Sample skills');
+  assert.equal(labelled.marketplace, '');
+  assert.equal(labelled.id, direct.id);
+  assert.equal(labelled.metadata, metadata);
+  assert.equal(applyCatalogVersions([labelled], [{ ...entry, version: '9.0' }])[0].updateStatus, undefined,
+    'A display label does not turn a direct installation into a marketplace comparison');
+  assert.equal(marketplaceLabel(withCatalogInfo([direct], [entry, { ...entry, id: 'other::sample', marketplace: 'other' }])[0]), '',
+    'An ambiguous source keeps its repository label');
+  assert.equal(marketplaceLabel(withCatalogInfo([{ ...labelled }], [])[0]), '', 'A label is dropped when the catalog no longer lists the source');
+  assert.equal(marketplaceLabel(withCatalogInfo([{ ...direct, sourceIdentity: 'other-source' }], [entry])[0]), '');
+  assert.equal(withCatalogInfo([installed], [entry])[0].catalogMarketplace, undefined);
+  assert.equal(marketplaceLabel(installed), 'market');
 });
 
 test('activity badge counts package updates plus one CLI upgrade and clears at zero', () => {

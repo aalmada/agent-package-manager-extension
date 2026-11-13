@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 import { ApmClient } from '../../src/apm/client';
 import { record } from '../../src/apm/adapters';
 import { redact } from '../../src/apm/redact';
+import { findInstalledPackage, withInstallations } from '../../src/apm/packageState';
+import { packageIdentity } from '../../src/apm/actions';
 
 test('process runner keeps exact arguments, separates streams and preserves exit codes', async () => {
   const client = new ApmClient({ executable: process.execPath, cwd: process.cwd() });
@@ -121,6 +123,43 @@ test('local catalogs read live manifests without APM calls while remote catalogs
     assert.equal(remote.items.length, 1);
     assert.equal(execute.mock.callCount(), 1);
   } finally { await rm(home, { recursive: true }); }
+});
+
+test('direct repository installations match their catalog source without marketplace lock metadata', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-source-identity-'));
+  try {
+    await mkdir(join(home, '.apm/cache/marketplace'), { recursive: true });
+    await mkdir(join(home, 'apm_modules'));
+    await writeFile(join(home, '.apm/cache/marketplace/catalog.json'), JSON.stringify({ plugins: [
+      { name: 'authoring', source: './plugins/authoring', version: '1.2.0' },
+      { name: 'same-source', source: { source: 'github', repo: 'team/catalog', path: 'plugins/authoring', ref: 'other' } },
+      { name: 'other-path', source: './plugins/other' },
+      { name: 'other-repository', source: { source: 'github', repo: 'other/catalog', path: 'plugins/authoring' } },
+      { name: 'other-host', source: { source: 'git', url: 'https://gitlab.com/team/catalog', path: 'plugins/authoring' } }
+    ] }));
+    const identity = 'team/catalog/plugins/authoring';
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [{
+      name: 'authoring', repo_url: 'team/catalog', host: 'github.com', version: '1.1.0',
+      is_virtual: true, virtual_path: 'plugins/authoring', package_type: 'apm_package'
+    }] }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async (args: string[]) => {
+      if (args.join(' ') === 'marketplace update catalog') return { stdout: '', stderr: '', exitCode: 0 };
+      assert.deepEqual(args, ['deps', 'list']);
+      return { stdout: `| Package | Version | Source |\n| ${identity} | 1.1.0 | github |`, stderr: '', exitCode: 0 };
+    });
+    const catalog = await client.getCatalog([{ name: 'catalog', source: 'https://github.com/Team/Catalog.git', ref: 'main' }]);
+    assert.deepEqual(catalog.errors, []);
+    const installed = await client.getInstalled({ kind: 'workspace', path: home, label: 'project' });
+    assert.equal(installed[0].marketplace, '');
+    assert.notEqual(installed[0].id, catalog.items[0].id);
+    const matched = withInstallations(catalog.items, installed);
+    assert.deepEqual(matched.map(item => item.installed), [true, true, false, false, false]);
+    assert.equal(matched[0].installations?.[0], installed[0]);
+    assert.equal(findInstalledPackage(catalog.items[0], installed), installed[0]);
+    assert.equal(packageIdentity(catalog.items[0], installed[0], false), identity);
+    assert.equal(packageIdentity(installed[0], installed[0], true), identity);
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
 
 test('missing package stores skip dependency-list calls but newly created stores are read immediately in both scopes', async t => {

@@ -1,10 +1,12 @@
 import type { BrowserSection, State, Message } from '../protocol';
 import type { PackageAction } from '../apm/actions';
+import type { PackageItem } from '../apm/types';
+import { marketplaceLabel, samePackage } from '../apm/packageState';
 import { renderActionResult, renderDetailSections } from './details';
 import { el } from './dom';
 import { filterPackages, filterTokens, sectionPackages, withStatus, withToken, type Filters } from './filter';
 import type { Workflow } from '../apm/workflows';
-import { scopeKey, scopeKindLabel, scopeLabel } from '../protocol';
+import { scopeKey, scopeKindLabel } from '../protocol';
 
 declare function acquireVsCodeApi(): { postMessage(message: Message): void; getState(): unknown; setState(value: unknown): void };
 const api = acquireVsCodeApi();
@@ -32,9 +34,23 @@ function action(text: string, type: 'refresh' | 'marketplaces' | 'setup' | 'outp
 function workflowButton(text: string, workflow: Workflow) { return button(text, () => send({ type: 'workflow', workflow })); }
 function scopeSummary() {
   const scope = state.scopes.find(scope => `${scope.kind}:${scope.path}` === state.scopeKey);
-  return scope ? `${scopeLabel(scope)} — ${state.host ?? 'Local'}` : 'Select an APM scope';
+  return scope ? `${scopeKindLabel(scope)} — ${state.host ?? 'Local'}` : 'Select an APM scope';
 }
-function badge(text: string, warning = false) { return el('span', warning ? 'badge warning' : 'badge', text); }
+function badge(text: string) { return el('span', 'badge', text); }
+function origin(item: PackageItem) { return marketplaceLabel(item) || item.source || 'Direct source'; }
+function installationTag(section: BrowserSection | 'details', installation: PackageItem, select?: () => void) {
+  const outdated = installation.updateStatus === 'outdated';
+  const status = section === 'updates' ? installation.updateStale ? 'Cached' : undefined
+    : outdated ? installation.updateStale ? 'Update available (cached)' : 'Update available'
+      : installation.updateStale ? 'Showing saved update status'
+        : installation.updateStatus === 'failed' || installation.updateStatus === 'unknown' ? 'Could not check for updates'
+          : installation.updateStatus === 'not-comparable' ? 'Version could not be compared'
+            : section === 'catalog' || section === 'details' ? 'Installed' : undefined;
+  const scope = installation.scope ? scopeKindLabel(installation.scope) : undefined;
+  const text = scope && status ? `${scope}: ${status}` : scope ?? status;
+  if (!text) return undefined;
+  return select ? button(text, select, 'badge') : badge(text);
+}
 function packageAction(text: string, name: PackageAction, className = '') {
   const node = button(text, () => send({ type: 'packageAction', action: name }), className);
   node.id = `package-action-${name}`;
@@ -298,30 +314,17 @@ function renderList(section: BrowserSection) {
     const title = el('span', 'package-title'); title.append(el('strong', '', item.name), el('span', 'version', item.version));
     content.append(title);
     if (item.description) content.append(el('span', 'description', item.description));
-    content.append(el('span', 'marketplace', item.marketplace || item.source || 'Direct source'));
+    content.append(el('span', 'marketplace', origin(item)));
     const tags = el('span', 'tags');
     const scopeFilter = filterTokens(search).scope;
-    const statuses = name === 'Catalog' && item.installations
-      ? item.installations.filter(installation => !scopeFilter || installation.scope?.kind === scopeFilter) : [item];
-    for (const installation of statuses) {
-      const prefix = name === 'Catalog' && installation.scope ? `${scopeKindLabel(installation.scope)}: ` : '';
-      const statusBadge = (text: string, warning = false) => badge(`${prefix}${text}`, warning);
-      if (installation.updateStatus === 'outdated') {
-        if (name === 'Updates') {
-          if (installation.updateStale) tags.append(statusBadge('Cached'));
-        } else tags.append(statusBadge(installation.updateStale ? 'Update available (cached)' : 'Update available', true));
-      } else if (installation.updateStale) tags.append(statusBadge('Showing saved update status'));
-      else if (installation.updateStatus === 'failed' || installation.updateStatus === 'unknown') tags.append(statusBadge('Could not check for updates'));
-      else if (installation.updateStatus === 'not-comparable') tags.append(statusBadge('Version could not be compared'));
-      else if (installation.updateStatus === 'unchecked') tags.append(statusBadge('Update status not checked'));
+    const installations = name !== 'Catalog' ? [item]
+      : item.installations?.filter(installation => !scopeFilter || installation.scope?.kind === scopeFilter) ?? (item.installed ? [item] : []);
+    for (const installation of installations) {
+      const tag = installationTag(section, installation);
+      if (tag) tags.append(tag);
     }
     if (item.metadata?.stale) tags.append(badge('Cached catalog'));
     if (item.direct === false) tags.append(badge('Transitive'));
-    if (name === 'Catalog') {
-      if (item.installations?.some(installation => installation.scope?.kind === 'global')) tags.append(badge('Installed globally'));
-      if (item.installations?.some(installation => installation.scope?.kind === 'workspace')) tags.append(badge('Installed in workspace'));
-      if (item.installed && !item.installations) tags.append(badge('Installed'));
-    } else if (item.scope) tags.append(badge(scopeKindLabel(item.scope)));
     if (tags.childElementCount) content.append(tags);
     row.append(content); wrapper.append(row); list.append(wrapper);
   }
@@ -332,15 +335,23 @@ function renderList(section: BrowserSection) {
 function renderDetails() {
   const item = state.item;
   if (!item) { root.append(el('p', '', 'Package details are loading...')); return; }
-  root.append(header(item.name, item.description), el('p', 'muted', `${item.marketplace || item.source || 'Direct source'} • ${item.version}`));
-  root.append(el('p', 'scope-summary', scopeSummary()));
-  const installations = state.installed.filter(installation => installation.id === item.id && installation.scope);
+  root.append(header(item.name, item.description), el('p', 'muted', `${origin(item)} • ${item.version}`));
+  const installations = state.installed.filter(installation => samePackage(installation, item) && installation.scope);
   if (installations.length) {
-    const scopes = el('div', 'toolbar');
+    const scopes = el('div', 'toolbar installation-tags');
+    scopes.setAttribute('role', 'group');
+    scopes.setAttribute('aria-label', 'Package installations');
     for (const installation of installations) {
       const scope = installation.scope!;
-      scopes.append(button(`${scopeLabel(scope, true)} (${installation.version})`,
-        () => send({ type: 'details', id: installation.id, scopeKey: scopeKey(scope) }), 'secondary'));
+      const key = scopeKey(scope);
+      const tag = installationTag('details', installation,
+        () => send({ type: 'details', id: installation.id, scopeKey: key }));
+      if (tag) {
+        tag.id = `installation-${key}`;
+        tag.title = `${scopeKindLabel(scope)}: ${installation.version}`;
+        tag.setAttribute('aria-pressed', String(key === state.scopeKey));
+        scopes.append(tag);
+      }
     }
     root.append(scopes);
   }
@@ -363,7 +374,6 @@ function renderDetails() {
   if (state.actionResult?.preview && state.actionResult.status === 'success') toolbar.append(packageAction('Review and apply preview options', 'applyPreview'));
   root.append(toolbar);
   if (state.actionResult) root.append(renderActionResult(state.actionResult, () => send({ type: 'cancel' }), id => send({ type: 'navigate', id })));
-  const currentScope = state.scopes.find(s => scopeKey(s) === state.scopeKey)?.label;
   const updateMessage = item.updateStatus === 'outdated'
     ? `Update available${item.latestVersion ? `: ${item.latestVersion}` : ''}.${item.updateStale ? ' This is the last known result; refresh to verify.' : ''}`
     : item.updateStatus === 'current' ? 'This package is up to date.'
@@ -371,7 +381,7 @@ function renderDetails() {
         ? `Could not check for updates${item.updateStale ? '; showing the last known result' : ''}.`
         : item.updateStatus === 'not-comparable' ? 'Could not compare this package version with the latest version.'
           : item.updateStatus === 'unchecked' ? 'Update status has not been checked yet.' : undefined;
-  if (updateMessage) root.append(el('p', `notice${item.updateStale ? ' warning' : ''}`, `${updateMessage}${currentScope ? ` Scope: ${currentScope}.` : ''}`));
+  if (updateMessage) root.append(el('p', `notice${item.updateStale ? ' warning' : ''}`, updateMessage));
   root.append(renderDetailSections(item, state.details, state.busy, id => send({ type: 'navigate', id })));
   if (state.readmeHtml) {
     const article = el('article', 'readme'); article.innerHTML = state.readmeHtml; root.append(article);

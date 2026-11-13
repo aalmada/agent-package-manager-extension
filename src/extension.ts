@@ -15,7 +15,7 @@ import { renderMarkdown } from './views/markdown';
 import { containsUrlCredentials, redact, safePayload } from './apm/redact';
 import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm/installation';
 import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
-import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from './apm/packageState';
+import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, samePackage, withCatalogInfo, withInstallations } from './apm/packageState';
 import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
 import { AuditDiagnostics, contentNavigation, openNavigation, type NavigationTarget, type AuditTicket } from './navigation';
 import { registerManifestAssistance } from './manifestAssistance';
@@ -426,11 +426,11 @@ class ApmExtension implements vscode.Disposable {
         this.state.catalog = [...catalog.value.items, ...this.state.catalog.filter(i => failed.includes(i.marketplace)).map(i => ({ ...i, metadata: { ...i.metadata, stale: true } }))];
         this.state.errors.push(...catalog.value.errors);
       } else this.state.errors.push(`Catalog: ${redact(String(catalog.reason))}`);
-      // `apm deps list` has no descriptions; borrow catalog ones so text filters match Installed and Updates too.
+      // `apm deps list` has no descriptions or marketplace names for direct sources; borrow catalog ones for display and filters.
       this.state.installed = installed.flatMap<PackageItem>(({ scope: target, result }) => {
         if (result.status === 'fulfilled') {
           this.setDetailRefreshError(target);
-          return applyCatalogVersions(this.withDescriptions(result.value), this.state.catalog).map(item => ({ ...item, scope: target }));
+          return applyCatalogVersions(withCatalogInfo(result.value, this.state.catalog), this.state.catalog).map(item => ({ ...item, scope: target }));
         }
         const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
         this.state.errors.push(error);
@@ -438,6 +438,7 @@ class ApmExtension implements vscode.Disposable {
         return previousInstalled.filter(item => inScope(item, target))
           .map(item => ({ ...item, updateStale: true }));
       });
+      this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
       this.state.checkedAt = undefined;
       for (const { scope: target, result } of installed) {
         if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
@@ -472,9 +473,6 @@ class ApmExtension implements vscode.Disposable {
       if (epoch === this.epoch) this.notifyRefresh();
     }
   }
-  private withDescriptions(items: PackageItem[]): PackageItem[] {
-    return items.map(item => item.description ? item : { ...item, description: this.state.catalog.find(c => c.id === item.id)?.description });
-  }
   private detailContexts(scope: Scope): PanelContext[] {
     return [...this.panels.values()].filter(entry => entry.mode === 'details' && inScope(entry, scope) && entry.item);
   }
@@ -501,7 +499,7 @@ class ApmExtension implements vscode.Disposable {
       const previous = this.detailContexts(scope).flatMap(entry => entry.item ? [entry.item] : []);
       const client = this.client(scope, signal, pass);
       try {
-        let installed: PackageItem[] = applyCatalogVersions(this.withDescriptions(await client.getInstalled(scope)), this.state.catalog).map(item => ({ ...item, scope }));
+        let installed: PackageItem[] = applyCatalogVersions(withCatalogInfo(await client.getInstalled(scope), this.state.catalog), this.state.catalog).map(item => ({ ...item, scope }));
         if (epoch !== this.epoch || signal.aborted) return;
         this.setDetailRefreshError(scope);
         this.updateDetailItems(scope, installed);
@@ -1252,16 +1250,19 @@ class ApmExtension implements vscode.Disposable {
     const scope = key ? this.state.scopes.find(scope => scopeKey(scope) === key) : this.scope();
     if (!scope) throw new Error('This package scope is no longer available.');
     const catalog = this.state.catalog.find(item => item.id === id);
-    const item = this.state.installed.find(i => i.id === id && inScope(i, scope))
-      ?? (key ? undefined : this.state.installed.find(i => i.id === id))
+    const listed = catalog ?? this.state.installed.find(item => item.id === id);
+    if (!listed) throw new Error('Package is no longer available. Refresh and retry.');
+    const item = findInstalledPackage({ ...listed, scope }, this.state.installed)
+      ?? (key ? undefined : findInstalledPackage({ ...listed, scope: undefined }, this.state.installed))
       ?? (catalog ? { ...catalog, scope, installed: false, updateStatus: undefined, latestVersion: undefined, updateStale: undefined } : undefined);
     if (!item) throw new Error('Package is no longer available. Refresh and retry.');
     await this.openPackageDetails(item, { ...(item.scope ?? scope) });
   }
   private async openPackageDetails(item: PackageItem, scope: Scope) {
     this.requireTrust();
-    const key = `details:${scopeKey(scope)}:${item.id}`;
-    let entry = this.panels.get(key);
+    const key = `details:${scopeKey(scope)}:${item.sourceIdentity ?? item.id}`;
+    let entry = this.panels.get(key) ?? [...this.panels.values()].find(entry =>
+      entry.mode === 'details' && entry.scope && isSameScope(entry.scope, scope) && entry.item && samePackage(entry.item, item));
     if (!entry) {
       const panel = vscode.window.createWebviewPanel('apm.details', item.name, vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
       entry = this.attach(panel.webview, 'details', panel);

@@ -44,14 +44,35 @@ Choosing the active scope again clears the scope filter. In a multi-root workspa
 
 ## Badges
 
+Package lists and details pages use the same scope/status badges. An update or update-check status implies the package is installed in that scope, so the scope is never repeated:
+
+| Section | Up to date | Newer version available |
+| --- | --- | --- |
+| **Catalog** and package details | **Workspace: Installed**, **Global: Installed** | **Workspace: Update available**, **Global: Update available** |
+| **Installed** | **Workspace**, **Global** | **Workspace: Update available**, **Global: Update available** |
+| **Updates** | | **Workspace**, **Global** |
+
+A package installed in both scopes has two badges in **Catalog**, and a separate entry for each scope in **Installed** and **Updates**. When a scope filter is active, **Catalog** shows only the badge for that scope. Update status is conveyed by text, not an extra border.
+
+Direct Git installations also appear as installed in **Catalog** when their repository and package subdirectory match a catalog entry. Matching does not rely on the package name alone. If exactly one marketplace lists that source, **Installed**, **Updates**, and package details show that marketplace name instead of the repository, and marketplace search, filter, and sort include the package. Updates and other operations still use the source the package was installed from. A source listed by several marketplaces keeps its repository label.
+
+On package details pages, select a scope badge to view that installation. The active scope is bold, and hovering a badge shows its installed version. **Workspace** refers to the current workspace; badges omit the folder name.
+
+The status part of a scope badge can also be:
+
+| Status | Meaning |
+| --- | --- |
+| **Update available (cached)**, or **Cached** in **Updates** | The update result comes from an earlier check. |
+| **Showing saved update status** | The latest update check failed, so the last known result is shown. |
+| **Could not check for updates** | APM could not determine the update status. |
+| **Version could not be compared** | APM could not compare the installed version with the latest one. |
+
+Other badges:
+
 | Badge | Meaning |
 | --- | --- |
-| **Installed globally**, **Installed in workspace** | A catalog package is installed in that scope. Both can appear. |
-| **Global**, **Workspace** | The scope of an entry in **Installed** or **Updates**. A package installed in both scopes has a separate entry for each. |
-| **Update available** | A newer version is available. **(cached)** means the result comes from an earlier check. |
 | **Transitive** | Installed as a dependency of another package, not declared directly. |
 | **Cached catalog** | The marketplace could not be refreshed, so its last known entries are shown. |
-| **Could not check for updates**, **Version could not be compared**, **Update status not checked** | The update status is unknown. |
 
 The **APM** Activity Bar icon shows a badge with the number of global and workspace updates, regardless of search filters, plus one when the extension recommends a CLI upgrade. Its tooltip identifies results saved from an earlier check. The badge disappears when there are no updates, the CLI is unavailable, or the workspace is untrusted.
 
@@ -62,17 +83,17 @@ The **APM** Activity Bar icon shows a badge with the number of global and worksp
 - **Refresh** checks immediately. Changing accounts clears cached remote results, and installing, updating, or uninstalling forces a fresh update check for that scope.
 - Refresh progress appears as VS Code's native view progress indicator. Repeated refresh warnings are shown once until they change or clear.
 
-Catalog packages show update status as soon as the catalog loads, by comparing installed and catalog versions. APM's `apm outdated` check then refines the status during the same refresh.
+Catalog installation badges appear as soon as installed packages are loaded, without waiting for update checks. Comparing installed and catalog versions supplies the initial update status; APM's `apm outdated` check then refines it during the same refresh.
 
 ## Package details
 
-Select a package to open its page in an editor tab.
+Select a package to open its page in an editor tab. **Catalog**, **Installed**, and **Updates** open the same details tab for the same package and installation scope, including packages installed directly from a Git repository. Installed packages show their installed version, local contents, and update/uninstall actions regardless of which list you opened them from.
 
 ![A package page with actions, tags, contents, package information, and README](images/package-details.png)
 
 The page shows:
 
-- The package's scope and execution host, such as **Workspace: contoso-web — Local**.
+- Compact installation badges with the active scope marked, without a separate workspace-name line. Keyword tags from package metadata use the same badge style.
 - **Actions** for the package in that scope. See [Managing packages](managing-packages.md).
 - **Contents**: skills, agents, instructions, prompts, Copilot extensions, and other primitives. Items that exist locally open the verified file; items missing from local metadata are listed without a link.
 - **Package information**: other metadata from the package manifest and APM, such as author, license, and repository.

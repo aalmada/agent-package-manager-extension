@@ -52,6 +52,14 @@ export function remoteSource(source: unknown, marketplace: Marketplace, hosts?: 
   return { repository, path: repositoryPath(path), ref: repositoryRef(ref) };
 }
 
+/** Refs select versions of a package; its repository and subdirectory identify the package itself. */
+export function remotePackageIdentity(source: RemoteSource | undefined): string | undefined {
+  if (!source) return undefined;
+  const { repository, path } = source;
+  return JSON.stringify([repository.provider, repository.origin,
+    repository.provider === 'github' ? repository.path.toLowerCase() : repository.path, path]);
+}
+
 function repositoryLocation(location: string, hint: string | undefined, hosts: readonly RepositoryHost[] = []): string {
   if (/^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|git@)/.test(location)) return location;
   const knownHosts = ['github.com', 'gitlab.com', 'dev.azure.com', ...hosts.map(host => {
