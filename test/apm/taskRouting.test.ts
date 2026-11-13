@@ -50,14 +50,26 @@ interface Harness {
   workflow(workflow: Workflow, uri?: unknown, scope?: Scope): Promise<void>;
   installPackage(scope?: Scope, preview?: boolean): Promise<void>;
   showTargets(context?: Panel): Promise<void>;
+  reviewExecutableTrust(): Promise<void>;
+  manageExecutableTrust(): Promise<void>;
+  marketplaceHealth(): Promise<void>;
+  discoverMcpServers(): Promise<void>;
+  installMcpServer(): Promise<void>;
+  lifecycleWorkflows(): Promise<void>;
+  dependencyReports(): Promise<void>;
+  moreActions(): Promise<void>;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
   cancelConfirmation?: boolean; onConfirmation?: () => Promise<void>;
   errorChoice?: string;
   inputs?: (string | undefined)[]; picks?: (number | number[] | undefined)[]; scriptsEnabled?: boolean; token?: string;
+  installed?: PackageItem[];
+  marketplaces?: Marketplace[];
   tasks?: { definition: { workflow: string; script?: string }; scope: { uri: { fsPath: string } } }[];
-  output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number } } = {}) {
+  output?: (args: string[]) => { stdout: string; stderr: string; exitCode: number };
+  savePath?: string;
+  scope?: Scope } = {}) {
   const processListeners = new Set<(event: { execution: Execution; exitCode?: number }) => void>();
   const endListeners = new Set<(event: { execution: Execution }) => void>();
   const executions: Execution[] = [], argv: string[][] = [], messages: Partial<State>[] = [];
@@ -86,6 +98,8 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   const vscode = {
     authentication: { getSession: async () => options.token ? { accessToken: options.token } : undefined },
     env: { remoteName: undefined },
+    TreeItem: class { contextValue?: string; constructor(readonly label: string, readonly collapsibleState: number) {} },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1 },
     commands: { executeCommand: async (id: string, key?: string, value?: unknown) => {
       commands.push(id);
       if (id === 'setContext' && key) contexts.set(key, value);
@@ -93,7 +107,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     Task, ProcessExecution, TaskScope: { Workspace: 1, Global: 2 },
     TaskRevealKind: { Always: 1 }, TaskPanelKind: { Dedicated: 2 }, ProgressLocation: { Notification: 1 },
     QuickPickItemKind: { Separator: -1 },
-    Uri: { file: (path: string) => ({ fsPath: path }) },
+    Uri: { file: (path: string) => ({ scheme: 'file', fsPath: path }) },
     workspace: {
       isTrusted: options.trusted !== false,
       getConfiguration: () => ({ get: (key: string) => key === 'tasks.includeScripts' ? options.scriptsEnabled ?? false : 'apm' }),
@@ -108,6 +122,10 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
         const answer = inputs.shift();
         if (answer !== undefined) assert.equal(input.validateInput?.(answer), undefined);
         return answer;
+      },
+      showSaveDialog: async (input: { title: string }) => {
+        prompts.push(input.title);
+        return options.savePath ? { scheme: 'file', fsPath: options.savePath } : undefined;
       },
       showQuickPick: async (items: { label?: string }[], input: { title: string }) => {
         prompts.push(input.title); choices.push({ title: input.title, labels: Array.from(items, item => item.label ?? '') });
@@ -164,7 +182,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     context: { workspaceState: { get: (_key: string, fallback: unknown) => fallback, update: async (key: string, value: unknown) => { saved.set(key, value); } } },
     output: { appendLine() {}, show() {} },
     diagnostics: { clear() {}, begin: (key: string) => ({ key, generation: 0, run: 1 }) },
-    state: { scopeKey: `workspace:${root}`, installed: [], catalog: [], marketplaces: [], scopes: [
+    state: { scopeKey: `workspace:${root}`, installed: [], catalog: [], marketplaces: options.marketplaces ?? [], scopes: [
       { kind: 'workspace', label: 'project', path: root },
       { kind: 'workspace', label: 'other', path: '/other' },
       { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' }
@@ -180,10 +198,10 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
     loadDetails: async () => {},
     commandTasks: new Map(), queues: new Map(), panels: new Map(), subscriptions: [],
     requireTrust: () => { if (options.trusted === false) throw new Error('Trust this workspace'); },
-    scope: (panel?: Panel) => panel?.scope ?? ({ kind: 'workspace', label: 'project', path: root }),
+    scope: (panel?: Panel) => panel?.scope ?? options.scope ?? ({ kind: 'workspace', label: 'project', path: root }),
     client: (scope?: Scope) => ({
       supports: async () => true,
-      getInstalled: async () => [],
+      getInstalled: async () => options.installed ?? [],
       execute: async (args: string[], execution?: { inputLines?: readonly string[] }) => {
         argv.push(args); executionInputs.push(execution?.inputLines); executionScopes.push(scope);
         if (execution?.inputLines && args[0] === 'init') {
@@ -193,7 +211,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
         return options.output?.(args) ?? { stdout: args.join(' ') === 'compile --help' ? '  --target TEXT  Values: claude, copilot, cursor.\n  --help' : '', stderr: '', exitCode: 0 };
       }
     }),
-    serialize: async (_key: string, operation: () => Promise<void>) => { serializations++; await operation(); },
+    serialize: async <T>(_key: string, operation: () => Promise<T>): Promise<T> => { serializations++; return operation(); },
     send: (panel: Panel) => { messages.push({ ...panel.extra }); },
     scheduleRefresh: () => { refreshes++; }, refresh: async () => { refreshes++; }
   });
@@ -751,6 +769,335 @@ test('native validation, previews and doctor execute without command forms or un
   assert.equal(untrusted.argv.length, 0);
 });
 
+test('policy explanations and read-only trust reports bypass the contract mutation annotation', async () => {
+  const packageItem: PackageItem = {
+    id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true,
+    scope: { kind: 'workspace', label: 'project', path: '/project' }
+  };
+  const explanation = harness({
+    installed: [packageItem], picks: [0],
+    output: args => ({ stdout: args[0] === 'policy' ? 'Effective decision: denied' : '', stderr: '', exitCode: 0 })
+  });
+  await explanation.extension.workflow('policy');
+  assert.deepEqual(Array.from(explanation.argv[0]), ['policy', 'explain', 'owner/repo']);
+  assert.equal(explanation.confirmations.length, 0);
+  assert.match(explanation.previews[0].content, /Effective decision: denied/);
+
+  const report = harness({
+    picks: [1],
+    output: args => ({ stdout: args.join(' '), stderr: '', exitCode: 0 })
+  });
+  await report.extension.reviewExecutableTrust();
+  assert.deepEqual(Array.from(report.argv[0]), ['approve', '--pending']);
+  assert.equal(report.confirmations.length, 0);
+  assert.match(report.previews[0].content, /approve --pending/);
+
+  const status = harness({
+    picks: [0],
+    output: args => ({ stdout: args[0] === 'policy' ? '{"source":"org","rules":[]}' : '', stderr: '', exitCode: 0 })
+  });
+  await status.extension.reviewExecutableTrust();
+  assert.deepEqual(Array.from(status.argv[0]), ['policy', 'status', '--json']);
+  assert.match(status.previews[0].content, /"source": "org"/);
+});
+
+test('executable trust changes preserve package scope and confirm the personal destination', async () => {
+  const globalScope: Scope = { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' };
+  const packageItem: PackageItem = {
+    id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true, scope: globalScope
+  };
+  const approved = harness({ installed: [packageItem], picks: [2, 0, 0, 0] });
+  await approved.extension.manageExecutableTrust();
+  assert.deepEqual(Array.from(approved.argv[0]), ['approve', '--user', 'owner/repo']);
+  assert.equal(approved.executionScopes[0]?.kind, 'global');
+  assert.match(approved.confirmations[0], /your personal APM configuration/);
+  assert.match(approved.confirmations[0], /Only proceed for sources you trust/);
+  assert.match(approved.previews[0].content, /Exit code: 0/);
+
+  const denied = harness({ installed: [packageItem], picks: [2, 0, 1, 0], cancelConfirmation: true });
+  await denied.extension.manageExecutableTrust();
+  assert.match(denied.confirmations[0], /Deny executable primitives for owner\/repo/);
+  assert.equal(denied.argv.length, 0);
+});
+
+test('shared executable trust changes require an existing project manifest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-trust-policy-'));
+  try {
+    await writeFile(join(root, 'apm.yml'), 'name: trust-policy\n');
+    const packageItem: PackageItem = {
+      id: 'owner/repo', name: 'repo', marketplace: '', version: 'v1', source: 'owner/repo', installed: true,
+      scope: { kind: 'workspace', label: 'project', path: root }
+    };
+    const host = harness({ root, installed: [packageItem], picks: [0, 0, 0, 0] });
+    await host.extension.manageExecutableTrust();
+    assert.deepEqual(Array.from(host.argv[0]), ['approve', 'owner/repo']);
+    assert.match(host.confirmations[0], /the shared apm\.yml in project/);
+    assert.equal(host.executionScopes[0]?.path, root);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('marketplace health offers explicit offline checks and preserves failing reports', async () => {
+  const host = harness({
+    picks: [1],
+    output: args => ({
+      stdout: args.includes('--offline') ? 'Marketplace entry could not be resolved from cache.' : '',
+      stderr: '', exitCode: 1
+    })
+  });
+  await host.extension.marketplaceHealth();
+  assert.deepEqual(Array.from(host.argv[0]), ['marketplace', 'check', '--offline']);
+  assert.match(host.previews[0].content, /Marketplace entry could not be resolved from cache/);
+  assert.match(host.previews[0].content, /Exit code: 1/);
+  assert.match(host.confirmations[0], /reported findings or exited with code 1/);
+});
+
+test('marketplace validation selects a registered marketplace without exposing its source URL', async () => {
+  const host = harness({
+    picks: [4, 0],
+    marketplaces: [{ name: 'central', source: 'https://example.test/marketplace.json' }],
+    output: () => ({ stdout: 'Marketplace structure is valid.', stderr: '', exitCode: 0 })
+  });
+  await host.extension.marketplaceHealth();
+  assert.deepEqual(Array.from(host.argv[0]), ['marketplace', 'validate', 'central']);
+  assert.match(host.previews[0].title, /central/);
+  assert.doesNotMatch(host.choices[1].labels.join(' '), /example\.test/);
+  assert.equal(host.confirmations.length, 0);
+});
+
+test('MCP registry discovery runs only the selected explicit query and preserves nonzero output', async () => {
+  const listed = harness({
+    picks: [0],
+    output: () => ({ stdout: 'io.github.example/issues  Issue tracking server', stderr: '', exitCode: 0 })
+  });
+  await listed.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(listed.argv[0]), ['mcp', 'list']);
+  assert.match(listed.previews[0].content, /Issue tracking server/);
+
+  const host = harness({
+    picks: [1],
+    inputs: ['issue tracker'],
+    output: args => ({
+      stdout: args[1] === 'search' ? 'io.github.example/issues  Issue tracking server' : '',
+      stderr: 'Registry used: https://registry.example.test',
+      exitCode: 1
+    })
+  });
+  await host.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(host.argv[0]), ['mcp', 'search', 'issue tracker']);
+  assert.match(host.previews[0].content, /Exit code: 1/);
+  assert.match(host.previews[0].content, /Issue tracking server/);
+  assert.match(host.previews[0].content, /registry\.example\.test/);
+  assert.match(host.confirmations[0], /reported findings or exited with code 1/);
+  assert.equal(host.executionScopes[0]?.kind, 'workspace');
+
+  const shown = harness({
+    picks: [2],
+    inputs: ['io.github.example/issues'],
+    output: () => ({ stdout: 'Description: Issue tracking server', stderr: '', exitCode: 0 })
+  });
+  await shown.extension.discoverMcpServers();
+  assert.deepEqual(Array.from(shown.argv[0]), ['mcp', 'show', 'io.github.example/issues']);
+  assert.match(shown.previews[0].content, /Description: Issue tracking server/);
+
+  const cancelled = harness({ picks: [2], inputs: [undefined] });
+  await cancelled.extension.discoverMcpServers();
+  assert.equal(cancelled.argv.length, 0);
+});
+
+test('MCP installation uses the independent destination picker and confirms the mutation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-mcp-install-'));
+  try {
+    await writeFile(join(root, 'apm.yml'), 'name: mcp-install\n');
+    const host = harness({
+      root,
+      picks: [0],
+      inputs: ['io.github.example/server'],
+      output: () => ({ stdout: 'Added MCP server to apm.yml.', stderr: '', exitCode: 0 })
+    });
+    await host.extension.installMcpServer();
+    assert.deepEqual(Array.from(host.argv[0]), ['install', '--mcp', 'io.github.example/server']);
+    assert.equal(host.executionScopes[0]?.path, root);
+    assert.match(host.confirmations[0], /apm install in project/);
+    assert.match(host.previews[0].content, /Added MCP server/);
+
+    const cancelled = harness({ root, picks: [0], inputs: ['io.github.example/server'], cancelConfirmation: true });
+    await cancelled.extension.installMcpServer();
+    assert.equal(cancelled.argv.length, 0, 'Dismissing the install confirmation does not run APM');
+  } finally { await rm(root, { recursive: true, force: true }); }
+
+  const global = harness({
+    picks: [0],
+    inputs: ['io.github.example/server']
+  });
+  await global.extension.installMcpServer();
+  assert.deepEqual(Array.from(global.argv[0]), ['install', '--global', '--mcp', 'io.github.example/server']);
+  assert.equal(global.executionScopes[0]?.kind, 'global');
+});
+
+test('lifecycle discovery and dry runs stay read-only while execution requires explicit confirmation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-lifecycle-'));
+  try {
+    const inspected = harness({
+      root,
+      picks: [0],
+      output: () => ({ stdout: 'post-install command: echo ready', stderr: '', exitCode: 0 })
+    });
+    await inspected.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(inspected.argv[0]), ['lifecycle']);
+    assert.equal(inspected.confirmations.length, 0);
+
+    const validation = harness({
+      root,
+      picks: [1],
+      output: () => ({ stdout: 'script.js: invalid lifecycle handler', stderr: '', exitCode: 1 })
+    });
+    await validation.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(validation.argv[0]), ['lifecycle', 'validate']);
+    assert.match(validation.previews[0].content, /Exit code: 1/);
+    assert.match(validation.previews[0].content, /invalid lifecycle handler/);
+    assert.match(validation.confirmations[0], /reported findings or exited with code 1/);
+
+    const dryRun = harness({
+      root,
+      picks: [2, 2],
+      output: () => ({ stdout: 'Dry-run: pre-update would fire 1 script.', stderr: '', exitCode: 0 })
+    });
+    await dryRun.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(dryRun.argv[0]), ['lifecycle', 'test', 'pre-update']);
+    assert.equal(dryRun.confirmations.length, 0);
+    assert.match(dryRun.previews[0].content, /would fire 1 script/);
+
+    const executed = harness({
+      root,
+      picks: [3, 0],
+      output: () => ({ stdout: 'Lifecycle event fired.', stderr: '', exitCode: 0 })
+    });
+    await executed.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(executed.argv[0]), ['lifecycle', 'test', '--execute', 'pre-install']);
+    assert.match(executed.confirmations[0], /runs project-defined commands/);
+    assert.match(executed.previews[0].content, /Lifecycle event fired/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('lifecycle trust changes and forced initialization use confirmed APM mutations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-lifecycle-mutation-'));
+  try {
+    const missingManifest = harness({ root, picks: [4] });
+    await assert.rejects(missingManifest.extension.lifecycleWorkflows(), /Initialize an APM project/);
+    assert.equal(missingManifest.argv.length, 0);
+
+    await writeFile(join(root, 'apm.yml'), 'name: lifecycle-test\n');
+    const trusted = harness({
+      root,
+      picks: [4],
+      output: () => ({ stdout: 'Lifecycle scripts are trusted.', stderr: '', exitCode: 0 })
+    });
+    await trusted.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(trusted.argv[0]), ['lifecycle', 'trust']);
+    assert.match(trusted.confirmations[0], /during future installs/);
+
+    const replaced = harness({
+      root,
+      picks: [7],
+      output: () => ({ stdout: 'Injected lifecycle block.', stderr: '', exitCode: 0 })
+    });
+    await replaced.extension.lifecycleWorkflows();
+    assert.deepEqual(Array.from(replaced.argv[0]), ['lifecycle', 'init', '--force']);
+    assert.match(replaced.confirmations[0], /Overwrite the existing lifecycle block/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('dependency reports check outdated packages and export SBOMs in both formats and scopes', async () => {
+  const outdated = harness({
+    picks: [0],
+    scope: { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' },
+    output: () => ({ stdout: 'repo  v1  v2  git', stderr: '', exitCode: 0 })
+  });
+  await outdated.extension.dependencyReports();
+  assert.deepEqual(Array.from(outdated.argv[0]), ['outdated', '--global']);
+  assert.match(outdated.previews[0].content, /repo\s+v1\s+v2/);
+  assert.equal(outdated.confirmations.length, 0);
+  assert.match(outdated.choices[0].labels[0], /network/);
+
+  const viewed = harness({
+    picks: [1, 0],
+    output: () => ({ stdout: '{"bomFormat":"CycloneDX"}', stderr: '', exitCode: 0 })
+  });
+  await viewed.extension.dependencyReports();
+  assert.deepEqual(Array.from(viewed.argv[0]), ['lock', 'export', '--format', 'cyclonedx']);
+  assert.match(viewed.previews[0].content, /CycloneDX/);
+  assert.equal(viewed.confirmations.length, 0);
+
+  const saved = harness({
+    picks: [2, 1],
+    savePath: '/home/test/.apm/reports/apm-sbom.spdx.json',
+    scope: { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' },
+    output: () => ({ stdout: 'Wrote SPDX SBOM.', stderr: '', exitCode: 0 })
+  });
+  await saved.extension.dependencyReports();
+  assert.deepEqual(Array.from(saved.argv[0]), [
+    'lock', 'export', '--global', '--format', 'spdx', '--output', '/home/test/.apm/reports/apm-sbom.spdx.json'
+  ]);
+  assert.match(saved.confirmations[0], /Write the spdx SBOM from Global \(user\) to/);
+  assert.match(saved.previews[0].content, /Wrote SPDX SBOM/);
+  assert.equal(saved.counts().refreshes, 0, 'SBOM export does not trigger an unrelated package refresh');
+
+  const failedExport = harness({
+    picks: [2, 0],
+    savePath: '/project/apm-sbom.cdx.json',
+    output: () => ({ stdout: 'partial report', stderr: 'export failed', exitCode: 2 })
+  });
+  await failedExport.extension.dependencyReports();
+  assert.match(failedExport.previews[0].content, /Exit code: 2[\s\S]*partial report[\s\S]*export failed/);
+  assert.match(failedExport.confirmations[1], /exited with code 2/);
+  assert.equal(failedExport.notices.length, 0, 'Failed exports do not show a success notification');
+
+  const cancelled = harness({ picks: [2, 0] });
+  await cancelled.extension.dependencyReports();
+  assert.equal(cancelled.argv.length, 0, 'Cancelling the file picker does not run APM');
+
+  const declined = harness({ picks: [2, 0], savePath: '/project/apm-sbom.cdx.json', cancelConfirmation: true });
+  await declined.extension.dependencyReports();
+  assert.equal(declined.argv.length, 0, 'Dismissing the SBOM write confirmation does not run APM');
+});
+
+test('dependency tree and why reports stay in the selected package scope', async () => {
+  const global: Scope = { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' };
+  const host = harness({
+    scope: global,
+    output: args => args[1] === 'tree'
+      ? { stdout: 'project\n└── owner/package@1.2.0', stderr: '', exitCode: 0 }
+      : { stdout: '{"package":"owner/package","parents":[]}', stderr: '', exitCode: 0 }
+  });
+  const panel: Panel = { mode: 'browser', scope: global, extra: {} };
+  await host.extension.handle({ type: 'dependencyTree' }, panel);
+  assert.deepEqual(Array.from(host.argv[0]), ['deps', 'tree', '--global']);
+  assert.match(host.previews[0].content, /owner\/package@1\.2\.0/);
+
+  host.extension.state.installed = [{
+    id: 'owner/package', name: 'package', marketplace: '', version: '1.2.0', installed: true, scope: global,
+    metadata: { cliIdentity: 'owner/package' }
+  }];
+  await host.extension.handle({ type: 'dependencyWhy', id: 'owner/package', scopeKey: 'global:/home/test/.apm' }, panel);
+  assert.deepEqual(Array.from(host.argv[1]), ['deps', 'why', '--global', 'owner/package', '--json']);
+  assert.match(host.previews[1].content, /"parents": \[\]/);
+  assert.equal(host.executionScopes[1]?.kind, 'global');
+});
+
+test('More APM actions picker exposes recently added workflows', async () => {
+  const host = harness({ picks: [8] });
+  let invoked = false;
+  Reflect.set(host.extension, 'discoverMcpServers', async () => { invoked = true; });
+  await host.extension.moreActions();
+  assert.equal(invoked, true);
+  assert.deepEqual(host.choices[0].labels, [
+    'Dependency Reports', 'View Dependency Tree', 'Explain Dependency', 'Find File Owner',
+    'Review Executable Trust', 'Manage Executable Trust', 'Explain Package Policy',
+    'Check Marketplace Health', 'Discover MCP Servers', 'Install MCP Server',
+    'Manage Lifecycle Workflows'
+  ]);
+});
+
 test('dependency links navigate to the package scope in the existing browser without running a tree command', async () => {
   const host = harness();
   await host.extension.handle({ type: 'dependencies' }, {
@@ -799,6 +1146,9 @@ test('deployment explanations use native pickers and removed generic messages ar
   assert.deepEqual(Array.from(host.argv[0]), ['targets', '--json']);
   assert.match(host.prompts[0], /APM deployment targets/);
   for (const type of ['tools', 'selectCommand', 'command', 'help']) assert.throws(() => parseMessage({ type, id: 'install', args: {}, options: {} }), /Unknown/);
+  assert.deepEqual(parseMessage({ type: 'dependencyWhy', id: 'sample', scopeKey: 'workspace:/project' }),
+    { type: 'dependencyWhy', id: 'sample', scopeKey: 'workspace:/project' });
+  assert.throws(() => parseMessage({ type: 'dependencyWhy', id: 'sample' }), /Unknown/);
 });
 
 test('native script selection starts only the chosen folder-bound VS Code task', async () => {

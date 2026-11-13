@@ -185,10 +185,14 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     ] };
     await postMessage(page, { type: 'state', state: dependencies });
     await postMessage(page, { type: 'setSearch', search: '@dependencies' });
-    await expect(page.getByRole('heading', { name: 'Dependencies', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Installed dependencies', exact: true })).toBeVisible();
+    await expect(page.getByLabel('More APM actions')).toHaveCount(0);
     await expect(page.locator('.dependency-summary')).toContainText('Workspace: My agent project');
+    await page.getByRole('button', { name: 'View dependency tree' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"dependencyTree"}');
     await expect(page.locator('.package-row')).toHaveCount(2);
-    await expect(page.locator('.count-badge')).toHaveText(['1', '1']);
+    await expect(page.locator('.count-badge')).toHaveText(['2']);
+    await expect(page.locator('.dependency-group-heading')).toHaveText(['Direct dependencies (1)', 'Transitive dependencies (1)']);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`dependencies-${theme}.png`), fullPage: true });
     await page.locator('#search').fill('helper @dependencies');

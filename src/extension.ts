@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { homedir, platform } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
 import { record, type VariablePrompt } from './apm/adapters';
@@ -25,6 +25,7 @@ import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveCo
 import { RepositoryAccessError, RepositoryAuthentication, signInToGithub, type AccessPass } from './authentication';
 import { cliEnvironment } from './auth/cli';
 import { repositoryFromPackageSource, type Repository } from './auth/repositories';
+import { parseDependencyTree } from './apm/dependencyTree';
 
 interface PanelContext {
   webview?: vscode.Webview;
@@ -540,12 +541,25 @@ class ApmExtension implements vscode.Disposable {
     return picked?.scope;
   }
   async workflow(workflow: Workflow, uri?: vscode.Uri, capturedScope?: Scope) {
-    const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor');
+    const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor' && workflow !== 'policy');
     if (!scope) return;
     if (workflow === 'previewInstall') { await this.installPackage(scope, true); return; }
     if (workflow === 'runScript') { await this.runProjectScript(scope); return; }
     const command = workflowCommands[workflow];
     const args: Record<string, string> = {}, options: Record<string, unknown> = { ...command.options };
+    if (workflow === 'policy') {
+      const installed = await this.client(scope).getInstalled(scope);
+      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
+      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
+        { title: `Explain package policy — ${scope.label}`, placeHolder: 'Select an installed dependency' });
+      if (!picked) return;
+      const packageName = packageIdentity(picked.item, picked.item, false);
+      if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
+        throw new Error('APM returned an invalid dependency identity.');
+      }
+      await this.showPolicyReport(scope, `Executable trust policy: ${packageName}`, ['policy', 'explain', packageName]);
+      return;
+    }
     let inputLines: string[] | undefined;
     if (workflow === 'initialize') {
       if (await hasProjectManifest(scope.path)) {
@@ -575,14 +589,6 @@ class ApmExtension implements vscode.Disposable {
       args.project_name = '.';
       inputLines = [...fields, 'y'];
     }
-    if (workflow === 'policy') {
-      const installed = await this.client(scope).getInstalled(scope);
-      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
-      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
-        { title: 'Explain package policy', placeHolder: 'Select an installed dependency' });
-      if (!picked) return;
-      args.package = packageIdentity(picked.item, picked.item, false);
-    }
     const context: PanelContext = { mode: 'native', scope, extra: {} };
     this.nativeOperations.add(context);
     try { await this.runCommand({ type: 'command', id: command.id, args, options }, context, inputLines); }
@@ -603,13 +609,425 @@ class ApmExtension implements vscode.Disposable {
         `APM audit reported findings or incomplete coverage in ${scope.label}. Review Problems.`, 'Show Output').then(choice => {
         if (choice) this.output.show();
       });
-    } else if (workflow === 'previewCompile' || workflow === 'policy' || workflow === 'doctor') {
-      await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : workflow === 'doctor' ? 'APM health check' : 'Package policy', context.extra.result);
+    } else if (workflow === 'previewCompile' || workflow === 'doctor') {
+      await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : 'APM health check', context.extra.result);
     } else {
       void vscode.window.showInformationMessage(`APM ${workflow === 'validate' ? 'validation' : 'compilation'} completed in ${scope.label}.`, 'Show Output').then(choice => {
         if (choice) this.output.show();
       });
     }
+  }
+  async reviewExecutableTrust() {
+    this.requireTrust();
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const reports = [
+      { label: 'Policy status', description: 'Discovery source, cache, and effective rules', title: 'APM policy status', args: ['policy', 'status', '--json'], json: true },
+      { label: 'Pending executable approvals', description: 'Packages with unapproved executable primitives', title: 'Pending executable approvals', args: ['approve', '--pending'] },
+      { label: 'Effective trust decisions', description: 'Current executable allow and deny decisions', title: 'Effective executable trust decisions', args: ['approve', '--list'] }
+    ];
+    const picked = await vscode.window.showQuickPick(reports, {
+      title: `Review executable trust — ${scope.label}`,
+      placeHolder: 'Choose a read-only policy report'
+    });
+    if (!picked) return;
+    await this.showPolicyReport(scope, picked.title, picked.args, picked.json);
+  }
+  async marketplaceHealth() {
+    this.requireTrust();
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const reports = [
+      { label: 'Check marketplace entries (network)', description: 'Resolve entries from the project marketplace configuration', title: 'Marketplace entry check', args: ['marketplace', 'check'] },
+      { label: 'Check marketplace entries (offline)', description: 'Validate schema and cached refs without network access', title: 'Offline marketplace entry check', args: ['marketplace', 'check', '--offline'] },
+      { label: 'Show outdated marketplace packages (network)', description: 'Look for available upgrades', title: 'Outdated marketplace packages', args: ['marketplace', 'outdated'] },
+      { label: 'Show outdated packages (offline)', description: 'Use cached refs only', title: 'Offline outdated marketplace packages', args: ['marketplace', 'outdated', '--offline'] },
+      { label: 'Validate a registered marketplace', description: 'Check marketplace structure and plugin schema', title: 'Marketplace validation', args: ['marketplace', 'validate'], marketplaceCommand: 'validate' as const },
+      { label: 'Audit marketplace dependencies (may fetch refs)', description: 'Check whether plugin dependencies resolve through the marketplace', title: 'Marketplace dependency audit', args: ['marketplace', 'audit'], marketplaceCommand: 'audit' as const }
+    ];
+    const picked = await vscode.window.showQuickPick(reports, {
+      title: `Marketplace health — ${scope.label}`,
+      placeHolder: 'Choose a read-only check; network actions are labeled'
+    });
+    if (!picked) return;
+    const args = [...picked.args];
+    let title = `${picked.title} — ${scope.label}`;
+    if ('marketplaceCommand' in picked) {
+      if (!this.state.marketplaces.length) throw new Error('No registered marketplaces are available to validate or audit.');
+      const selected = await vscode.window.showQuickPick(this.state.marketplaces.map(marketplace => ({
+        label: marketplace.name, marketplace
+      })), { title: picked.title, placeHolder: 'Choose a registered marketplace' });
+      if (!selected) return;
+      args.push(selected.marketplace.name);
+      title = `${picked.title}: ${selected.marketplace.name} — ${scope.label}`;
+    }
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty marketplace health report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
+  async discoverMcpServers() {
+    const scope = await this.workflowScope();
+    if (!scope) return;
+    const actions = [
+      { label: 'List MCP servers (registry/network)', description: 'Browse the configured registry', command: 'list', title: 'MCP registry servers' },
+      { label: 'Search MCP servers (registry/network)', description: 'Search by keyword or phrase', command: 'search', title: 'MCP registry search' },
+      { label: 'Show MCP server details (registry/network)', description: 'Look up an exact registry name', command: 'show', title: 'MCP server details' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Discover MCP servers — ${scope.label}`,
+      placeHolder: 'Choose an explicit registry query'
+    });
+    if (!action) return;
+    const args = ['mcp', action.command];
+    let title = `${action.title} — ${scope.label}`;
+    if (action.command !== 'list') {
+      const search = action.command === 'search';
+      const value = await vscode.window.showInputBox({
+        title: search ? 'Search MCP registry' : 'Show MCP server details',
+        prompt: search ? 'Enter a keyword or phrase' : 'Enter the exact MCP registry name',
+        validateInput: input => {
+          const trimmed = input.trim();
+          if (!trimmed || trimmed.startsWith('-') || /[\r\n\0]/.test(input) || containsUrlCredentials(trimmed)) {
+            return 'Enter a non-empty value without leading flags, line breaks, NUL, or URL credentials.';
+          }
+          if (!search && /\s/.test(trimmed)) return 'Enter the exact registry name without whitespace.';
+          return undefined;
+        }
+      });
+      if (value === undefined) return;
+      args.push(value.trim());
+      if (!search) title = `${action.title}: ${value.trim()} — ${scope.label}`;
+    }
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty MCP registry report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
+  async lifecycleWorkflows() {
+    const scope = await this.workflowScope(undefined, undefined, true);
+    if (!scope) return;
+    const actions: (
+      | { label: string; description: string; actionType: 'report'; args: string[]; title: string }
+      | { label: string; description: string; actionType: 'test'; execute: boolean }
+      | { label: string; description: string; actionType: 'command'; id: string; options: Record<string, unknown>; title: string }
+    )[] = [
+      { label: 'Inspect discovered lifecycle scripts', description: 'List scripts APM discovers from project, user, and policy sources', actionType: 'report', args: ['lifecycle'], title: 'Discovered lifecycle scripts' },
+      { label: 'Validate lifecycle scripts', description: 'Check discovered script files without running them', actionType: 'report', args: ['lifecycle', 'validate'], title: 'Lifecycle script validation' },
+      { label: 'Test lifecycle event (dry run)', description: 'Preview matching scripts without running commands or requests', actionType: 'test', execute: false },
+      { label: 'Execute lifecycle event scripts', description: 'Run project-defined scripts; explicit confirmation required', actionType: 'test', execute: true },
+      { label: 'Trust project lifecycle scripts', description: 'Allow this project lifecycle block to run during installs', actionType: 'command', id: 'lifecycle trust', options: {}, title: 'Trust project lifecycle scripts' },
+      { label: 'Revoke lifecycle trust', description: 'Prevent this project lifecycle block from running during installs', actionType: 'command', id: 'lifecycle untrust', options: {}, title: 'Revoke project lifecycle trust' },
+      { label: 'Add starter lifecycle block', description: 'Add an example lifecycle block to apm.yml', actionType: 'command', id: 'lifecycle init', options: {}, title: 'Add starter lifecycle block' },
+      { label: 'Replace lifecycle block (overwrite)', description: 'Overwrite the existing lifecycle definition in apm.yml', actionType: 'command', id: 'lifecycle init', options: { '--force': true }, title: 'Replace lifecycle block' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Lifecycle workflows — ${scope.label}`,
+      placeHolder: 'Choose an explicit inspection, test, or trust action'
+    });
+    if (!action) return;
+    if (action.actionType === 'report') {
+      await this.showLifecycleReport(scope, `${action.title} — ${scope.label}`, action.args);
+      return;
+    }
+    if (action.actionType === 'test') {
+      const events = ['pre-install', 'post-install', 'pre-update', 'post-update', 'pre-uninstall', 'post-uninstall'];
+      const event = await vscode.window.showQuickPick(events.map(label => ({ label })), {
+        title: action.execute ? 'Execute lifecycle event scripts' : 'Dry-run lifecycle event',
+        placeHolder: 'Choose one of the six lifecycle events'
+      });
+      if (!event) return;
+      const args = { event: event.label };
+      const title = `${action.execute ? 'Executed' : 'Dry-run'} lifecycle event: ${event.label} — ${scope.label}`;
+      if (action.execute) await this.runLifecycleCommand(scope, 'lifecycle test', args, { '--execute': true }, title);
+      else await this.showLifecycleReport(scope, title, ['lifecycle', 'test', event.label]);
+      return;
+    }
+    if (!await hasProjectManifest(scope.path)) throw new Error(`Initialize an APM project in ${scope.label} before changing its lifecycle configuration.`);
+    await this.runLifecycleCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
+  }
+  async moreActions() {
+    const actions = [
+      { label: 'Dependency Reports', description: 'Check outdated packages or generate an SBOM', run: () => this.dependencyReports() },
+      { label: 'View Dependency Tree', description: 'Inspect the selected scope dependency tree', run: () => this.refreshDependencyTree() },
+      { label: 'Explain Dependency', description: 'Inspect why an installed package is present', run: () => this.explainDependency() },
+      { label: 'Find File Owner', description: 'Find which APM package deployed a file', run: () => this.findDependencyFile() },
+      { label: 'Review Executable Trust', description: 'Review executable policy and pending approvals', run: () => this.reviewExecutableTrust() },
+      { label: 'Manage Executable Trust', description: 'Approve or deny a package executable primitives', run: () => this.manageExecutableTrust() },
+      { label: 'Explain Package Policy', description: 'Inspect a package effective policy decision', run: () => this.workflow('policy') },
+      { label: 'Check Marketplace Health', description: 'Check marketplace packages and dependency health', run: () => this.marketplaceHealth() },
+      { label: 'Discover MCP Servers', description: 'Search the configured MCP registry', run: () => this.discoverMcpServers() },
+      { label: 'Install MCP Server', description: 'Install a server from the configured MCP registry', run: () => this.installMcpServer() },
+      { label: 'Manage Lifecycle Workflows', description: 'Inspect and manage APM lifecycle scripts', run: () => this.lifecycleWorkflows() }
+    ];
+    const selected = await vscode.window.showQuickPick(actions, {
+      title: 'More APM actions',
+      placeHolder: 'Search dependency, policy, marketplace, MCP, and lifecycle workflows'
+    });
+    await selected?.run();
+  }
+  async dependencyReports() {
+    const scope = await this.workflowScope();
+    if (!scope) return;
+    const actions = [
+      { label: 'Check outdated dependencies (network)', description: 'Run APM remote version checks for this scope', actionType: 'outdated' },
+      { label: 'View SBOM in editor', description: 'Generate CycloneDX or SPDX output without writing a file', actionType: 'view' },
+      { label: 'Save SBOM to file...', description: 'Write a CycloneDX or SPDX file to a location you choose', actionType: 'save' }
+    ];
+    const action = await vscode.window.showQuickPick(actions, {
+      title: `Dependency reports — ${scope.label}`,
+      placeHolder: 'Choose a report; outdated checks may use the network'
+    });
+    if (!action) return;
+    if (action.actionType === 'outdated') {
+      const context: PanelContext = { mode: 'native', scope, extra: {} };
+      this.nativeOperations.add(context);
+      try { await this.runCommand({ type: 'command', id: 'outdated', args: {}, options: {} }, context); }
+      finally { this.nativeOperations.delete(context); }
+      if (!context.extra.result) return;
+      const title = `Outdated dependencies — ${scope.label}`;
+      await this.showTextResult(title, context.extra.result);
+      if (context.extra.error) throw new Error(context.extra.error);
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+      return;
+    }
+    const formats = [
+      { label: 'CycloneDX JSON', value: 'cyclonedx', filename: 'apm-sbom.cdx.json' },
+      { label: 'SPDX JSON', value: 'spdx', filename: 'apm-sbom.spdx.json' }
+    ];
+    const format = await vscode.window.showQuickPick(formats, {
+      title: 'Choose SBOM format',
+      placeHolder: 'Select a supported APM lock export format'
+    });
+    if (!format) return;
+    if (action.actionType === 'view') {
+      const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value];
+      await this.showDependencyReport(scope, `${format.label} SBOM — ${scope.label}`, args);
+      return;
+    }
+    const destination = await vscode.window.showSaveDialog({
+      title: `Save ${format.label} SBOM`,
+      defaultUri: vscode.Uri.file(join(scope.path, format.filename)),
+      filters: { [format.label]: ['json'] }
+    });
+    if (!destination) return;
+    if (destination.scheme !== 'file') throw new Error('Choose a file-system location for the SBOM.');
+    const outputPath = destination.fsPath;
+    const title = `${format.label} SBOM export — ${scope.label}`;
+    const confirmation = await vscode.window.showWarningMessage(
+      `Write the ${format.value} SBOM from ${scope.label} to ${outputPath}? Host: ${this.hostLabel()}. APM reads the selected lockfile and writes only this report file.`,
+      'Write SBOM');
+    if (confirmation !== 'Write SBOM') return;
+    const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value, '--output', outputPath];
+    const result = await this.serialize('apm-mutations', () => this.executeInspection(scope, title, args));
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned no confirmation for the SBOM file. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} exited with code ${result.exitCode}. Review the result document and APM Output.`);
+      return;
+    }
+    void vscode.window.showInformationMessage(`SBOM written to ${outputPath}.`, 'Open SBOM').then(choice => {
+      if (choice) void vscode.workspace.openTextDocument(vscode.Uri.file(outputPath))
+        .then(document => vscode.window.showTextDocument(document))
+        .then(undefined, error => this.report(error));
+    });
+  }
+  private async showDependencyReport(scope: Scope, title: string, args: string[], validate?: (output: string) => void) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty dependency report. Review APM Output.');
+    if (result.exitCode === 0) validate?.(result.stdout);
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
+  private async showLifecycleReport(scope: Scope, title: string, args: string[]) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty lifecycle report. Review APM Output.');
+    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
+    if (result.exitCode !== 0) {
+      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
+    } else {
+      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+    }
+  }
+  private async runLifecycleCommand(scope: Scope, id: string, args: Record<string, string>, options: Record<string, unknown>, title: string) {
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try { await this.runCommand({ type: 'command', id, args, options }, context); }
+    finally { this.nativeOperations.delete(context); }
+    if (!context.extra.result) return;
+    await this.showTextResult(title, context.extra.result);
+    if (context.extra.error) throw new Error(context.extra.error);
+    void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+  }
+  async manageExecutableTrust() {
+    this.requireTrust();
+    const selectedScope = await vscode.window.showQuickPick(this.state.scopes.map(scope => ({
+      label: scope.kind === 'global' ? 'Global (user)' : scope.label,
+      description: scope.path,
+      detail: scopeKey(scope) === this.state.scopeKey ? 'Current package scope' : undefined,
+      scope
+    })), { title: 'Choose package scope', placeHolder: 'Select where the package is installed' });
+    if (!selectedScope) return;
+    const scope = { ...selectedScope.scope };
+    const installed = await this.client(scope).getInstalled(scope);
+    if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
+    const picked = await vscode.window.showQuickPick(installed.map(item => ({
+      label: item.name,
+      description: item.version,
+      detail: scope.label,
+      item
+    })), { title: `Choose package — ${scope.label}`, placeHolder: 'Select a package to change executable trust for' });
+    if (!picked) return;
+    const packageName = packageIdentity(picked.item, picked.item, false);
+    if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
+      throw new Error('APM returned an invalid dependency identity.');
+    }
+    const action = await vscode.window.showQuickPick([
+      { label: 'Approve executable primitives', description: 'Grant this package permission to use its declared executables', command: 'approve' },
+      { label: 'Deny executable primitives', description: "Block this package's executable primitives; deny takes precedence", command: 'deny' }
+    ], { title: `Manage executable trust — ${packageName}`, placeHolder: 'Choose an explicit trust decision' });
+    if (!action) return;
+    const destinations = [
+      ...(scope.kind === 'workspace' && await hasProjectManifest(scope.path)
+        ? [{ label: 'Shared project policy', description: 'Write the decision to apm.yml', user: false }]
+        : []),
+      { label: 'Personal policy', description: 'Write the decision to ~/.apm/config.json', user: true }
+    ];
+    const destination = await vscode.window.showQuickPick(destinations, {
+      title: `Store trust decision — ${packageName}`,
+      placeHolder: 'Choose the policy destination; package scope stays unchanged'
+    });
+    if (!destination) return;
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      await this.runCommand({
+        type: 'command',
+        id: action.command,
+        args: { packages: packageName },
+        options: destination.user ? { '--user': true } : {}
+      }, context);
+    } finally { this.nativeOperations.delete(context); }
+    if (context.extra.result && !context.extra.error) {
+      await this.showTextResult(`${action.label}: ${packageName}`, context.extra.result);
+    }
+  }
+  private async showPolicyReport(scope: Scope, title: string, args: string[], json = false) {
+    const result = await this.executeInspection(scope, title, args);
+    if (!result) return;
+    if (result.exitCode !== 0) throw new Error(`APM policy inspection failed: ${redact(result.stderr || result.stdout)}`);
+    let output = result.stdout.trim();
+    if (json) {
+      try { output = JSON.stringify(JSON.parse(output), null, 2); }
+      catch { throw new Error('APM returned an invalid policy status report. Review APM Output.'); }
+    }
+    if (result.stderr.trim()) output = [output, result.stderr.trim()].filter(Boolean).join('\n');
+    if (!output) throw new Error('APM returned an empty policy report. Review APM Output.');
+    await this.showTextResult(title, output);
+  }
+  private async executeInspection(scope: Scope, title: string, args: string[]) {
+    this.requireTrust();
+    const capturedScope = { ...scope };
+    const controller = new AbortController();
+    const context: PanelContext = { mode: 'native', scope: capturedScope, controller, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      this.output.appendLine(`\n$ apm ${redact(args.join(' '))} (${capturedScope.label})`);
+      const result = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification, title, cancellable: true
+      }, async (_progress, cancellation) => {
+        const subscription = cancellation.onCancellationRequested(() => controller.abort());
+        try {
+          return await this.client(capturedScope, controller.signal).execute(args, {
+            signal: controller.signal, timeoutMs: 5 * 60_000
+          });
+        } finally { subscription.dispose(); }
+      });
+      if (controller.signal.aborted) return;
+      return result;
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally { this.nativeOperations.delete(context); }
+  }
+  async refreshDependencyTree(capturedScope?: Scope) {
+    const scope = { ...(capturedScope ?? this.scope()) };
+    await this.showDependencyReport(scope, `Dependency tree — ${scope.label}`,
+      ['deps', 'tree', ...(scope.kind === 'global' ? ['--global'] : [])], output => { parseDependencyTree(output); });
+  }
+  async explainDependency(target?: unknown, capturedScope?: Scope) {
+    this.requireTrust();
+    const scope = { ...(capturedScope ?? this.scope()) };
+    let packageName = typeof target === 'string' ? target : undefined;
+    if (!packageName) {
+      const installed = await this.client(scope).getInstalled(scope);
+      if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
+      const picked = await vscode.window.showQuickPick(installed.map(dependency => ({
+        label: dependency.name, description: dependency.version, dependency
+      })), { title: `Explain APM dependency — ${scope.label}`, placeHolder: 'Choose an installed dependency' });
+      if (!picked) return;
+      packageName = packageIdentity(picked.dependency, picked.dependency, false);
+    }
+    if (packageName.startsWith('-') || /[\s\0]/.test(packageName)) throw new Error('APM returned an invalid dependency identity.');
+    const result = await this.executeInspection(scope, `Why ${packageName} is installed`, [
+      'deps', 'why', ...(scope.kind === 'global' ? ['--global'] : []), packageName, '--json'
+    ]);
+    if (!result) return;
+    if (result.exitCode !== 0) throw new Error(`Dependency explanation failed: ${redact(result.stderr || result.stdout)}`);
+    let formatted: string;
+    try { formatted = JSON.stringify(JSON.parse(result.stdout), null, 2); }
+    catch { throw new Error('APM returned an invalid dependency explanation. Review APM Output.'); }
+    await this.showTextResult(`Why ${packageName} is installed`, formatted);
+  }
+  async findDependencyFile(target?: unknown) {
+    this.requireTrust();
+    let uri = target instanceof vscode.Uri ? target : vscode.window.activeTextEditor?.document.uri;
+    if (!uri) {
+      const scope = await this.workflowScope(undefined, undefined, true);
+      if (!scope) return;
+      const selected = await vscode.window.showOpenDialog({
+        title: 'Find the APM package that deployed a file',
+        defaultUri: vscode.Uri.file(scope.path),
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false
+      });
+      uri = selected?.[0];
+    }
+    if (!uri) return;
+    if (uri.scheme !== 'file') throw new Error('Select a file from a filesystem workspace.');
+    const scope = await this.workflowScope(uri, undefined, true);
+    if (!scope) return;
+    const path = relative(scope.path, uri.fsPath);
+    if (!path || path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+      throw new Error('Select a file inside the APM project folder.');
+    }
+    const metadata = await vscode.workspace.fs.stat(uri);
+    if (metadata.type !== vscode.FileType.File) throw new Error('Select a file, not a folder.');
+    const result = await this.client(scope).execute(['find', path, '--path', '--source']);
+    if (result.exitCode !== 0) throw new Error(`APM could not trace this file: ${redact(result.stderr || result.stdout)}`);
+    await this.showTextResult(`APM file ownership: ${path}`, result.stdout);
   }
   private async showTextResult(title: string, content: string) {
     const uri = vscode.Uri.from({ scheme: 'apm-result', path: `/${title.replace(/[^a-zA-Z0-9._-]/g, '-')}.txt`, query: String(++this.resultId) });
@@ -654,6 +1072,37 @@ class ApmExtension implements vscode.Disposable {
         if (choice) void this.openPackageDetails(context.item ?? item, scope).catch(error => this.report(error));
       });
     }
+  }
+  async installMcpServer() {
+    const scope = await this.installScope();
+    if (!scope) return;
+    const name = await vscode.window.showInputBox({
+      title: `Install MCP server — ${scope.label}`,
+      prompt: 'Enter the exact MCP registry name',
+      validateInput: value => {
+        const trimmed = value.trim();
+        return !trimmed || trimmed.startsWith('-') || /[\s\0]/.test(trimmed) || containsUrlCredentials(trimmed)
+          ? 'Enter a registry name without whitespace, leading flags, NUL, or URL credentials.'
+          : undefined;
+      }
+    });
+    if (name === undefined) return;
+    const serverName = name.trim();
+    const context: PanelContext = { mode: 'native', scope, extra: {} };
+    this.nativeOperations.add(context);
+    try {
+      await this.runCommand({
+        type: 'command',
+        id: 'install',
+        args: {},
+        options: { '--mcp': serverName }
+      }, context);
+    } finally { this.nativeOperations.delete(context); }
+    if (!context.extra.result) return;
+    const title = `MCP server installation: ${serverName} — ${scope.label}`;
+    await this.showTextResult(title, context.extra.result);
+    if (context.extra.error) throw new Error(context.extra.error);
+    void vscode.window.showInformationMessage(`${serverName} installed in ${scope.label}. Review the result document for details.`);
   }
   private async installScope(preferred = this.scope()): Promise<Scope | undefined> {
     this.requireTrust();
@@ -777,7 +1226,7 @@ class ApmExtension implements vscode.Disposable {
     }
     this.setSearch(withToken(this.search, '@marketplace:', name));
   }
-  async chooseScope(kind: 'workspace' | 'global') {
+  async chooseScope(kind: 'workspace' | 'global' | '') {
     let target: Scope | undefined;
     if (kind === 'workspace') {
       const folders = this.state.scopes.filter(s => s.kind === 'workspace');
@@ -895,6 +1344,15 @@ class ApmExtension implements vscode.Disposable {
         if (scopeKey(scope) !== this.state.scopeKey) await this.selectScope(scopeKey(scope));
         this.setSearch('@dependencies');
         await vscode.commands.executeCommand('apm.browser.focus');
+        break;
+      }
+      case 'dependencyTree': await this.refreshDependencyTree(this.scope(context)); break;
+      case 'actions': await this.moreActions(); break;
+      case 'dependencyWhy': {
+        const scope = this.state.scopes.find(candidate => scopeKey(candidate) === message.scopeKey);
+        const item = scope && this.state.installed.find(candidate => candidate.id === message.id && inScope(candidate, scope));
+        if (!scope || !item) throw new Error('This installed dependency is no longer available. Refresh and retry.');
+        await this.explainDependency(packageIdentity(item, item, false), scope);
         break;
       }
       case 'chooseScope': await this.chooseAnyScope(); break;
@@ -1210,8 +1668,25 @@ class ApmExtension implements vscode.Disposable {
     const mutating = descriptor.mutates && !options['--dry-run'] && !options['--validate'] &&
       (descriptor.id !== 'audit' || options['--strip'] === true || typeof options['--output'] === 'string');
     if (mutating) {
+      const trustMutation = descriptor.command[0] === 'approve' || descriptor.command[0] === 'deny';
+      const trustDestination = options['--user'] === true ? 'your personal APM configuration' : `the shared apm.yml in ${scope.label}`;
+      const trustAction = descriptor.command[0] === 'approve' ? 'Approve executable primitives for' : 'Deny executable primitives for';
+      const lifecycleExecution = descriptor.id === 'lifecycle test' && options['--execute'] === true;
+      const lifecycleReplacement = descriptor.id === 'lifecycle init' && options['--force'] === true;
+      const lifecycleTrustChange = descriptor.id === 'lifecycle trust' || descriptor.id === 'lifecycle untrust';
       const confirmation = await vscode.window.showWarningMessage(
-        `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`, 'Run');
+        trustMutation
+          ? `${trustAction} ${message.args.packages} in ${trustDestination}? Host: ${this.hostLabel()}. This changes executable trust for the selected package. Only proceed for sources you trust.`
+          : lifecycleExecution
+            ? `Execute the "${message.args.event}" lifecycle scripts in ${scope.label}? Host: ${this.hostLabel()}. This runs project-defined commands and may change files or make network requests. Only proceed for projects you trust.`
+            : lifecycleReplacement
+              ? `Overwrite the existing lifecycle block in apm.yml in ${scope.label}? Host: ${this.hostLabel()}. This replaces the project's lifecycle definition. Only proceed for projects you trust.`
+              : lifecycleTrustChange
+                ? `${descriptor.id === 'lifecycle trust' ? 'Trust' : 'Revoke trust for'} lifecycle scripts from apm.yml in ${scope.label}? Host: ${this.hostLabel()}. ${descriptor.id === 'lifecycle trust' ? 'This allows' : 'This prevents'} APM from running these project-defined commands during future installs.`
+                : descriptor.id === 'lifecycle init'
+                  ? `Add a starter lifecycle block to apm.yml in ${scope.label}? Host: ${this.hostLabel()}. Edit and validate the scripts before trusting them.`
+              : `${descriptor.label} in ${scope.label}? Host: ${this.hostLabel()}. ${options['--force'] === true ? 'WARNING: force can overwrite authored files and bypass critical security findings. ' : ''}${descriptor.id === 'init' && inputLines ? `Name: ${inputLines[0]}\nVersion: ${inputLines[1] || 'APM default'}\nDescription: ${inputLines[2] || 'APM default'}\nAuthor: ${inputLines[3] || 'APM default'}\nTargets: ${String(options['--target'] ?? 'APM auto-detection')}` : 'APM may write manifests or deployed files. Preview compilation first to inspect planned changes.'}\nOnly proceed for projects you trust.`,
+        trustMutation ? 'Apply Trust Decision' : 'Run');
       if (!confirmation) return;
     }
     if (!inputLines && !requiresTerminal(descriptor, options) && descriptor.options.some(o => o.name === '--yes') && options['--yes'] === undefined && await client.supports(descriptor.command, ['--yes'])) {
@@ -1382,6 +1857,18 @@ export function activate(context: vscode.ExtensionContext) {
   for (const [command, callback] of [
     ...Object.keys(workflowCommands).filter(workflow => workflow !== 'previewInstall' && workflow !== 'policy').map(workflow => [`apm.${workflow}`, (uri?: unknown) => extension.workflow(workflow as Workflow, uri instanceof vscode.Uri ? uri : undefined)] as const),
     ['apm.targets', (uri?: unknown) => extension.showTargets(undefined, uri instanceof vscode.Uri ? uri : undefined)],
+    ['apm.dependencies.refresh', () => extension.refreshDependencyTree()],
+    ['apm.dependencies.why', (item?: unknown) => extension.explainDependency(item)],
+    ['apm.dependencies.find', (uri?: unknown) => extension.findDependencyFile(uri)],
+    ['apm.actions', () => extension.moreActions()],
+    ['apm.policy.review', () => extension.reviewExecutableTrust()],
+    ['apm.policy.explain', () => extension.workflow('policy')],
+    ['apm.policy.manage', () => extension.manageExecutableTrust()],
+    ['apm.marketplace.health', () => extension.marketplaceHealth()],
+    ['apm.mcp.discover', () => extension.discoverMcpServers()],
+    ['apm.mcp.install', () => extension.installMcpServer()],
+    ['apm.lifecycle', () => extension.lifecycleWorkflows()],
+    ['apm.reports.dependencies', () => extension.dependencyReports()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
@@ -1393,11 +1880,12 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.filter.installed', () => extension.toggleStatus('@installed')],
     ['apm.filter.updates', () => extension.toggleStatus('@updates')],
     ['apm.filter.dependencies', () => extension.toggleStatus('@dependencies')],
+    ['apm.filter.scope.all', () => extension.chooseScope('')],
     ['apm.filter.scope.workspace', () => extension.chooseScope('workspace')],
     ['apm.filter.scope.global', () => extension.chooseScope('global')],
     ['apm.filter.marketplace.all', () => extension.chooseMarketplace(true)],
     ['apm.filter.marketplace.choose', () => extension.chooseMarketplace()],
-    ...(['name', 'name-desc', 'marketplace', 'version', 'version-desc'] as const).map(order => [`apm.filter.sort.${order}`, () => extension.sortBy(order)] as const),
+    ...(['name', 'name-desc', 'marketplace'] as const).map(order => [`apm.filter.sort.${order}`, () => extension.sortBy(order)] as const),
     ['apm.output', () => extension.showOutput()]
   ] as const) {
     const handler = async (argument?: unknown) => {

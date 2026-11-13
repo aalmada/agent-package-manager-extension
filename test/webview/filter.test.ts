@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterPackages, compareVersions, filterTokens, withStatus, withToken } from '../../src/webview/filter';
+import { filterPackages, filterTokens, withStatus, withToken } from '../../src/webview/filter';
 import type { PackageItem } from '../../src/apm/types';
 const packages: PackageItem[] = [
   { id: 'b::sample', name: 'sample', marketplace: 'b', version: '1.9.0', installed: true, updateStatus: 'outdated', description: 'Code review' },
@@ -14,18 +14,14 @@ test('shared filters match text, marketplace tokens and confirmed updates', () =
   assert.equal(filterPackages(packages, { ...base, text: '@updates' }).length, 1);
   assert.equal(filterPackages(packages, { ...base, text: '@dependencies' }).length, 2);
   assert.deepEqual(filterPackages(packages, { ...base, text: 'review @dependencies @marketplace:b' }).map(p => p.id), ['b::sample']);
-  assert.deepEqual(filterPackages(packages, { ...base, text: '@marketplace:a @sort:version-desc' }).map(p => p.id), ['a::sample', 'a::other']);
+  assert.deepEqual(filterPackages(packages, { ...base, text: '@marketplace:a @sort:version-desc' }).map(p => p.id), ['a::other', 'a::sample']);
 });
-test('versions compare semantically, including prerelease precedence', () => {
-  assert.ok(compareVersions('1.10.0', '1.9.0') > 0);
-  assert.ok(compareVersions('1.0.0', '1.0.0-rc.1') > 0);
-  assert.ok(compareVersions('1.0.0-rc.10', '1.0.0-rc.2') > 0);
-  assert.ok(compareVersions('1.0.0-1', '1.0.0-beta') < 0);
-  assert.equal(compareVersions('v1.0.0+build', '1.0.0'), 0);
+test('unsupported sort tokens do not sort by version', () => {
+  assert.equal(filterTokens('@sort:version-desc').sort, 'name');
   assert.deepEqual(filterPackages(packages, base).filter(p => p.name === 'sample').map(p => p.id), ['a::sample', 'b::sample']);
 });
 test('filter token helpers back the native filter menu', () => {
-  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:version-desc'), { marketplace: 'my market', scope: '', sort: 'version-desc', installed: false, updates: true, dependencies: false });
+  assert.deepEqual(filterTokens('kanban @marketplace:"my market" @updates @sort:marketplace'), { marketplace: 'my market', scope: '', sort: 'marketplace', installed: false, updates: true, dependencies: false });
   assert.equal(filterTokens('@dependencies').dependencies, true);
   assert.equal(withToken('kanban @sort:version', '@sort:', 'name-desc'), 'kanban @sort:name-desc');
   assert.equal(withToken('kanban @marketplace:one', '@marketplace:', ''), 'kanban');
@@ -46,4 +42,5 @@ test('scope filters match installations without borrowing update status from the
   assert.equal(filterPackages([catalog], { ...base, text: '@updates @scope:workspace' }).length, 1);
   assert.equal(filterTokens('@scope:global').scope, 'global');
   assert.equal(withToken('@scope:global @updates', '@scope:', ''), '@updates');
+  assert.equal(filterTokens(withToken('@scope:global @updates', '@scope:', '')).scope, '');
 });

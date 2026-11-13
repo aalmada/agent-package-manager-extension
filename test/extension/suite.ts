@@ -93,7 +93,7 @@ async function steps() {
   await apm().update('allowRemoteImages', undefined, vscode.ConfigurationTarget.Global);
   assert.equal(apm().get('allowRemoteImages'), false);
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle', 'apm.reports.dependencies']) assert.ok(commands.includes(command), command);
   assert.ok(!commands.includes('apm.getStarted'));
   for (const command of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!commands.includes(command), command);
   assert.equal(apm().get('tasks.includeScripts'), false);
@@ -154,7 +154,9 @@ async function steps() {
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
   await unlink(manifestUri.fsPath);
   await unlink(instructionPath);
-  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name', 'apm.filter.sort.version-desc']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.refresh', 'apm.marketplaces', 'apm.settings', 'apm.install', 'apm.setup', 'apm.actions', 'apm.dependencies.refresh', 'apm.dependencies.why', 'apm.dependencies.find', 'apm.policy.review', 'apm.policy.explain', 'apm.policy.manage', 'apm.marketplace.health', 'apm.filter.installed', 'apm.filter.updates', 'apm.filter.scope.all', 'apm.filter.scope.workspace', 'apm.filter.scope.global', 'apm.filter.marketplace.all', 'apm.filter.marketplace.choose', 'apm.filter.sort.name']) assert.ok(commands.includes(command), command);
+  assert.ok(!commands.includes('apm.filter.sort.version'));
+  assert.ok(!commands.includes('apm.filter.sort.version-desc'));
 
   // Settings editor, not a custom page.
   await vscode.commands.executeCommand('apm.marketplaces');

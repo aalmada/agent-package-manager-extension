@@ -118,14 +118,15 @@ function renderBrowserContents() {
   container.replaceChildren();
   if (filterTokens(search).dependencies) {
     const summary = el('div', 'dependency-summary');
-    summary.append(el('h2', '', 'Dependencies'), el('p', 'muted', scopeSummary()),
+    summary.append(el('h2', '', 'Installed dependencies'), el('p', 'muted', scopeSummary()),
       el('p', 'muted', 'Global and current workspace dependencies. Use @scope:global or @scope:workspace to filter.'),
+      button('View dependency tree', () => send({ type: 'dependencyTree' }), 'secondary'),
       button('Back to packages', () => applySearch(withStatus(search, '')), 'secondary'));
     container.append(summary);
   }
   const tokens = filterTokens(search);
   const candidates: BrowserSection[] = tokens.dependencies
-    ? ['direct', 'transitive', ...(state.installed.some(item => item.direct === undefined) ? ['unclassified' as const] : [])]
+    ? ['installed']
     : tokens.installed ? ['installed'] : tokens.updates ? ['updates'] : ['catalog', 'installed', 'updates'];
   const sections = candidates.filter(section => !((section === 'catalog' || section === 'installed' || section === 'updates') && state.hiddenSections?.includes(section)));
   const lists = el('div', 'sections');
@@ -235,6 +236,21 @@ function sectionSash(before: { section: BrowserSection; node: HTMLElement }, aft
   return sash;
 }
 function renderList(section: BrowserSection) {
+  if (section === 'installed' && filterTokens(search).dependencies) {
+    const body = el('div', 'section-body dependency-groups');
+    body.setAttribute('role', 'region');
+    body.setAttribute('aria-label', 'Installed dependencies');
+    const groups: BrowserSection[] = ['direct', 'transitive', ...(state.installed.some(item => item.direct === undefined) ? ['unclassified' as const] : [])];
+    for (const group of groups) {
+      const items = filterPackages(sectionPackages(group, state), filters());
+      const sectionElement = el('section', 'dependency-group');
+      const groupBody = renderList(group);
+      groupBody.id = `section-body-${group}`;
+      sectionElement.append(el('h3', 'dependency-group-heading', `${sectionNames[group]} (${items.length})`), groupBody);
+      body.append(sectionElement);
+    }
+    return body;
+  }
   const name = sectionNames[section];
   const items = sectionPackages(section, state);
   const dependencies = ['direct', 'transitive', 'unclassified'].includes(section);
@@ -335,9 +351,11 @@ function renderDetails() {
     if (item.updateStatus === 'outdated') toolbar.append(packageAction('Update', 'update'), packageAction('Preview update', 'previewUpdate', 'secondary'));
     toolbar.append(packageAction('Uninstall', 'uninstall', 'secondary'), packageAction('Change version…', 'installWithOptions', 'secondary'));
     if (!global) toolbar.append(packageAction('Audit', 'audit', 'secondary'));
+    if (item.scope) toolbar.append(button('Explain dependency', () =>
+      send({ type: 'dependencyWhy', id: item.id, scopeKey: scopeKey(item.scope!) }), 'secondary'));
     const scope = state.scopes.find(scope => `${scope.kind}:${scope.path}` === state.scopeKey);
     const dependencies = button(scope?.kind === 'global' ? 'View global dependencies' : 'View workspace dependencies', () => send({ type: 'dependencies' }), 'secondary');
-    dependencies.title = 'Shows all dependencies in this scope. Package-specific relationships are not available.';
+    dependencies.title = 'Shows all installed dependencies in this scope.';
     toolbar.append(dependencies);
     toolbar.append(packageAction('Install in…', 'install', 'secondary'));
   } else toolbar.append(packageAction('Install', 'install'), packageAction('Install version…', 'installWithOptions', 'secondary'));
