@@ -1,11 +1,11 @@
 lockfile_version: '1'
-generated_at: '2026-11-10T10:27:55.676283+00:00'
+generated_at: '2026-11-13T10:03:41.409129+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: netfabric/intelligentium
   name: agent-authoring
   host: github.com
-  resolved_commit: 0ea29d4b05b717965b12bdcd572df5d10acfa9db
+  resolved_commit: e1812dc34395e6826ed5bb52dd241643f6460c01
   version: 0.15.1
   virtual_path: plugins/agent-authoring
   is_virtual: true
@@ -185,8 +185,8 @@ dependencies:
 - repo_url: netfabric/intelligentium
   name: vscode
   host: github.com
-  resolved_commit: 0ea29d4b05b717965b12bdcd572df5d10acfa9db
-  version: 0.1.0
+  resolved_commit: e1812dc34395e6826ed5bb52dd241643f6460c01
+  version: 0.1.1
   virtual_path: plugins/vscode
   is_virtual: true
   package_type: apm_package
@@ -200,21 +200,21 @@ dependencies:
   - .agents/skills/vscode-extension/references/ui-and-interaction.md
   - .agents/skills/vscode-extension/references/webviews-and-security.md
   deployed_file_hashes:
-    .agents/skills/vscode-extension/SKILL.md: sha256:3e9e66e3b81c103a95fde58ac39a89bfa299834431b32748eb1532e854e46a24
+    .agents/skills/vscode-extension/SKILL.md: sha256:8ec77434737cc2753991618d20f1b26f2e43345ba0a19272c0cd834973caf40d
     .agents/skills/vscode-extension/references/authentication-and-accounts.md: sha256:e2508e8f08d8c485b790ba0bb528f38e310bb6056e790e5eab212421042b2c4b
     .agents/skills/vscode-extension/references/progress-and-cancellation.md: sha256:99763bcb726da606c5e085748b5a2adf125987b5ebcf26fef3137a42c1253165
     .agents/skills/vscode-extension/references/project-analysis.md: sha256:89ef1b143579caf50b5c23058f0f0da1505d3b82bfff4902f20fb572b4a6a8b5
     .agents/skills/vscode-extension/references/testing-ci-publishing.md: sha256:82c6835dff8d9b8f5f72bd36754de3e33c131aac9caab0f6db2c88c06b6071b2
     .agents/skills/vscode-extension/references/ui-and-interaction.md: sha256:95fcffb63c090943b225528299a872bbd92f8512d88fb84378750fbdf6f51c60
     .agents/skills/vscode-extension/references/webviews-and-security.md: sha256:d24f820d20a6c66b0fdc381e0ae9d3f039d0bfe989c8eeaab4057781c331fcbf
-  content_hash: sha256:212059b76bec95eb8729412f3f75566c29c5ebaa1e0b7a34f5f85ecccb1832ee
+  content_hash: sha256:d233cd1ab6df1dd2d166218d532f01744867b1464dbf15ed2c8366a04db70e81
   discovered_via: intelligentium
   marketplace_plugin_name: vscode
   declared_license: MIT
 - repo_url: netfabric/intelligentium
   name: codebase-memory
   host: github.com
-  resolved_commit: ac49c7fbbe63b717521be6315e4564c956db04b1
+  resolved_commit: e1812dc34395e6826ed5bb52dd241643f6460c01
   version: 0.3.0
   virtual_path: plugins/codebase-memory
   is_virtual: true
@@ -1179,7 +1179,7 @@ deployments:
   owners:
   - netfabric/intelligentium/plugins/vscode
   active_owner: netfabric/intelligentium/plugins/vscode
-  content_hash: sha256:3e9e66e3b81c103a95fde58ac39a89bfa299834431b32748eb1532e854e46a24
+  content_hash: sha256:8ec77434737cc2753991618d20f1b26f2e43345ba0a19272c0cd834973caf40d
 - kind: project-relative
   target: copilot
   value: .agents/skills/vscode-extension/references/authentication-and-accounts.md
