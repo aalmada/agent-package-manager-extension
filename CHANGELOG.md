@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- List the extension in the Marketplace AI category.
+
 ## 0.4.3
 
 - Use the same compact scope and status badges in Catalog, Installed, Updates, and package details, without repeating the workspace name.
