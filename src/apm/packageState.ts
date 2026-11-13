@@ -21,13 +21,19 @@ export function samePackage(a: PackageItem, b: PackageItem): boolean {
     (!!a.marketplace && a.marketplace === b.marketplace && a.name === b.name);
 }
 
-/** Display name of a package's marketplace, including the catalog marketplace of a matching direct installation. */
+/** Display name of a package's marketplace, preferring its current registered name. */
 export function marketplaceLabel(item: PackageItem): string {
-  return item.marketplace || item.catalogMarketplace || '';
+  return item.catalogMarketplace || item.marketplace || '';
 }
 
-/** Adds catalog descriptions and display-only marketplace names to installed packages without changing their CLI identity. */
-export function withCatalogInfo(installed: readonly PackageItem[], catalog: readonly PackageItem[]): PackageItem[] {
+/**
+ * Adds catalog descriptions and display-only marketplace names to installed packages without changing their CLI identity.
+ * With `registered`, a recorded marketplace name shows its registered spelling; direct installations and names that are
+ * no longer registered show the marketplace of their unique catalog source. Without it, only direct installations change.
+ */
+export function withCatalogInfo(installed: readonly PackageItem[], catalog: readonly PackageItem[], registered?: readonly { name: string }[]): PackageItem[] {
+  // Lock files keep the name as typed in `plugin@marketplace`; APM resolves it case-insensitively.
+  const names = registered && new Map(registered.map(marketplace => [marketplace.name.toLowerCase(), marketplace.name]));
   return installed.map(source => {
     const item: PackageItem = { ...source };
     delete item.catalogMarketplace;
@@ -35,8 +41,11 @@ export function withCatalogInfo(installed: readonly PackageItem[], catalog: read
     const description = item.description || matches.find(entry => entry.description)?.description;
     if (description) item.description = description;
     const marketplaces = new Set(matches.map(entry => entry.marketplace));
-    // An ambiguous source keeps its repository label rather than naming one of several marketplaces.
-    if (!item.marketplace && marketplaces.size === 1) item.catalogMarketplace = [...marketplaces][0];
+    const current = item.marketplace ? names?.get(item.marketplace.toLowerCase()) : undefined;
+    // An ambiguous source keeps its recorded or repository label rather than naming one of several marketplaces.
+    if (current) {
+      if (current !== item.marketplace) item.catalogMarketplace = current;
+    } else if ((!item.marketplace || names) && marketplaces.size === 1) item.catalogMarketplace = [...marketplaces][0];
     return item;
   });
 }

@@ -54,7 +54,9 @@ Package lists and details pages use the same scope/status badges. An update or u
 
 A package installed in both scopes has two badges in **Catalog**, and a separate entry for each scope in **Installed** and **Updates**. When a scope filter is active, **Catalog** shows only the badge for that scope. Update status is conveyed by text, not an extra border.
 
-Direct Git installations also appear as installed in **Catalog** when their repository and package subdirectory match a catalog entry. Matching does not rely on the package name alone. If exactly one marketplace lists that source, **Installed**, **Updates**, and package details show that marketplace name instead of the repository, and marketplace search, filter, and sort include the package. Updates and other operations still use the source the package was installed from. A source listed by several marketplaces keeps its repository label.
+Direct Git installations also appear as installed in **Catalog** when their repository and package subdirectory match a catalog entry. Matching does not rely on the package name alone. If exactly one marketplace lists that source, **Installed**, **Updates**, and package details show that marketplace name instead of the repository, and marketplace search, filter, and sort include the package. A source listed by several marketplaces keeps its repository label.
+
+Marketplace labels always use the alias currently registered with APM, including a custom `name=` alias. If a package was installed through a marketplace alias that has since been renamed, it shows the new alias when exactly one marketplace lists its source. A different-case spelling of the alias also shows as the registered name. Updates and other operations still use the source or marketplace name recorded when the package was installed.
 
 On package details pages, select a scope badge to view that installation. The active scope is bold, and hovering a badge shows its installed version. **Workspace** refers to the current workspace; badges omit the folder name.
 

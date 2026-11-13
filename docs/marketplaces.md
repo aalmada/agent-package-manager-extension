@@ -27,7 +27,7 @@ The setting is machine-scoped, so it lives in your user settings or, for Remote 
 | Local path or `file:///` URI | `/path/to/marketplace`, `file:///path/to/repo` |
 
 - Append `#ref` to a Git source, including a `file:///` URI, to pin a tag, branch, or commit.
-- Prefix an entry with `name=` to choose its alias, for example `team=owner/repo`. Otherwise the alias is derived from the source so that it does not replace another registration.
+- Prefix an entry with `name=` to choose its alias, for example `team=owner/repo`. Otherwise the alias is derived from the source so that it does not replace another registration. The package browser shows this registered alias everywhere, as described in [badges](package-browser.md#badges).
 - Relative paths require a single local workspace folder and are converted to absolute file URIs.
 - Do not put credentials in URLs; SSH usernames are allowed. Use [private repository authentication](private-repositories.md) instead. The extension does not copy an existing APM registration that contains URL credentials into the setting; remove or replace it in APM first.
 

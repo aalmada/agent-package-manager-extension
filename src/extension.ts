@@ -430,7 +430,7 @@ class ApmExtension implements vscode.Disposable {
       this.state.installed = installed.flatMap<PackageItem>(({ scope: target, result }) => {
         if (result.status === 'fulfilled') {
           this.setDetailRefreshError(target);
-          return applyCatalogVersions(withCatalogInfo(result.value, this.state.catalog), this.state.catalog).map(item => ({ ...item, scope: target }));
+          return applyCatalogVersions(withCatalogInfo(result.value, this.state.catalog, registered), this.state.catalog).map(item => ({ ...item, scope: target }));
         }
         const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
         this.state.errors.push(error);
@@ -499,7 +499,7 @@ class ApmExtension implements vscode.Disposable {
       const previous = this.detailContexts(scope).flatMap(entry => entry.item ? [entry.item] : []);
       const client = this.client(scope, signal, pass);
       try {
-        let installed: PackageItem[] = applyCatalogVersions(withCatalogInfo(await client.getInstalled(scope), this.state.catalog), this.state.catalog).map(item => ({ ...item, scope }));
+        let installed: PackageItem[] = applyCatalogVersions(withCatalogInfo(await client.getInstalled(scope), this.state.catalog, this.state.marketplaces), this.state.catalog).map(item => ({ ...item, scope }));
         if (epoch !== this.epoch || signal.aborted) return;
         this.setDetailRefreshError(scope);
         this.updateDetailItems(scope, installed);

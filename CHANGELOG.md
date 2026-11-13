@@ -4,7 +4,7 @@
 
 - Use the same compact scope and status badges in Catalog, Installed, Updates, and package details, without repeating the workspace name.
 - Match packages installed directly from a Git repository to their catalog entries, so Catalog shows their installation badges and every list opens the same package page.
-- Show the catalog marketplace name for those packages everywhere, and include it in marketplace search, filter, and sort.
+- Show the marketplace alias currently registered with APM everywhere, including custom `name=` aliases, aliases renamed after installation, and packages installed directly from Git. Marketplace search, filter, and sort use the same name.
 - Render all badges with one borderless style.
 
 ## 0.4.2

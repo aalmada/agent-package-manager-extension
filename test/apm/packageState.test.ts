@@ -48,6 +48,23 @@ test('direct installations show the marketplace of a unique catalog source witho
   assert.equal(marketplaceLabel(installed), 'market');
 });
 
+test('installed packages show the current registered marketplace name without changing their CLI identity', () => {
+  // `docker=docker/skills` registers an alias that differs from the repository name.
+  const entry: PackageItem = { ...catalog, id: 'docker::sample', marketplace: 'docker', sourceIdentity: 'sample-source' };
+  const registered = [{ name: 'docker' }, { name: 'other' }];
+  const recorded = (marketplace: string): PackageItem => ({ ...installed, id: `${marketplace}::sample`, marketplace, sourceIdentity: entry.sourceIdentity });
+  const [renamed] = withCatalogInfo([recorded('old-alias')], [entry], registered);
+  assert.equal(marketplaceLabel(renamed), 'docker', 'A lock name that is no longer registered shows the current alias');
+  assert.equal(renamed.marketplace, 'old-alias');
+  assert.equal(renamed.id, 'old-alias::sample');
+  assert.equal(marketplaceLabel(withCatalogInfo([recorded('Docker')], [], registered)[0]), 'docker',
+    'A name typed with different case shows its registered spelling');
+  assert.equal(marketplaceLabel(withCatalogInfo([recorded('other')], [entry], registered)[0]), 'other',
+    'A registered name is kept when its own catalog is unavailable');
+  assert.equal(marketplaceLabel(withCatalogInfo([recorded('old-alias')], [entry])[0]), 'old-alias',
+    'Without the registry, recorded names are kept');
+});
+
 test('activity badge counts package updates plus one CLI upgrade and clears at zero', () => {
   const state = { trusted: true, version: '0.35.0', installed: [installed] };
   assert.deepEqual(getUpdateBadge(state), { value: 1, tooltip: '1 package update available' });
