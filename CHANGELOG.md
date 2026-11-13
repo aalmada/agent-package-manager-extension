@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Fix discovery of installed private packages and exclude synthetic local entries from repository account selection.
+- Reduce refresh and authentication overhead, show catalog update results sooner, and match APM update results case-insensitively.
+- Simplify the Marketplace overview and link to the detailed user guide and introductory post.
+
 ## 0.4.0
 
 - Add dependency tree and dependency explanation workflows, executable trust and policy management, and marketplace health checks.

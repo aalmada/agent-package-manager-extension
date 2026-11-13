@@ -2,7 +2,7 @@
   "name": "apm-package-manager",
   "displayName": "APM - Agent Package Manager",
   "description": "Visual package, marketplace, and workflow management for Microsoft's Agent Package Manager.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "antao-almada",
   "license": "MIT",
   "repository": {
@@ -64,28 +64,94 @@
       ]
     },
     "commands": [
-      { "command": "apm.initialize", "title": "APM: Initialize Project" },
-      { "command": "apm.compile", "title": "APM: Compile" },
-      { "command": "apm.previewCompile", "title": "APM: Preview Compilation" },
-      { "command": "apm.validate", "title": "APM: Validate Manifest and Primitives" },
-      { "command": "apm.auditWorkspace", "title": "APM: Audit Workspace" },
-      { "command": "apm.doctor", "title": "APM: Run Doctor" },
-      { "command": "apm.signIn", "title": "APM: Sign in to GitHub" },
-      { "command": "apm.manageAccounts", "title": "APM: Manage Repository Accounts" },
-      { "command": "apm.targets", "title": "APM: Explain Deployment Targets" },
-      { "command": "apm.actions", "title": "APM: More APM Actions" },
-      { "command": "apm.dependencies.refresh", "title": "APM: View Dependency Tree" },
-      { "command": "apm.dependencies.why", "title": "APM: Explain Dependency" },
-      { "command": "apm.dependencies.find", "title": "APM: Find File Owner" },
-      { "command": "apm.policy.review", "title": "APM: Review Executable Trust" },
-      { "command": "apm.policy.explain", "title": "APM: Explain Package Policy" },
-      { "command": "apm.policy.manage", "title": "APM: Manage Executable Trust" },
-      { "command": "apm.marketplace.health", "title": "APM: Check Marketplace Health" },
-      { "command": "apm.mcp.discover", "title": "APM: Discover MCP Servers" },
-      { "command": "apm.mcp.install", "title": "APM: Install MCP Server" },
-      { "command": "apm.lifecycle", "title": "APM: Manage Lifecycle Workflows" },
-      { "command": "apm.reports.dependencies", "title": "APM: Dependency Reports" },
-      { "command": "apm.runScript", "title": "APM: Run Script" },
+      {
+        "command": "apm.initialize",
+        "title": "APM: Initialize Project"
+      },
+      {
+        "command": "apm.compile",
+        "title": "APM: Compile"
+      },
+      {
+        "command": "apm.previewCompile",
+        "title": "APM: Preview Compilation"
+      },
+      {
+        "command": "apm.validate",
+        "title": "APM: Validate Manifest and Primitives"
+      },
+      {
+        "command": "apm.auditWorkspace",
+        "title": "APM: Audit Workspace"
+      },
+      {
+        "command": "apm.doctor",
+        "title": "APM: Run Doctor"
+      },
+      {
+        "command": "apm.signIn",
+        "title": "APM: Sign in to GitHub"
+      },
+      {
+        "command": "apm.manageAccounts",
+        "title": "APM: Manage Repository Accounts"
+      },
+      {
+        "command": "apm.targets",
+        "title": "APM: Explain Deployment Targets"
+      },
+      {
+        "command": "apm.actions",
+        "title": "APM: More APM Actions"
+      },
+      {
+        "command": "apm.dependencies.refresh",
+        "title": "APM: View Dependency Tree"
+      },
+      {
+        "command": "apm.dependencies.why",
+        "title": "APM: Explain Dependency"
+      },
+      {
+        "command": "apm.dependencies.find",
+        "title": "APM: Find File Owner"
+      },
+      {
+        "command": "apm.policy.review",
+        "title": "APM: Review Executable Trust"
+      },
+      {
+        "command": "apm.policy.explain",
+        "title": "APM: Explain Package Policy"
+      },
+      {
+        "command": "apm.policy.manage",
+        "title": "APM: Manage Executable Trust"
+      },
+      {
+        "command": "apm.marketplace.health",
+        "title": "APM: Check Marketplace Health"
+      },
+      {
+        "command": "apm.mcp.discover",
+        "title": "APM: Discover MCP Servers"
+      },
+      {
+        "command": "apm.mcp.install",
+        "title": "APM: Install MCP Server"
+      },
+      {
+        "command": "apm.lifecycle",
+        "title": "APM: Manage Lifecycle Workflows"
+      },
+      {
+        "command": "apm.reports.dependencies",
+        "title": "APM: Dependency Reports"
+      },
+      {
+        "command": "apm.runScript",
+        "title": "APM: Run Script"
+      },
       {
         "command": "apm.refresh",
         "title": "APM: Refresh",
@@ -100,12 +166,36 @@
         "title": "Settings",
         "category": "APM"
       },
-      { "command": "apm.views.catalog", "title": "Catalog", "category": "APM Views" },
-      { "command": "apm.views.catalog.checked", "title": "✓ Catalog", "category": "APM Views" },
-      { "command": "apm.views.installed", "title": "Installed", "category": "APM Views" },
-      { "command": "apm.views.installed.checked", "title": "✓ Installed", "category": "APM Views" },
-      { "command": "apm.views.updates", "title": "Updates", "category": "APM Views" },
-      { "command": "apm.views.updates.checked", "title": "✓ Updates", "category": "APM Views" },
+      {
+        "command": "apm.views.catalog",
+        "title": "Catalog",
+        "category": "APM Views"
+      },
+      {
+        "command": "apm.views.catalog.checked",
+        "title": "✓ Catalog",
+        "category": "APM Views"
+      },
+      {
+        "command": "apm.views.installed",
+        "title": "Installed",
+        "category": "APM Views"
+      },
+      {
+        "command": "apm.views.installed.checked",
+        "title": "✓ Installed",
+        "category": "APM Views"
+      },
+      {
+        "command": "apm.views.updates",
+        "title": "Updates",
+        "category": "APM Views"
+      },
+      {
+        "command": "apm.views.updates.checked",
+        "title": "✓ Updates",
+        "category": "APM Views"
+      },
       {
         "command": "apm.install",
         "title": "APM: Install Package",
@@ -119,42 +209,158 @@
         "command": "apm.output",
         "title": "APM: Show Output"
       },
-      { "command": "apm.filter.installed", "title": "Installed", "category": "APM Filter" },
-      { "command": "apm.filter.installed.checked", "title": "✓ Installed", "category": "APM Filter" },
-      { "command": "apm.filter.updates", "title": "Updates", "category": "APM Filter" },
-      { "command": "apm.filter.updates.checked", "title": "✓ Updates", "category": "APM Filter" },
-      { "command": "apm.filter.dependencies", "title": "Dependencies", "category": "APM Filter" },
-      { "command": "apm.filter.dependencies.checked", "title": "✓ Dependencies", "category": "APM Filter" },
-      { "command": "apm.filter.scope.all", "title": "All Scopes", "category": "APM Filter" },
-      { "command": "apm.filter.scope.all.checked", "title": "✓ All Scopes", "category": "APM Filter" },
-      { "command": "apm.filter.scope.workspace", "title": "Workspace", "category": "APM Filter" },
-      { "command": "apm.filter.scope.workspace.checked", "title": "✓ Workspace", "category": "APM Filter" },
-      { "command": "apm.filter.scope.global", "title": "Global (user)", "category": "APM Filter" },
-      { "command": "apm.filter.scope.global.checked", "title": "✓ Global (user)", "category": "APM Filter" },
-      { "command": "apm.filter.marketplace.all", "title": "All Marketplaces", "category": "APM Filter" },
-      { "command": "apm.filter.marketplace.all.checked", "title": "✓ All Marketplaces", "category": "APM Filter" },
-      { "command": "apm.filter.marketplace.choose", "title": "Choose Marketplace...", "category": "APM Filter" },
-      { "command": "apm.filter.marketplace.choose.checked", "title": "✓ Choose Marketplace...", "category": "APM Filter" },
-      { "command": "apm.filter.sort.name", "title": "Name (A-Z)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.name.checked", "title": "✓ Name (A-Z)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.name-desc", "title": "Name (Z-A)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.name-desc.checked", "title": "✓ Name (Z-A)", "category": "APM Filter" },
-      { "command": "apm.filter.sort.marketplace", "title": "Marketplace", "category": "APM Filter" },
-      { "command": "apm.filter.sort.marketplace.checked", "title": "✓ Marketplace", "category": "APM Filter" }
+      {
+        "command": "apm.filter.installed",
+        "title": "Installed",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.installed.checked",
+        "title": "✓ Installed",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.updates",
+        "title": "Updates",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.updates.checked",
+        "title": "✓ Updates",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.dependencies",
+        "title": "Dependencies",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.dependencies.checked",
+        "title": "✓ Dependencies",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.all",
+        "title": "All Scopes",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.all.checked",
+        "title": "✓ All Scopes",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.workspace",
+        "title": "Workspace",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.workspace.checked",
+        "title": "✓ Workspace",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.global",
+        "title": "Global (user)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.scope.global.checked",
+        "title": "✓ Global (user)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.marketplace.all",
+        "title": "All Marketplaces",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.marketplace.all.checked",
+        "title": "✓ All Marketplaces",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.marketplace.choose",
+        "title": "Choose Marketplace...",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.marketplace.choose.checked",
+        "title": "✓ Choose Marketplace...",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.name",
+        "title": "Name (A-Z)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.name.checked",
+        "title": "✓ Name (A-Z)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.name-desc",
+        "title": "Name (Z-A)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.name-desc.checked",
+        "title": "✓ Name (Z-A)",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.marketplace",
+        "title": "Marketplace",
+        "category": "APM Filter"
+      },
+      {
+        "command": "apm.filter.sort.marketplace.checked",
+        "title": "✓ Marketplace",
+        "category": "APM Filter"
+      }
     ],
     "menus": {
       "editor/title": [
-        { "command": "apm.validate", "when": "resourceFilename == apm.yml && isWorkspaceTrusted", "group": "apm@1" },
-        { "command": "apm.previewCompile", "when": "resourceFilename == apm.yml && isWorkspaceTrusted", "group": "apm@2" }
+        {
+          "command": "apm.validate",
+          "when": "resourceFilename == apm.yml && isWorkspaceTrusted",
+          "group": "apm@1"
+        },
+        {
+          "command": "apm.previewCompile",
+          "when": "resourceFilename == apm.yml && isWorkspaceTrusted",
+          "group": "apm@2"
+        }
       ],
       "explorer/context": [
-        { "command": "apm.initialize", "when": "explorerResourceIsFolder && isWorkspaceTrusted", "group": "apm@1" },
-        { "command": "apm.validate", "when": "resourceFilename == apm.yml && isWorkspaceTrusted", "group": "apm@2" },
-        { "command": "apm.auditWorkspace", "when": "resourceFilename == apm.yml && isWorkspaceTrusted", "group": "apm@3" },
-        { "command": "apm.dependencies.find", "when": "resourceScheme == file && !explorerResourceIsFolder && isWorkspaceTrusted", "group": "apm@4" }
+        {
+          "command": "apm.initialize",
+          "when": "explorerResourceIsFolder && isWorkspaceTrusted",
+          "group": "apm@1"
+        },
+        {
+          "command": "apm.validate",
+          "when": "resourceFilename == apm.yml && isWorkspaceTrusted",
+          "group": "apm@2"
+        },
+        {
+          "command": "apm.auditWorkspace",
+          "when": "resourceFilename == apm.yml && isWorkspaceTrusted",
+          "group": "apm@3"
+        },
+        {
+          "command": "apm.dependencies.find",
+          "when": "resourceScheme == file && !explorerResourceIsFolder && isWorkspaceTrusted",
+          "group": "apm@4"
+        }
       ],
       "editor/context": [
-        { "command": "apm.dependencies.find", "when": "resourceScheme == file && isWorkspaceTrusted", "group": "navigation@9" }
+        {
+          "command": "apm.dependencies.find",
+          "when": "resourceScheme == file && isWorkspaceTrusted",
+          "group": "navigation@9"
+        }
       ],
       "view/title": [
         {
@@ -179,20 +385,68 @@
         }
       ],
       "apm.views": [
-        { "command": "apm.views.catalog", "group": "1@1", "when": "!(apm.views.catalog)" },
-        { "command": "apm.views.catalog.checked", "group": "1@1", "when": "(apm.views.catalog)" },
-        { "command": "apm.views.installed", "group": "1@2", "when": "!(apm.views.installed)" },
-        { "command": "apm.views.installed.checked", "group": "1@2", "when": "(apm.views.installed)" },
-        { "command": "apm.views.updates", "group": "1@3", "when": "!(apm.views.updates)" },
-        { "command": "apm.views.updates.checked", "group": "1@3", "when": "(apm.views.updates)" }
+        {
+          "command": "apm.views.catalog",
+          "group": "1@1",
+          "when": "!(apm.views.catalog)"
+        },
+        {
+          "command": "apm.views.catalog.checked",
+          "group": "1@1",
+          "when": "(apm.views.catalog)"
+        },
+        {
+          "command": "apm.views.installed",
+          "group": "1@2",
+          "when": "!(apm.views.installed)"
+        },
+        {
+          "command": "apm.views.installed.checked",
+          "group": "1@2",
+          "when": "(apm.views.installed)"
+        },
+        {
+          "command": "apm.views.updates",
+          "group": "1@3",
+          "when": "!(apm.views.updates)"
+        },
+        {
+          "command": "apm.views.updates.checked",
+          "group": "1@3",
+          "when": "(apm.views.updates)"
+        }
       ],
       "webview/context": [
-        { "command": "apm.filter.installed", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.installed)", "group": "1_status@1" },
-        { "command": "apm.filter.installed.checked", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.installed)", "group": "1_status@1" },
-        { "command": "apm.filter.updates", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.updates)", "group": "1_status@2" },
-        { "command": "apm.filter.updates.checked", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.updates)", "group": "1_status@2" },
-        { "command": "apm.filter.dependencies", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.dependencies)", "group": "1_status@3" },
-        { "command": "apm.filter.dependencies.checked", "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.dependencies)", "group": "1_status@3" },
+        {
+          "command": "apm.filter.installed",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.installed)",
+          "group": "1_status@1"
+        },
+        {
+          "command": "apm.filter.installed.checked",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.installed)",
+          "group": "1_status@1"
+        },
+        {
+          "command": "apm.filter.updates",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.updates)",
+          "group": "1_status@2"
+        },
+        {
+          "command": "apm.filter.updates.checked",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.updates)",
+          "group": "1_status@2"
+        },
+        {
+          "command": "apm.filter.dependencies",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.dependencies)",
+          "group": "1_status@3"
+        },
+        {
+          "command": "apm.filter.dependencies.checked",
+          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.dependencies)",
+          "group": "1_status@3"
+        },
         {
           "submenu": "apm.filter.scope",
           "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
@@ -210,111 +464,292 @@
         }
       ],
       "apm.filter.scope": [
-        { "command": "apm.filter.scope.all", "group": "1@1", "when": "!(apm.filter.scopeKind == '')" },
-        { "command": "apm.filter.scope.all.checked", "group": "1@1", "when": "(apm.filter.scopeKind == '')" },
-        { "command": "apm.filter.scope.workspace", "group": "1@2", "when": "!(apm.filter.scopeKind == 'workspace')" },
-        { "command": "apm.filter.scope.workspace.checked", "group": "1@2", "when": "(apm.filter.scopeKind == 'workspace')" },
-        { "command": "apm.filter.scope.global", "group": "1@3", "when": "!(apm.filter.scopeKind == 'global')" },
-        { "command": "apm.filter.scope.global.checked", "group": "1@3", "when": "(apm.filter.scopeKind == 'global')" }
+        {
+          "command": "apm.filter.scope.all",
+          "group": "1@1",
+          "when": "!(apm.filter.scopeKind == '')"
+        },
+        {
+          "command": "apm.filter.scope.all.checked",
+          "group": "1@1",
+          "when": "(apm.filter.scopeKind == '')"
+        },
+        {
+          "command": "apm.filter.scope.workspace",
+          "group": "1@2",
+          "when": "!(apm.filter.scopeKind == 'workspace')"
+        },
+        {
+          "command": "apm.filter.scope.workspace.checked",
+          "group": "1@2",
+          "when": "(apm.filter.scopeKind == 'workspace')"
+        },
+        {
+          "command": "apm.filter.scope.global",
+          "group": "1@3",
+          "when": "!(apm.filter.scopeKind == 'global')"
+        },
+        {
+          "command": "apm.filter.scope.global.checked",
+          "group": "1@3",
+          "when": "(apm.filter.scopeKind == 'global')"
+        }
       ],
       "apm.filter.marketplace": [
-        { "command": "apm.filter.marketplace.all", "group": "1@1", "when": "!(apm.filter.marketplace == '')" },
-        { "command": "apm.filter.marketplace.all.checked", "group": "1@1", "when": "(apm.filter.marketplace == '')" },
-        { "command": "apm.filter.marketplace.choose", "group": "1@2", "when": "!(apm.filter.marketplace != '')" },
-        { "command": "apm.filter.marketplace.choose.checked", "group": "1@2", "when": "(apm.filter.marketplace != '')" }
+        {
+          "command": "apm.filter.marketplace.all",
+          "group": "1@1",
+          "when": "!(apm.filter.marketplace == '')"
+        },
+        {
+          "command": "apm.filter.marketplace.all.checked",
+          "group": "1@1",
+          "when": "(apm.filter.marketplace == '')"
+        },
+        {
+          "command": "apm.filter.marketplace.choose",
+          "group": "1@2",
+          "when": "!(apm.filter.marketplace != '')"
+        },
+        {
+          "command": "apm.filter.marketplace.choose.checked",
+          "group": "1@2",
+          "when": "(apm.filter.marketplace != '')"
+        }
       ],
       "apm.filter.sort": [
-        { "command": "apm.filter.sort.name", "group": "1@1", "when": "!(apm.filter.sort == 'name')" },
-        { "command": "apm.filter.sort.name.checked", "group": "1@1", "when": "(apm.filter.sort == 'name')" },
-        { "command": "apm.filter.sort.name-desc", "group": "1@2", "when": "!(apm.filter.sort == 'name-desc')" },
-        { "command": "apm.filter.sort.name-desc.checked", "group": "1@2", "when": "(apm.filter.sort == 'name-desc')" },
-        { "command": "apm.filter.sort.marketplace", "group": "1@3", "when": "!(apm.filter.sort == 'marketplace')" },
-        { "command": "apm.filter.sort.marketplace.checked", "group": "1@3", "when": "(apm.filter.sort == 'marketplace')" }
+        {
+          "command": "apm.filter.sort.name",
+          "group": "1@1",
+          "when": "!(apm.filter.sort == 'name')"
+        },
+        {
+          "command": "apm.filter.sort.name.checked",
+          "group": "1@1",
+          "when": "(apm.filter.sort == 'name')"
+        },
+        {
+          "command": "apm.filter.sort.name-desc",
+          "group": "1@2",
+          "when": "!(apm.filter.sort == 'name-desc')"
+        },
+        {
+          "command": "apm.filter.sort.name-desc.checked",
+          "group": "1@2",
+          "when": "(apm.filter.sort == 'name-desc')"
+        },
+        {
+          "command": "apm.filter.sort.marketplace",
+          "group": "1@3",
+          "when": "!(apm.filter.sort == 'marketplace')"
+        },
+        {
+          "command": "apm.filter.sort.marketplace.checked",
+          "group": "1@3",
+          "when": "(apm.filter.sort == 'marketplace')"
+        }
       ],
       "commandPalette": [
-        { "command": "apm.views.catalog", "when": "false" },
-        { "command": "apm.views.catalog.checked", "when": "false" },
-        { "command": "apm.views.installed", "when": "false" },
-        { "command": "apm.views.installed.checked", "when": "false" },
-        { "command": "apm.views.updates", "when": "false" },
-        { "command": "apm.views.updates.checked", "when": "false" },
-        { "command": "apm.initialize", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.compile", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.previewCompile", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.validate", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.auditWorkspace", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.targets", "when": "false" },
-        { "command": "apm.actions", "when": "isWorkspaceTrusted" },
-        { "command": "apm.settings", "when": "false" },
-        { "command": "apm.output", "when": "false" },
-        { "command": "apm.refresh", "when": "false" },
-        { "command": "apm.dependencies.refresh", "when": "isWorkspaceTrusted" },
-        { "command": "apm.dependencies.why", "when": "isWorkspaceTrusted" },
-        { "command": "apm.dependencies.find", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.policy.review", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.policy.explain", "when": "isWorkspaceTrusted" },
-        { "command": "apm.policy.manage", "when": "isWorkspaceTrusted" },
-        { "command": "apm.marketplace.health", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.mcp.discover", "when": "isWorkspaceTrusted" },
-        { "command": "apm.mcp.install", "when": "isWorkspaceTrusted" },
-        { "command": "apm.lifecycle", "when": "isWorkspaceTrusted && workspaceFolderCount != 0" },
-        { "command": "apm.reports.dependencies", "when": "isWorkspaceTrusted" },
-        { "command": "apm.runScript", "when": "isWorkspaceTrusted && workspaceFolderCount != 0 && config.apm.tasks.includeScripts" },
+        {
+          "command": "apm.views.catalog",
+          "when": "false"
+        },
+        {
+          "command": "apm.views.catalog.checked",
+          "when": "false"
+        },
+        {
+          "command": "apm.views.installed",
+          "when": "false"
+        },
+        {
+          "command": "apm.views.installed.checked",
+          "when": "false"
+        },
+        {
+          "command": "apm.views.updates",
+          "when": "false"
+        },
+        {
+          "command": "apm.views.updates.checked",
+          "when": "false"
+        },
+        {
+          "command": "apm.initialize",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.compile",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.previewCompile",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.validate",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.auditWorkspace",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.targets",
+          "when": "false"
+        },
+        {
+          "command": "apm.actions",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.settings",
+          "when": "false"
+        },
+        {
+          "command": "apm.output",
+          "when": "false"
+        },
+        {
+          "command": "apm.refresh",
+          "when": "false"
+        },
+        {
+          "command": "apm.dependencies.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.dependencies.why",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.dependencies.find",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.policy.review",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.policy.explain",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.policy.manage",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.marketplace.health",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.mcp.discover",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.mcp.install",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.lifecycle",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0"
+        },
+        {
+          "command": "apm.reports.dependencies",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "apm.runScript",
+          "when": "isWorkspaceTrusted && workspaceFolderCount != 0 && config.apm.tasks.includeScripts"
+        },
         {
           "command": "apm.filter.installed",
           "when": "false"
         },
-        { "command": "apm.filter.installed.checked", "when": "false" },
+        {
+          "command": "apm.filter.installed.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.updates",
           "when": "false"
         },
-        { "command": "apm.filter.updates.checked", "when": "false" },
+        {
+          "command": "apm.filter.updates.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.dependencies",
           "when": "false"
         },
-        { "command": "apm.filter.dependencies.checked", "when": "false" },
+        {
+          "command": "apm.filter.dependencies.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.scope.all",
           "when": "false"
         },
-        { "command": "apm.filter.scope.all.checked", "when": "false" },
+        {
+          "command": "apm.filter.scope.all.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.scope.workspace",
           "when": "false"
         },
-        { "command": "apm.filter.scope.workspace.checked", "when": "false" },
+        {
+          "command": "apm.filter.scope.workspace.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.scope.global",
           "when": "false"
         },
-        { "command": "apm.filter.scope.global.checked", "when": "false" },
+        {
+          "command": "apm.filter.scope.global.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.marketplace.all",
           "when": "false"
         },
-        { "command": "apm.filter.marketplace.all.checked", "when": "false" },
+        {
+          "command": "apm.filter.marketplace.all.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.marketplace.choose",
           "when": "false"
         },
-        { "command": "apm.filter.marketplace.choose.checked", "when": "false" },
+        {
+          "command": "apm.filter.marketplace.choose.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.sort.name",
           "when": "false"
         },
-        { "command": "apm.filter.sort.name.checked", "when": "false" },
+        {
+          "command": "apm.filter.sort.name.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.sort.name-desc",
           "when": "false"
         },
-        { "command": "apm.filter.sort.name-desc.checked", "when": "false" },
+        {
+          "command": "apm.filter.sort.name-desc.checked",
+          "when": "false"
+        },
         {
           "command": "apm.filter.sort.marketplace",
           "when": "false"
         },
-        { "command": "apm.filter.sort.marketplace.checked", "when": "false" }
+        {
+          "command": "apm.filter.sort.marketplace.checked",
+          "when": "false"
+        }
       ]
     },
     "configuration": [
@@ -352,7 +787,9 @@
         "properties": {
           "apm.marketplaces": {
             "type": "array",
-            "default": ["netfabric/intelligentium"],
+            "default": [
+              "netfabric/intelligentium"
+            ],
             "scope": "machine",
             "uniqueItems": true,
             "items": {
@@ -446,16 +883,34 @@
     "taskDefinitions": [
       {
         "type": "apm",
-        "required": ["workflow"],
+        "required": [
+          "workflow"
+        ],
         "properties": {
-          "workflow": { "type": "string", "enum": ["compile", "watch", "validate", "audit", "script"], "description": "APM workflow to run in this task's workspace folder." },
-          "script": { "type": "string", "description": "Manifest script name for workflow: script. Requires apm.tasks.includeScripts." }
+          "workflow": {
+            "type": "string",
+            "enum": [
+              "compile",
+              "watch",
+              "validate",
+              "audit",
+              "script"
+            ],
+            "description": "APM workflow to run in this task's workspace folder."
+          },
+          "script": {
+            "type": "string",
+            "description": "Manifest script name for workflow: script. Requires apm.tasks.includeScripts."
+          }
         },
         "when": "customExecutionSupported && isWorkspaceTrusted"
       }
     ],
     "submenus": [
-      { "id": "apm.views", "label": "Views" },
+      {
+        "id": "apm.views",
+        "label": "Views"
+      },
       {
         "id": "apm.filter.scope",
         "label": "Scope"
