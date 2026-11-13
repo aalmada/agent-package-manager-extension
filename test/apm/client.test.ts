@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -313,7 +313,7 @@ test('installed list recovers four deployed private bundles without authenticati
         { kind: 'skills', items: [{ name: item.name, path: `.agents/skills/${item.name}/SKILL.md`, description: `${item.name} description` }] },
         { kind: 'agents', items: [{ name: item.name, path: `.github/agents/${item.name}.agent.md`, description: `${item.name} description` }] }
       ]);
-      assert.equal(details.localContentRoot, home);
+      assert.equal(details.localContentRoot, await realpath(home));
       assert.match(JSON.stringify(details.contentsNotes), /verified deployed contents/);
     }
     assert.equal(execute.mock.callCount(), 0, 'Deployed bundles do not need a CLI scan without a package store');
