@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ApmClient } from '../../src/apm/client';
 import { record } from '../../src/apm/adapters';
 import { redact } from '../../src/apm/redact';
@@ -93,6 +94,60 @@ test('catalog details use the plugin repository fetcher without requiring a glob
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test('local catalogs read live manifests without APM calls while remote catalogs still update', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-local-catalog-test-'));
+  try {
+    const path = join(home, 'marketplace.json');
+    const write = (version: string) => writeFile(path, JSON.stringify({ plugins: [{ name: 'sample', version }] }));
+    await write('1.0');
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    const execute = t.mock.method(client, 'execute', async (args: string[]) => {
+      assert.deepEqual(args, ['marketplace', 'update', 'remote']);
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    for (const source of [home, pathToFileURL(path).href]) {
+      const result = await client.getCatalog([{ name: 'local', source }]);
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.items[0].version, '1.0');
+    }
+    await write('2.0');
+    const refreshed = await client.getCatalog([{ name: 'local', source: home }]);
+    assert.equal(refreshed.items[0].version, '2.0');
+    assert.equal(execute.mock.callCount(), 0);
+    await mkdir(join(home, '.apm/cache/marketplace'), { recursive: true });
+    await writeFile(join(home, '.apm/cache/marketplace/remote.json'), JSON.stringify({ plugins: [{ name: 'sample' }] }));
+    const remote = await client.getCatalog([{ name: 'remote', source: 'https://github.com/team/catalog' }]);
+    assert.deepEqual(remote.errors, []);
+    assert.equal(remote.items.length, 1);
+    assert.equal(execute.mock.callCount(), 1);
+  } finally { await rm(home, { recursive: true }); }
+});
+
+test('missing package stores skip dependency-list calls but newly created stores are read immediately in both scopes', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-store-scan-test-'));
+  try {
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    const execute = t.mock.method(client, 'execute', async (args: string[]) => {
+      assert.equal(args.join(' '), args.includes('--global') ? 'deps list --global' : 'deps list');
+      return { stdout: '| Package | Version | Source |\n| team/sample | 1.0 | github |', stderr: '', exitCode: 0 };
+    });
+    const scopes = [
+      { kind: 'workspace' as const, path: join(home, 'project'), label: 'project' },
+      { kind: 'global' as const, path: join(home, '.apm'), label: 'Global' }
+    ];
+    for (const scope of scopes) {
+      await mkdir(scope.path);
+      assert.deepEqual(await client.getInstalled(scope), []);
+    }
+    assert.equal(execute.mock.callCount(), 0);
+    for (const scope of scopes) {
+      await mkdir(join(scope.path, 'apm_modules'));
+      assert.equal((await client.getInstalled(scope))[0].name, 'team/sample');
+    }
+    assert.equal(execute.mock.callCount(), 2);
+  } finally { await rm(home, { recursive: true }); }
+});
+
 test('installed list recovers deployed standalone skills and opens their local details without a CLI view', async t => {
   const home = await mkdtemp(join(tmpdir(), 'apm-deployed-skill-test-'));
   try {
@@ -110,6 +165,7 @@ test('installed list recovers deployed standalone skills and opens their local d
       deployments: [{ kind: 'project-relative', value: path, active_owner: identity }]
     }));
     await writeFile(join(home, 'apm.yml'), 'dependencies:\n  apm:\n  - org/manifest-only\n');
+    await mkdir(join(home, 'apm_modules'));
     const client = new ApmClient({ executable: process.execPath, cwd: home, home });
     const execute = t.mock.method(client, 'execute', async (args: string[]) => {
       assert.deepEqual(args, ['deps', 'list']);
@@ -169,6 +225,7 @@ test('deployed-skill recovery preserves aliases, hosts and marketplaces without 
     assert.equal(recovered[0].version, '1.2.3');
     assert.equal(recovered[0].direct, false);
     assert.equal(recovered[0].metadata?.installExpression, 'sample@test');
+    await mkdir(join(home, 'apm_modules'));
     execute.mock.mockImplementation(async () => ({
       stdout: '| Package | Version | Source |\n| sample-alias | 1.2.3 | github |', stderr: '', exitCode: 0
     }));
@@ -259,7 +316,8 @@ test('installed list recovers four deployed private bundles without authenticati
       assert.equal(details.localContentRoot, home);
       assert.match(JSON.stringify(details.contentsNotes), /verified deployed contents/);
     }
-    assert.equal(execute.mock.callCount(), 1);
+    assert.equal(execute.mock.callCount(), 0, 'Deployed bundles do not need a CLI scan without a package store');
+    await mkdir(join(home, 'apm_modules'));
     execute.mock.mockImplementation(async () => ({
       stdout: '| Package | Version | Source |\n' + dependencies.map(dep =>
         `| ${dep.repo_url}/${dep.virtual_path} | 1.2.3 | github |`).join('\n'), stderr: '', exitCode: 0
@@ -267,6 +325,7 @@ test('installed list recovers four deployed private bundles without authenticati
     const listed = await client.getInstalled(scope);
     assert.equal(listed.length, 4);
     assert.ok(listed.every(item => item.metadata?.deployedPackagePaths === undefined));
+    assert.equal(execute.mock.callCount(), 1);
   } finally { await rm(home, { recursive: true }); }
 });
 

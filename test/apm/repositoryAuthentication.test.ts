@@ -133,6 +133,58 @@ test('permission denial and unavailable silent consent rotate to the next author
   assert.ok(host.calls.every(call => call.options.silent));
 });
 
+test('bound account is verified first without looking up sessions for other accounts', async () => {
+  const host = harness();
+  host.state.accounts = [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }, { id: 'three', label: 'Three' }];
+  host.state.tokens.set('three', 'token-three');
+  host.state.respond = (_url, headers) => new Response('', { status: headers.get('Authorization') === 'Bearer token-two' ? 200 : 404 });
+  await host.auth.credentials([repo('a')]);
+  host.calls.length = 0;
+  host.requests.length = 0;
+  assert.equal((await host.auth.credentials([repo('a')]))[0].token, 'token-two');
+  assert.deepEqual(host.calls.map(call => call.options.account?.id), ['two']);
+  assert.equal(host.requests.length, 1);
+});
+
+test('a refresh access pass verifies each repository once and never outlives its pass or generation', async () => {
+  const host = harness();
+  host.state.respond = (_url, headers) => new Response('', { status: headers.get('Authorization') === 'Bearer token-one' ? 200 : 404 });
+  const pass = host.auth.accessPass();
+  assert.equal((await host.auth.credentials([repo('a')], undefined, pass))[0].token, 'token-one');
+  const requests = host.requests.length, calls = host.calls.length;
+  assert.equal((await host.auth.credentials([repo('a')], undefined, pass))[0].token, 'token-one');
+  assert.equal(host.requests.length, requests);
+  assert.equal(host.calls.length, calls);
+  await host.auth.credentials([repo('a')]);
+  assert.equal(host.requests.length, requests + 1);
+  await host.auth.credentials([repo('a')], undefined, host.auth.accessPass());
+  assert.equal(host.requests.length, requests + 2);
+  host.auth.invalidate();
+  await host.auth.credentials([repo('a')], undefined, pass);
+  assert.equal(host.requests.length, requests + 3);
+});
+
+test('a definitively private repository skips repeated anonymous probes but rechecks before failing', async () => {
+  const host = harness();
+  host.state.accounts = [];
+  let allowed = false;
+  host.state.respond = () => new Response('', { status: allowed ? 200 : 404 });
+  assert.equal((await host.auth.credentials([repo('a')])).length, 0);
+  assert.equal(host.requests.length, 1);
+  assert.equal((await host.auth.credentials([repo('a')])).length, 0);
+  assert.equal(host.requests.length, 1);
+  host.state.accounts = [{ id: 'one', label: 'One' }];
+  allowed = true;
+  host.state.respond = (_url, headers) => new Response('', { status: headers.has('Authorization') ? 404 : 200 });
+  assert.equal((await host.auth.credentials([repo('a')])).length, 0);
+  assert.deepEqual(host.requests.slice(1).map(request => request.headers.has('Authorization')), [true, false]);
+  host.auth.invalidate();
+  host.state.accounts = [];
+  host.state.respond = () => new Response('', { status: 404 });
+  await host.auth.credentials([repo('a')]);
+  assert.equal(host.requests.length, 4);
+});
+
 test('repository picker offers configured and registered marketplaces and known repositories without network discovery', async () => {
   const host = harness();
   host.state.respond = (_url, headers) => new Response('', { status: headers.has('Authorization') ? 200 : 404 });

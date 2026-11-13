@@ -156,7 +156,9 @@ export class ApmClient {
     // Keep requests bounded; CLI fetching also owns transport authentication.
     for (const marketplace of marketplaces) {
       try {
-        await this.checked(['marketplace', 'update', marketplace.name]);
+        if (!isAbsolute(marketplace.source) && !marketplace.source.startsWith('file://')) {
+          await this.checked(['marketplace', 'update', marketplace.name]);
+        }
         let manifest: Record<string, unknown> | undefined;
         try {
           const snapshot = await marketplaceManifest(marketplace, this.home);
@@ -191,14 +193,26 @@ export class ApmClient {
     if (scope.kind === 'global') {
       try { await stat(scope.path); } catch (error) { if (isMissing(error)) return []; throw error; }
     }
-    const args = ['deps', 'list', ...(scope.kind === 'global' ? ['--global'] : [])];
-    const result = await this.checked(args, scope.kind === 'global' ? this.home : scope.path);
-    const items = parseInstalled(result.stdout);
+    let storePresent = true;
+    try { await stat(join(scope.path, 'apm_modules')); }
+    catch (error) { if (isMissing(error)) storePresent = false; else throw error; }
+    const items: PackageItem[] = [];
+    if (storePresent) {
+      const args = ['deps', 'list', ...(scope.kind === 'global' ? ['--global'] : [])];
+      const result = await this.checked(args, scope.kind === 'global' ? this.home : scope.path);
+      items.push(...parseInstalled(result.stdout));
+    }
     let lock: unknown;
     try { lock = parseYaml(await readFile(join(scope.path, 'apm.lock.yaml'), 'utf8')); }
     catch (error) { if (!isMissing(error)) throw new ApmError(`Cannot read lockfile: ${String(error)}`); }
     const dependencies: Record<string, unknown>[] = record(lock) && Array.isArray(lock.dependencies) ? lock.dependencies.filter(record) : [];
     const deployments = record(lock) && Array.isArray(lock.deployments) ? lock.deployments.filter(record) : [];
+    const deploymentByPath = new Map<string, Record<string, unknown>>();
+    for (const entry of deployments) {
+      if (entry.kind === 'project-relative' && typeof entry.value === 'string' && !deploymentByPath.has(entry.value)) {
+        deploymentByPath.set(entry.value, entry);
+      }
+    }
     for (const dep of dependencies) {
       if (!['claude_skill', 'skill_bundle', 'marketplace_plugin'].includes(String(dep.package_type)) ||
         !Array.isArray(dep.deployed_files) || items.some(item => matchesDependency(item.name, dep))) continue;
@@ -209,7 +223,7 @@ export class ApmClient {
       for (const path of dep.deployed_files) {
         if (typeof path !== 'string' || (standalone && !/[\\/]SKILL\.md$/i.test(path))) continue;
         if (!standalone && !deployedContentKind(path)) continue;
-        const deployment = deployments.find(entry => entry.kind === 'project-relative' && entry.value === path);
+        const deployment = deploymentByPath.get(path);
         if (deployment && deployment.active_owner !== identity) continue;
         const actual = await resolveContained(scope.path, path);
         if (!actual || !(await stat(actual)).isFile()) continue;
@@ -253,7 +267,8 @@ export class ApmClient {
     for (const item of items) {
       const lock = record(item.metadata?.lock) ? item.metadata.lock : undefined;
       const identity = String(item.metadata?.lockIdentity ?? item.metadata?.cliIdentity ?? item.name);
-      if (rows.some(row => row.package === identity || row.package === item.metadata?.cliIdentity)) continue;
+      const cliIdentity = String(item.metadata?.cliIdentity ?? '').toLowerCase();
+      if (rows.some(row => row.package.toLowerCase() === identity.toLowerCase() || row.package.toLowerCase() === cliIdentity)) continue;
       const excluded = lock?.source === 'local' || !!lock?.registry_prefix;
       if (excluded || (allCurrent && lock)) rows.push({
         package: identity, current: item.version, latest: allCurrent && !excluded ? item.version : '-',

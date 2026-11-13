@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from '../../src/apm/packageState';
+import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from '../../src/apm/packageState';
 import type { PackageItem, Scope, UpdateRow } from '../../src/apm/types';
 
 const workspace: Scope = { kind: 'workspace', path: '/project', label: 'project' };
@@ -104,4 +104,25 @@ test('a changed lock revision reloads metadata and does not reuse an old update 
   reconcileDetailContexts([entry], workspace, [catalog], [updated], () => { reloads++; });
   assert.equal(reloads, 1);
   assert.equal(retainUpdateResults([updated], [old])[0].updateStatus, 'failed');
+});
+
+test('catalog versions give immediate update results that APM refines only with definitive rows', () => {
+  const lockIdentity = 'NTT-ORG/plugins/plugins/meta';
+  const item = (version: string): PackageItem => ({ id: 'market::meta', name: 'meta', marketplace: 'market', version, installed: true,
+    updateStatus: 'unchecked', metadata: { cliIdentity: 'meta', lockIdentity } });
+  const entry = (version: string, stale = false): PackageItem => ({ id: 'market::meta', name: 'meta', marketplace: 'market', version, installed: false,
+    ...(stale ? { metadata: { stale } } : {}) });
+  const [outdated] = applyCatalogVersions([item('6.0.6')], [entry('6.0.7')]);
+  assert.equal(outdated.updateStatus, 'outdated');
+  assert.equal(outdated.latestVersion, '6.0.7');
+  assert.equal(applyCatalogVersions([item('6.0.7')], [entry('6.0.7')])[0].updateStatus, 'current');
+  assert.equal(applyCatalogVersions([item('6.0.6')], [entry('6.0.7', true)])[0].updateStatus, 'unchecked');
+  assert.equal(applyCatalogVersions([item('Not specified')], [entry('6.0.7')])[0].updateStatus, 'unchecked');
+  const row = (status: UpdateRow['status']): UpdateRow => ({ package: lockIdentity.toLowerCase(), current: '(none)', latest: '-', status, source: 'apm outdated' });
+  assert.equal(applyUpdateRows([outdated], [row('unknown')])[0].updateStatus, 'outdated');
+  assert.equal(applyUpdateRows([outdated], [])[0].updateStatus, 'outdated');
+  assert.equal(applyUpdateRows([outdated], [row('current')])[0].updateStatus, 'current');
+  assert.equal(applyUpdateRows([item('6.0.6')], [row('outdated')])[0].updateStatus, 'outdated');
+  assert.equal(retainUpdateResults([outdated], [])[0].updateStatus, 'outdated');
+  assert.equal(retainUpdateResults([outdated], [{ ...outdated, updateStatus: 'current', metadata: {} }])[0].updateStatus, 'current');
 });

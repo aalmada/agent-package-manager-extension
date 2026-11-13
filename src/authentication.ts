@@ -15,6 +15,7 @@ type Context = Pick<vscode.ExtensionContext, 'globalState' | 'secrets'>;
 type Binding = { repository: Repository; account?: string; secret?: string };
 export type RepositoryCredential = { repository: Repository; token: string; username: string; scheme: 'basic' | 'bearer' };
 type Candidate = RepositoryCredential & { account?: string; secret?: string };
+export type AccessPass = { readonly generation: number; readonly selections: Map<string, Promise<Candidate | undefined>> };
 type MarketplaceSources = { settings: readonly string[]; registered: readonly Marketplace[]; workspaceRoot?: string };
 
 export class RepositoryAccessError extends Error {
@@ -82,6 +83,8 @@ export class RepositoryAuthentication implements vscode.Disposable {
   private readonly listener?: vscode.Disposable;
   private readonly probes = new Map<string, Promise<boolean>>();
   private readonly access = new Map<string, { at: number; allowed: boolean }>();
+  /** Repositories whose anonymous probe was definitively denied; never stores credentials. */
+  private readonly nonPublic = new Map<string, number>();
   private readonly changes = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changes.event;
 
@@ -93,7 +96,9 @@ export class RepositoryAuthentication implements vscode.Disposable {
   }
 
   get generation(): number { return this.revision; }
-  invalidate(): void { this.revision++; this.probes.clear(); this.access.clear(); this.changes.fire(); }
+  invalidate(): void { this.revision++; this.probes.clear(); this.access.clear(); this.nonPublic.clear(); this.changes.fire(); }
+  /** Starts one read-only refresh pass; credentials verified in it are reused only by later calls passing the same object. */
+  accessPass(): AccessPass { return { generation: this.revision, selections: new Map() }; }
   dispose(): void { this.disposed = true; this.invalidate(); this.listener?.dispose(); this.changes.dispose(); }
   hosts(): readonly RepositoryHost[] {
     return repositoryHosts(this.context.globalState.get<RepositoryHost[]>(`${this.namespace}.hosts`, []));
@@ -115,26 +120,25 @@ export class RepositoryAuthentication implements vscode.Disposable {
     const parsed = repositoryFromSource(`${repository.origin}/${repository.path}`, this.hosts());
     if (!parsed || repositoryKey(parsed) !== repositoryKey(repository)) throw new Error('Repository authentication requires an approved repository host and path.');
   }
-  private async candidates(repository: Repository, generation: number, signal?: AbortSignal): Promise<Candidate[]> {
+  /** Yields candidates lazily so selection stops looking up sessions once one has access. */
+  private async *candidates(repository: Repository, generation: number, signal?: AbortSignal): AsyncGenerator<Candidate> {
     const binding = this.bindings().find(item => repositoryKey(item.repository) === repositoryKey(repository));
-    const result: Candidate[] = [];
     if (binding?.secret) {
       const token = await this.context.secrets.get(binding.secret);
       this.check(generation, signal);
-      if (token) result.push({ repository, token, username: repository.provider === 'gitlab' ? 'oauth2' : repository.provider === 'github' ? 'x-access-token' : 'apm',
-        scheme: repository.provider === 'github' ? 'bearer' : 'basic', secret: binding.secret });
+      if (token) yield { repository, token, username: repository.provider === 'gitlab' ? 'oauth2' : repository.provider === 'github' ? 'x-access-token' : 'apm',
+        scheme: repository.provider === 'github' ? 'bearer' : 'basic', secret: binding.secret };
     }
     const provider = githubAccountProvider(repository);
-    if (!provider) return result;
+    if (!provider) return;
     const accounts = [...await vscode.authentication.getAccounts(provider)];
     this.check(generation, signal);
     accounts.sort((a, b) => Number(b.id === binding?.account) - Number(a.id === binding?.account));
     for (const account of accounts.slice(0, 20)) {
       const session = await vscode.authentication.getSession(provider, scopes, { account, silent: true });
       this.check(generation, signal);
-      if (session) result.push({ repository, token: session.accessToken, username: 'x-access-token', scheme: 'bearer', account: account.id });
+      if (session) yield { repository, token: session.accessToken, username: 'x-access-token', scheme: 'bearer', account: account.id };
     }
-    return result;
   }
   private authorization(candidate: RepositoryCredential): string {
     return candidate.scheme === 'bearer' ? `Bearer ${candidate.token}` :
@@ -174,16 +178,21 @@ export class RepositoryAuthentication implements vscode.Disposable {
     options: { allowFallback?: boolean; reuseAccess?: boolean; anonymousLimit?: RepositoryRateLimitError } = {}): Promise<Candidate | undefined> {
     const bound = this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository));
     let anonymousLimit = options.anonymousLimit;
-    if (!bound && !anonymousLimit) {
+    const key = repositoryKey(repository), deniedAt = this.nonPublic.get(key);
+    const skipped = !bound && !anonymousLimit && deniedAt !== undefined && Date.now() - deniedAt < 5 * 60_000;
+    if (!bound && !anonymousLimit && !skipped) {
       try {
         if (await this.probe(repository, undefined, generation, signal, options.reuseAccess)) return undefined;
+        if (this.nonPublic.size >= 100) this.nonPublic.clear();
+        this.nonPublic.set(key, Date.now());
       } catch (error) {
         if (!(error instanceof RepositoryRateLimitError)) throw error;
         anonymousLimit = error;
       }
     }
-    const candidates = await this.candidates(repository, generation, signal);
-    for (const candidate of candidates) {
+    let tried = 0;
+    for await (const candidate of this.candidates(repository, generation, signal)) {
+      tried++;
       if (await this.probe(repository, candidate, generation, signal, options.reuseAccess)) {
         this.check(generation, signal);
         // A rate-limited anonymous probe cannot establish that the repository is private.
@@ -196,18 +205,34 @@ export class RepositoryAuthentication implements vscode.Disposable {
     }
     if (bound && await this.probe(repository, undefined, generation, signal, options.reuseAccess)) return undefined;
     if (anonymousLimit) throw anonymousLimit;
-    if (options.allowFallback && !candidates.length && !this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository))) return undefined;
+    if (options.allowFallback && !tried && !this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository))) return undefined;
+    // Recheck a skipped anonymous probe before failing, in case the repository became public.
+    if (skipped) {
+      if (await this.probe(repository, undefined, generation, signal, options.reuseAccess)) { this.nonPublic.delete(key); return undefined; }
+      this.nonPublic.set(key, Date.now());
+    }
     throw new RepositoryAccessError(repository);
   }
-  async credentials(repositories: readonly Repository[], signal?: AbortSignal): Promise<readonly RepositoryCredential[]> {
+  async credentials(repositories: readonly Repository[], signal?: AbortSignal, pass?: AccessPass): Promise<readonly RepositoryCredential[]> {
     const generation = this.revision;
     this.check(generation, signal);
     const result: RepositoryCredential[] = [];
     const unique = [...new Map(repositories.map(repository => [repositoryKey(repository), repository])).values()];
     if (unique.length > 100) throw new Error('Too many repositories in one authentication request.');
+    const shared = pass?.generation === generation ? pass.selections : undefined;
     for (const repository of unique) {
       this.validate(repository);
-      const candidate = await this.select(repository, generation, signal, { allowFallback: true });
+      const key = repositoryKey(repository);
+      let selection = shared?.get(key);
+      if (!selection) {
+        selection = this.select(repository, generation, signal, { allowFallback: true });
+        if (shared) {
+          shared.set(key, selection);
+          // Failures are retried by later calls in the same pass rather than reused.
+          selection.catch(() => { if (shared.get(key) === selection) shared.delete(key); });
+        }
+      }
+      const candidate = await selection;
       this.check(generation, signal);
       if (candidate) result.push({ repository, token: candidate.token, username: candidate.username, scheme: candidate.scheme });
     }

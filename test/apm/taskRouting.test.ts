@@ -9,7 +9,7 @@ import { runInNewContext } from 'node:vm';
 import { buildSync } from 'esbuild';
 import type { Message, PackageSection, State } from '../../src/protocol';
 import type { PackageAction } from '../../src/apm/actions';
-import type { Marketplace, PackageItem, Scope, UpdateRow } from '../../src/apm/types';
+import type { Marketplace, PackageItem, Probe, Scope, UpdateRow } from '../../src/apm/types';
 import type { Workflow, CommandRequest } from '../../src/apm/workflows';
 import { parseMessage } from '../../src/protocol';
 
@@ -37,6 +37,7 @@ interface Harness {
   refreshAll(): Promise<void>;
   scheduleRefresh(): void;
   refreshCatalog(client: unknown, marketplaces: Marketplace[]): Promise<{ items: PackageItem[]; errors: string[] }>;
+  refreshProbe(client: unknown, scope: Scope): Promise<Probe>;
   refreshUpdates(client: unknown, scope: Scope, installed: PackageItem[], previous: PackageItem[]): Promise<{ items: PackageItem[]; checkedAt?: string; error?: string }>;
   authenticationChanged(): void;
   report(error: unknown, context?: Panel): void;
@@ -169,8 +170,8 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       { kind: 'global', label: 'Global (user)', path: '/home/test/.apm' }
     ] },
     nativeOperations: new Set(), results: new Map(), search: '', refreshNotices: new Set(), readmeNotices: new Set(),
-    catalogSnapshots: new Map(), updateSnapshots: new Map(),
-    authentication: { invalidate() {}, hosts: () => [] },
+    catalogSnapshots: new Map(), updateSnapshots: new Map(), probeSnapshots: new Map(),
+    authentication: { invalidate() {}, hosts: () => [], accessPass: () => ({ generation: 0, selections: new Map() }) },
     settingsSync: { retry() {} },
     commandEnvironment: async () => options.token ? { GITHUB_APM_PAT: options.token } : {},
     allowRemoteImages: () => false,
@@ -349,6 +350,33 @@ test('automatic catalog refreshes reuse remote successes and failures for five m
   assert.equal(calls.filter(name => name === 'local').length, 2, 'Local catalogs are not throttled');
 });
 
+test('background CLI probes are scope-bound, expire after five minutes and do not cache failures', async t => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  const host = harness();
+  const scope: Scope = { kind: 'workspace', path: '/project', label: 'project' };
+  let calls = 0, fail = false;
+  const client = { probe: async () => {
+    calls++;
+    if (fail) throw new Error('CLI unavailable');
+    return { version: '0.35.0', commands: ['install'] };
+  } };
+  await host.extension.refreshProbe(client, scope);
+  now += 5 * 60_000 - 1;
+  await host.extension.refreshProbe(client, scope);
+  assert.equal(calls, 1);
+  await host.extension.refreshProbe(client, { ...scope, path: '/other' });
+  assert.equal(calls, 2, 'Another scope may configure a different executable');
+  now++;
+  fail = true;
+  await assert.rejects(host.extension.refreshProbe(client, scope), /CLI unavailable/);
+  await assert.rejects(host.extension.refreshProbe(client, scope), /CLI unavailable/);
+  assert.equal(calls, 4);
+  fail = false;
+  await host.extension.refreshProbe(client, scope);
+  assert.equal(calls, 5, 'A failed probe does not delay recovery');
+});
+
 test('automatic update checks are scoped, bounded and never reuse results for changed revisions', async t => {
   let now = 1000;
   t.mock.method(Date, 'now', () => now);
@@ -445,9 +473,9 @@ test('repeated browser and command refreshes do not repeat remote marketplace or
   Reflect.set(host.extension, 'refresh', prototype.refresh);
   Reflect.set(host.extension, 'epoch', 0);
   const item: PackageItem = { id: 'installed::org/pkg', name: 'org/pkg', version: '1', marketplace: '', installed: true };
-  const calls = { catalog: 0, installed: 0, outdated: 0 };
+  const calls = { probe: 0, catalog: 0, installed: 0, outdated: 0 };
   Reflect.set(host.extension, 'client', () => ({
-    probe: async () => ({ version: '0.35.0', commands: [] }),
+    probe: async () => { calls.probe++; return { version: '0.35.0', commands: [] }; },
     getMarketplaces: async () => [{ name: 'catalog', source: 'org/catalog' }],
     getInstalled: async () => { calls.installed++; return [item]; },
     getCatalog: async () => { calls.catalog++; return { items: [], errors: [] }; },
@@ -459,11 +487,11 @@ test('repeated browser and command refreshes do not repeat remote marketplace or
   try {
     for (let i = 0; i < 10; i++) await host.extension.refresh();
     assert.deepEqual(host.errors, []);
-    assert.deepEqual(calls, { catalog: 1, installed: 10, outdated: 1 });
+    assert.deepEqual(calls, { probe: 1, catalog: 1, installed: 10, outdated: 1 });
     assert.equal(host.extension.state.installed[0].updateStatus, 'current');
     assert.equal(host.extension.state.installed[0].updateStale, undefined);
     await host.extension.refreshAll();
-    assert.deepEqual(calls, { catalog: 2, installed: 11, outdated: 2 });
+    assert.deepEqual(calls, { probe: 2, catalog: 2, installed: 11, outdated: 2 });
   } finally { host.extension.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 

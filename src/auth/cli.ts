@@ -5,6 +5,7 @@ import { marketplaceRepository, remoteSource } from '../apm/remoteMetadata';
 import type { Marketplace } from '../apm/types';
 import { repositoryFromSource, repositoryFromPackageSource, repositoryKey, type Repository, type RepositoryHost } from './repositories';
 import { dependencyExpressions } from './dependencies';
+import type { AccessPass } from '../authentication';
 
 export interface CliCredential {
   repository: Repository;
@@ -16,7 +17,7 @@ export interface CliCredential {
 export interface CliAuthentication {
   hosts(): readonly RepositoryHost[];
   knownRepositories(): readonly Repository[];
-  credentials(repositories: readonly Repository[], signal?: AbortSignal): Promise<readonly CliCredential[]>;
+  credentials(repositories: readonly Repository[], signal?: AbortSignal, pass?: AccessPass): Promise<readonly CliCredential[]>;
 }
 
 const localCommands = new Set(['config', 'compile', 'deps', 'view', 'init', 'target', 'runtime', 'uninstall', 'cache']);
@@ -26,7 +27,7 @@ const compatibilityError = 'This APM CLI cannot safely route different repositor
 
 /** Read-only context collection; APM remains responsible for dependency resolution. */
 export async function cliEnvironment(authentication: CliAuthentication, args: readonly string[],
-  cwd: string, home: string, signal?: AbortSignal): Promise<Record<string, string>> {
+  cwd: string, home: string, signal?: AbortSignal, pass?: AccessPass): Promise<Record<string, string>> {
   signal?.throwIfAborted();
   if (!args.length || args.includes('--help') || args.includes('--version') || localCommands.has(args[0])) return {};
   // Scripts are project code, not repository authentication clients.
@@ -74,7 +75,7 @@ export async function cliEnvironment(authentication: CliAuthentication, args: re
     }
   }
   signal?.throwIfAborted();
-  const selected = await authentication.credentials([...repositories.values()], signal);
+  const selected = await authentication.credentials([...repositories.values()], signal, pass);
   signal?.throwIfAborted();
   if (!selected.length) return {};
   const tokens = new Set(selected.map(credential => credential.token));

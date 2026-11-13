@@ -5,7 +5,7 @@ import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
 import { record, type VariablePrompt } from './apm/adapters';
 import { descriptors, buildCommandArguments, requiresTerminal } from './apm/commands';
-import type { Marketplace, PackageItem, Scope } from './apm/types';
+import type { Marketplace, PackageItem, Probe, Scope } from './apm/types';
 import type { Message, Mode, PackageSection, State } from './protocol';
 import { inScope, isSameScope, parseMessage, scopeKey, scopeLabel } from './protocol';
 import { SettingsSync } from './config/sync';
@@ -15,14 +15,14 @@ import { renderMarkdown } from './views/markdown';
 import { containsUrlCredentials, redact, safePayload } from './apm/redact';
 import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm/installation';
 import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
-import { applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from './apm/packageState';
+import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withInstallations } from './apm/packageState';
 import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
 import { AuditDiagnostics, contentNavigation, openNavigation, type NavigationTarget, type AuditTicket } from './navigation';
 import { registerManifestAssistance } from './manifestAssistance';
 import { registerApmTaskProvider } from './taskProvider';
 import type { ContentGroup } from './apm/contents';
 import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveContained } from './apm/manifest';
-import { RepositoryAccessError, RepositoryAuthentication, signInToGithub } from './authentication';
+import { RepositoryAccessError, RepositoryAuthentication, signInToGithub, type AccessPass } from './authentication';
 import { cliEnvironment } from './auth/cli';
 import { repositoryFromPackageSource, type Repository } from './auth/repositories';
 
@@ -57,6 +57,7 @@ class ApmExtension implements vscode.Disposable {
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private readonly catalogSnapshots = new Map<string, { at: number; items: PackageItem[]; errors: string[] }>();
   private readonly updateSnapshots = new Map<string, { at: number; items: PackageItem[]; checkedAt?: string; error?: string }>();
+  private readonly probeSnapshots = new Map<string, { at: number; probe: Probe }>();
   private operation?: AbortController;
   private refreshController?: AbortController;
   private queues = new Map<string, Promise<void>>();
@@ -115,7 +116,7 @@ class ApmExtension implements vscode.Disposable {
     this.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => { void this.settingsSync.sync(); this.scheduleRefresh(); }));
     this.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('github-enterprise.uri')) this.authentication.invalidate();
-      if (event.affectsConfiguration('apm.executablePath')) { this.epoch++; this.state.version = undefined; this.clearRemoteSnapshots(); this.scheduleRefresh(); }
+      if (event.affectsConfiguration('apm.executablePath')) { this.epoch++; this.state.version = undefined; this.probeSnapshots.clear(); this.clearRemoteSnapshots(); this.scheduleRefresh(); }
       if (event.affectsConfiguration('apm.allowRemoteImages')) {
         for (const entry of this.panels.values()) {
           if (entry.mode !== 'details') continue;
@@ -167,13 +168,14 @@ class ApmExtension implements vscode.Disposable {
   private scope(context?: PanelContext): Scope {
     return context?.scope ?? this.state.scopes.find(s => scopeKey(s) === this.state.scopeKey)!;
   }
-  private client(scope = this.scope(), signal?: AbortSignal) {
+  /** `pass` must be supplied only for read-only refresh commands. */
+  private client(scope = this.scope(), signal?: AbortSignal, pass?: AccessPass) {
     const resource = scope.kind === 'workspace' ? vscode.Uri.file(scope.path) : undefined;
     return new ApmClient({
       executable: vscode.workspace.getConfiguration('apm', resource).get<string>('executablePath', 'apm'),
       cwd: scope.kind === 'global' ? homedir() : scope.path,
       signal,
-      environment: (args, cwd, cancellation) => this.commandEnvironment(args, cwd, cancellation),
+      environment: (args, cwd, cancellation) => this.commandEnvironment(args, cwd, cancellation, pass),
       fetcher: (input, init) => this.authentication.fetch(input, { ...init,
         signal: signal && init?.signal ? AbortSignal.any([signal, init.signal]) : signal ?? init?.signal }),
       repositoryHosts: () => this.authentication.hosts(),
@@ -183,10 +185,10 @@ class ApmExtension implements vscode.Disposable {
   private requireTrust() {
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before running APM or reading package sources.');
   }
-  private commandEnvironment(args: readonly string[], cwd: string, signal?: AbortSignal) {
+  private commandEnvironment(args: readonly string[], cwd: string, signal?: AbortSignal, pass?: AccessPass) {
     this.requireTrust();
     const generation = this.authentication.generation;
-    return cliEnvironment(this.authentication, args, cwd, homedir(), signal).then(environment => {
+    return cliEnvironment(this.authentication, args, cwd, homedir(), signal, pass).then(environment => {
       this.requireTrust();
       signal?.throwIfAborted();
       if (generation !== this.authentication.generation) throw new Error('Repository authentication changed. Run the operation again.');
@@ -319,6 +321,14 @@ class ApmExtension implements vscode.Disposable {
     this.catalogSnapshots.clear();
     this.updateSnapshots.clear();
   }
+  private async refreshProbe(client: ApmClient, scope: Scope): Promise<Probe> {
+    const key = scopeKey(scope), snapshot = this.probeSnapshots.get(key);
+    if (snapshot && Date.now() - snapshot.at < remoteRefreshInterval) return snapshot.probe;
+    const at = Date.now(), epoch = this.epoch;
+    const probe = await client.probe();
+    if (epoch === this.epoch) this.probeSnapshots.set(key, { at, probe });
+    return probe;
+  }
   private async refreshCatalog(client: ApmClient, marketplaces: Marketplace[]) {
     const items: PackageItem[] = [], errors: string[] = [], keys = new Set<string>();
     for (const marketplace of marketplaces) {
@@ -358,6 +368,7 @@ class ApmExtension implements vscode.Disposable {
   async refreshAll() {
     this.settingsSync.retry();
     if (this.refreshing) await this.refreshing;
+    this.probeSnapshots.clear();
     this.clearRemoteSnapshots();
     const requests = new Map([...this.panels.values()].filter(entry => entry.mode === 'details').map(entry => [entry, entry.detailsRequest]));
     await this.refresh();
@@ -381,13 +392,15 @@ class ApmExtension implements vscode.Disposable {
     const epoch = this.epoch;
     const controller = new AbortController();
     this.refreshController = controller;
-    const scope = this.scope(), client = this.client(scope, controller.signal);
+    // Each refresh verifies a repository's credential once and reuses it for its later read-only commands.
+    const pass = this.authentication.accessPass();
+    const scope = this.scope(), client = this.client(scope, controller.signal, pass);
     const workspace = scope.kind === 'workspace' ? scope : this.state.scopes.find(candidate => candidate.kind === 'workspace');
     const scopes = [this.globalScope(), ...(workspace ? [workspace] : [])];
     const previousInstalled = this.state.installed;
     this.state.busy = true; this.state.error = undefined; this.state.errors = []; this.broadcast();
     try {
-      const probe = await client.probe();
+      const probe = await this.refreshProbe(client, scope);
       if (epoch !== this.epoch) return;
       this.state.version = probe.version; this.state.warning = probe.warning; this.state.availableCommands = probe.commands;
       this.state.projectPresent = !!workspace && await hasProjectManifest(workspace.path);
@@ -400,7 +413,7 @@ class ApmExtension implements vscode.Disposable {
           Promise.all(scopes.map(async target => ({
             scope: target,
             result: await Promise.allSettled([target.kind === 'workspace' && !this.state.projectPresent
-              ? Promise.resolve([] as PackageItem[]) : this.client(target, controller.signal).getInstalled(target)]).then(([result]) => result)
+              ? Promise.resolve([] as PackageItem[]) : this.client(target, controller.signal, pass).getInstalled(target)]).then(([result]) => result)
           })))
         ]);
         return { registered, catalog, installed };
@@ -416,7 +429,7 @@ class ApmExtension implements vscode.Disposable {
       this.state.installed = installed.flatMap<PackageItem>(({ scope: target, result }) => {
         if (result.status === 'fulfilled') {
           this.setDetailRefreshError(target);
-          return this.withDescriptions(result.value).map(item => ({ ...item, scope: target }));
+          return applyCatalogVersions(this.withDescriptions(result.value), this.state.catalog).map(item => ({ ...item, scope: target }));
         }
         const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
         this.state.errors.push(error);
@@ -432,7 +445,7 @@ class ApmExtension implements vscode.Disposable {
       for (const { scope: target, result } of installed) {
         if (result.status !== 'fulfilled' || !result.value.length) continue;
         const items = this.state.installed.filter(item => inScope(item, target));
-        const updates = await this.refreshUpdates(this.client(target, controller.signal), target, items, previousInstalled);
+        const updates = await this.refreshUpdates(this.client(target, controller.signal, pass), target, items, previousInstalled);
         if (epoch !== this.epoch) return;
         this.state.installed = this.state.installed.map(item => inScope(item, target)
           ? findInstalledPackage(item, updates.items) ?? item : item);
@@ -447,7 +460,7 @@ class ApmExtension implements vscode.Disposable {
       for (const { scope: target, result } of installed) {
         if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
       }
-      await this.refreshOtherDetailScopes(scopes, controller.signal, epoch);
+      await this.refreshOtherDetailScopes(scopes, controller.signal, epoch, pass);
       if (epoch === this.epoch) await Promise.all([...this.panels.values()]
         .filter(entry => entry.mode === 'details' && entry.item && entry.panel && !entry.extra.details && !entry.extra.busy)
         .map(entry => this.loadDetails(entry)));
@@ -476,7 +489,7 @@ class ApmExtension implements vscode.Disposable {
     reconcileDetailContexts(this.panels.values(), scope, this.state.catalog, installed, entry => { void this.loadDetails(entry); });
     for (const entry of this.detailContexts(scope)) this.send(entry);
   }
-  private async refreshOtherDetailScopes(selected: readonly Scope[], signal: AbortSignal, epoch: number) {
+  private async refreshOtherDetailScopes(selected: readonly Scope[], signal: AbortSignal, epoch: number, pass: AccessPass) {
     const scopes = new Map<string, Scope>();
     for (const entry of this.panels.values()) {
       if (entry.mode === 'details' && entry.scope && entry.item && !selected.some(scope => isSameScope(entry.scope!, scope))) {
@@ -485,9 +498,9 @@ class ApmExtension implements vscode.Disposable {
     }
     await Promise.all([...scopes.values()].map(async scope => {
       const previous = this.detailContexts(scope).flatMap(entry => entry.item ? [entry.item] : []);
-      const client = this.client(scope, signal);
+      const client = this.client(scope, signal, pass);
       try {
-        let installed: PackageItem[] = this.withDescriptions(await client.getInstalled(scope)).map(item => ({ ...item, scope }));
+        let installed: PackageItem[] = applyCatalogVersions(this.withDescriptions(await client.getInstalled(scope)), this.state.catalog).map(item => ({ ...item, scope }));
         if (epoch !== this.epoch || signal.aborted) return;
         this.setDetailRefreshError(scope);
         this.updateDetailItems(scope, installed);
@@ -1343,6 +1356,7 @@ class ApmExtension implements vscode.Disposable {
       if (event.exitCode === 0) {
         const previous = this.state.version;
         this.epoch++; this.state.version = undefined; this.state.warning = undefined;
+        this.probeSnapshots.clear();
         void this.refresh().then(() => {
           const current = this.state.version;
           if (!current) return;
