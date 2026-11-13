@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Expand the user guide into topic pages with screenshots, covering the APM view, command, context menu, settings, and task entry points for each operation.
+- Show the package browser in the Marketplace overview and describe the different ways to run operations.
+
 ## 0.4.1
 
 - Fix discovery of installed private packages and exclude synthetic local entries from repository account selection.
