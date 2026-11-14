@@ -241,7 +241,7 @@ export class ApmClient {
         metadata: { cliIdentity, ...(standalone ? { deployedSkillPath: paths[0] } : { deployedPackagePaths: paths }) }
       });
     }
-    return items.map(item => {
+    return withRequiredBy(items.map(item => {
       const matching = dependencies.filter(dep => matchesDependency(item.name, dep));
       if (matching.length !== 1) return item;
       const dep = matching[0];
@@ -263,7 +263,7 @@ export class ApmClient {
         source: local ?? (typeof dep.repo_url === 'string' ? dep.repo_url : item.source),
         metadata: { ...item.metadata, lock: dep, lockIdentity, installExpression }
       };
-    });
+    }), dependencies);
   }
   async checkUpdates(scope: Scope, installed?: PackageItem[]): Promise<UpdateRow[]> {
     const result = await this.checked(['outdated', ...(scope.kind === 'global' ? ['--global'] : [])], scope.kind === 'global' ? this.home : scope.path);
@@ -364,6 +364,34 @@ function dependencyIdentity(dep: Record<string, unknown>): string | undefined {
   const host = typeof dep.host === 'string' && dep.host !== 'github.com' && !dep.registry_prefix ? `${dep.host}/` : '';
   const virtual = dep.is_virtual && typeof dep.virtual_path === 'string' ? `/${dep.virtual_path}` : '';
   return `${host}${dep.repo_url}${virtual}`;
+}
+
+/**
+ * Mirrors `apm deps tree`: replacement pins list every incoming request parent; other pins name one
+ * `resolved_by` parent, which is a unique key in current lockfiles and a repository URL at depth-1 in legacy ones.
+ */
+function withRequiredBy(items: PackageItem[], dependencies: Record<string, unknown>[]): PackageItem[] {
+  const depth = (dep: Record<string, unknown>) => typeof dep.depth === 'number' ? dep.depth : 1;
+  const parentOf = (key: string, child: Record<string, unknown>) => {
+    const keyed = dependencies.filter(dep => dependencyIdentity(dep) === key);
+    if (keyed.length) return keyed.length === 1 ? keyed[0] : undefined;
+    const legacy = dependencies.filter(dep => dep.repo_url === key && depth(dep) === depth(child) - 1);
+    return legacy.length === 1 ? legacy[0] : undefined;
+  };
+  return items.map(item => {
+    const lock = item.metadata?.lock;
+    if (item.direct !== false || !record(lock)) return item;
+    const requests = record(lock.replacement) && Array.isArray(lock.replacement.requests) ? lock.replacement.requests.filter(record) : undefined;
+    const keys = [...new Set((requests ? requests.map(request => request.parent) : [lock.resolved_by])
+      .filter((key): key is string => typeof key === 'string' && !!key))];
+    if (!keys.length) return item;
+    const requiredBy = keys.map(key => {
+      const dep = parentOf(key, lock);
+      const parent = dep && items.find(candidate => candidate.metadata?.lock === dep);
+      return parent ? { name: parent.name, id: parent.id } : { name: dep ? dependencyIdentity(dep) ?? key : key };
+    });
+    return { ...item, requiredBy };
+  });
 }
 
 function matchesDependency(identity: string, dep: Record<string, unknown>): boolean {

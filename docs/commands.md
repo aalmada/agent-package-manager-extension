@@ -11,6 +11,7 @@ Every extension command starts with **APM:** in the Command Palette (**View** > 
 | Command | What it does | Also available from | Shown when |
 | --- | --- | --- | --- |
 | **APM: Install Package** | Install a catalog package or a package source. See [Install a package](managing-packages.md#install-a-package). | **Install a package** in the APM view | Always |
+| **APM: Open Package Browser** | Browse packages in a large window. See [Package browser window](package-browser.md#package-browser-window). | **Open Package Browser** in the APM view toolbar | Always |
 | **APM: Open Marketplace Settings** | Open the `apm.marketplaces` setting. See [Marketplaces](marketplaces.md). | **Add marketplace** in the APM view | Always |
 | **APM: Install or Upgrade CLI** | Install or upgrade the APM CLI. See [Set up the APM CLI](getting-started.md#set-up-the-apm-cli). | **Install APM CLI** in the APM view; **Update APM** in compatibility notifications | Always |
 | **APM: Run Doctor** | Run `apm doctor` and open the health check in a read-only document. | **Run Doctor** in error notifications | Always |
@@ -33,7 +34,7 @@ Every extension command starts with **APM:** in the Command Palette (**View** > 
 
 | Command | What it does | Also available from | Shown when |
 | --- | --- | --- | --- |
-| **APM: View Dependency Tree** | Open `apm deps tree` for the current scope. See [Dependencies](dependencies.md#view-the-dependency-tree). | **View dependency tree** in dependency mode; More APM Actions | Trusted |
+| **APM: View Dependency Tree** | Open `apm deps tree` for the current scope. See [Dependencies](dependencies.md#view-the-dependency-tree). | **View dependency tree** in dependency mode; **Tree** on the package browser window's **Dependencies** page; More APM Actions | Trusted |
 | **APM: Explain Dependency** | Explain why an installed package is present. | **Explain dependency** on package pages; More APM Actions | Trusted |
 | **APM: Find File Owner** | Find which package deployed a file. | Explorer and editor context menus; More APM Actions | Trusted, folder |
 | **APM: Dependency Reports** | Check outdated dependencies, or view or save an SBOM. | More APM Actions | Trusted |

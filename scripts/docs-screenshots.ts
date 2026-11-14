@@ -6,6 +6,7 @@ import { chromium, type Page } from '@playwright/test';
 import { descriptors } from '../src/apm/commands';
 import { withInstallations } from '../src/apm/packageState';
 import type { ActionResult } from '../src/apm/actions';
+import type { DependencyTreeNode } from '../src/apm/dependencyTree';
 import type { PackageItem, Scope } from '../src/apm/types';
 import type { State } from '../src/protocol';
 
@@ -40,6 +41,8 @@ const theme = `:root {
   --vscode-badge-background: #616161;
   --vscode-badge-foreground: #f8f8f8;
   --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-inactiveSelectionBackground: #37373d;
+  --vscode-progressBar-background: #0078d4;
   --vscode-icon-foreground: #cccccc;
   --vscode-textLink-foreground: #4daafc;
   --vscode-editorWarning-foreground: #cca700;
@@ -73,13 +76,23 @@ const catalogEntries = [
   entry('team-skills', 'release-notes', '1.0.0', 'Summarize merged changes into release notes')
 ];
 const catalogItem = (name: string) => catalogEntries.find(item => item.name === name)!;
+const lockIdentity = (identity: string) => ({ metadata: { lockIdentity: identity } });
 const installed: PackageItem[] = [
-  { ...catalogItem('code-review'), version: '2.0.0', installed: true, scope: workspace, direct: true, updateStatus: 'outdated', latestVersion: '2.1.0' },
-  { ...catalogItem('docs-writer'), installed: true, scope: workspace, direct: true, updateStatus: 'current' },
+  { ...catalogItem('code-review'), version: '2.0.0', installed: true, scope: workspace, direct: true, updateStatus: 'outdated', latestVersion: '2.1.0',
+    ...lockIdentity('contoso/agent-plugins/plugins/code-review') },
+  { ...catalogItem('docs-writer'), installed: true, scope: workspace, direct: true, updateStatus: 'current', ...lockIdentity('contoso/team-skills/plugins/docs-writer') },
   { ...catalogItem('azure-diagnostics'), installed: true, scope: global, direct: true, updateStatus: 'current' },
   { id: 'contoso/agent-plugins/skills/markdown-lint', name: 'markdown-lint', marketplace: '', source: 'contoso/agent-plugins/skills/markdown-lint',
-    version: '1.2.0', description: 'Lint Markdown before review', installed: true, scope: workspace, direct: false, updateStatus: 'current' }
+    version: '1.2.0', description: 'Lint Markdown before review', installed: true, scope: workspace, direct: false, updateStatus: 'current',
+    requiredBy: [{ name: 'code-review', id: 'contoso-agents::code-review' }], ...lockIdentity('contoso/agent-plugins/skills/markdown-lint') }
 ];
+const treeNode = (packageName: string, version: string, children: DependencyTreeNode[] = []): DependencyTreeNode =>
+  ({ label: `${packageName}@${version}`, packageName, version, children });
+const workspaceTree: DependencyTreeNode = { label: 'contoso-web (local)', children: [
+  treeNode('contoso/agent-plugins/plugins/code-review', '2.0.0', [
+    treeNode('contoso/agent-plugins/skills/markdown-lint', '1.2.0'), { label: '2 skills', children: [] }, { label: '1 agent', children: [] }]),
+  treeNode('contoso/team-skills/plugins/docs-writer', '1.4.0', [{ label: '1 skill', children: [] }])
+] };
 
 function browserState(overrides: Partial<State> = {}): State {
   return {
@@ -144,7 +157,7 @@ async function render(page: Page, state: State, search?: string, saved?: object)
   await page.addScriptTag({ content: `Object.defineProperty(window, 'acquireVsCodeApi', { value: () => ({ getState: () => (${JSON.stringify(saved ?? null)}) ?? undefined, setState: () => undefined, postMessage: () => undefined }) });` });
   await page.addScriptTag({ path: script });
   await page.evaluate(post({ type: 'state', state }));
-  await page.waitForSelector(state.mode === 'browser' ? '#app.sidebar' : '#app.editor');
+  await page.waitForSelector(state.mode === 'browser' ? '#app.sidebar' : state.gallery ? '#app.gallery' : '#app.editor');
   if (search !== undefined) await page.evaluate(post({ type: 'setSearch', search }));
   await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
 }
@@ -153,6 +166,9 @@ async function render(page: Page, state: State, search?: string, saved?: object)
 interface Shot { file: string; width: number; height: number; state: State; search?: string; saved?: object; fullPage?: boolean; until?: string }
 const shots: Shot[] = [
   { file: 'package-browser.png', width: 340, height: 820, state: browserState(), saved: { sizes: { catalog: 185, installed: 140, updates: 55 } } },
+  { file: 'package-browser-window.png', width: 1100, height: 560, state: browserState({ mode: 'gallery', gallery: true, browserSearch: '' }) },
+  { file: 'package-browser-dependency-tree.png', width: 1100, height: 380, saved: { gallerySection: 'dependencies', dependencyView: 'tree' },
+    state: browserState({ mode: 'gallery', gallery: true, browserSearch: '', dependencyTrees: { [`workspace:${workspace.path}`]: { root: workspaceTree } } }) },
   { file: 'search-filters.png', width: 340, height: 360, state: browserState(), search: '@installed @scope:workspace' },
   { file: 'dependencies.png', width: 340, height: 480, state: browserState(), search: '@dependencies' },
   { file: 'initialize-project.png', width: 340, height: 300, search: '@installed',

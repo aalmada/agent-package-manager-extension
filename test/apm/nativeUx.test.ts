@@ -109,6 +109,7 @@ test('target and recovery adapters reflect null sources and reject malformed row
   assert.throws(() => parseMessage({ type: 'workflow', workflow: '__proto__' }), /Unknown/);
   assert.deepEqual(parseMessage({ type: 'workflow', workflow: 'doctor' }), { type: 'workflow', workflow: 'doctor' });
   assert.deepEqual(parseMessage({ type: 'navigate', id: 'content:0' }), { type: 'navigate', id: 'content:0' });
+  assert.deepEqual(parseMessage({ type: 'back' }), { type: 'back' });
   assert.ok(recoveryActions('Authentication failed (401)').includes('authentication'));
   assert.ok(recoveryActions('No marketplace.json found in owner/private').includes('authentication'));
   assert.ok(recoveryActions('Repository not found (404)').includes('authentication'));

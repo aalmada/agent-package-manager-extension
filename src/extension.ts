@@ -6,7 +6,7 @@ import { ApmClient } from './apm/client';
 import { record, type VariablePrompt } from './apm/adapters';
 import { descriptors, buildCommandArguments, requiresTerminal } from './apm/commands';
 import type { Marketplace, PackageItem, Probe, Scope } from './apm/types';
-import type { Message, Mode, PackageSection, State } from './protocol';
+import type { DependencyTreeView, Message, Mode, PackageSection, State } from './protocol';
 import { inScope, isSameScope, parseMessage, scopeKey, scopeLabel } from './protocol';
 import { SettingsSync } from './config/sync';
 import { webviewHtml } from './views/html';
@@ -27,9 +27,13 @@ import { cliEnvironment } from './auth/cli';
 import { repositoryFromPackageSource, type Repository } from './auth/repositories';
 import { parseDependencyTree } from './apm/dependencyTree';
 
+/** `output` and `exitCode` stay on the host for "Open as text"; `signature` detects later package changes. */
+interface StoredDependencyTree extends DependencyTreeView { output?: string; exitCode?: number; signature?: string }
 interface PanelContext {
   webview?: vscode.Webview;
   mode: Mode | 'native';
+  /** The large package browser: it shows package details in place instead of opening separate panels. */
+  gallery?: boolean;
   panel?: vscode.WebviewPanel;
   scope?: Scope;
   item?: PackageItem;
@@ -42,14 +46,24 @@ interface PanelContext {
   retry?: () => Promise<void>;
   authenticationRepository?: Repository;
   preview?: { id: string; args: Record<string, string>; options: Record<string, unknown>; title: string; action: PackageAction };
+  /** Package browser window only; survives moving between its list and details pages. */
+  dependencyTrees?: Map<string, StoredDependencyTree>;
 }
 
 const remoteRefreshInterval = 5 * 60_000;
+const packageBrowserViewType = 'apm.packageBrowser';
+const packageBrowserUri = () => vscode.Uri.from({ scheme: 'apm-browser', path: '/Agent Package Manager' });
+// VS Code's internal MODAL_GROUP; `vscode.openWith` maps every public ViewColumn to a main editor group.
+const modalEditorGroup = -4;
+function supportsModalEditors() {
+  return vscode.workspace.getConfiguration('workbench.editor').inspect?.('useModal')?.defaultValue !== undefined;
+}
 
 class ApmExtension implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel('APM');
   private readonly subscriptions: vscode.Disposable[] = [];
   private readonly panels = new Map<string, PanelContext>();
+  private galleryId = 0;
   private sidebar?: PanelContext;
   private sidebarView?: vscode.WebviewView;
   private search = '';
@@ -120,7 +134,7 @@ class ApmExtension implements vscode.Disposable {
       if (event.affectsConfiguration('apm.executablePath')) { this.epoch++; this.state.version = undefined; this.probeSnapshots.clear(); this.clearRemoteSnapshots(); this.scheduleRefresh(); }
       if (event.affectsConfiguration('apm.allowRemoteImages')) {
         for (const entry of this.panels.values()) {
-          if (entry.mode !== 'details') continue;
+          if (entry.mode !== 'details' && !entry.gallery) continue;
           if (typeof entry.extra.details?.readme === 'string') this.setReadme(entry, entry.extra.details.readme);
           if (entry.webview) entry.webview.html = webviewHtml(entry.webview, this.context.extensionUri, this.allowRemoteImages());
         }
@@ -224,10 +238,33 @@ class ApmExtension implements vscode.Disposable {
       })
     );
   }
+  async openPackageBrowser() {
+    const existing = [...this.panels.values()].filter(entry => entry.gallery && entry.panel).at(-1);
+    if (existing?.panel) { existing.panel.reveal(); return; }
+    const uri = packageBrowserUri();
+    if (supportsModalEditors()) {
+      try {
+        await vscode.commands.executeCommand('_workbench.openWith', uri, packageBrowserViewType, [modalEditorGroup, { pinned: true }]);
+        return;
+      } catch (error) { this.output.appendLine(`\nCould not open the package browser as a modal editor: ${redact(String(error))}`); }
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, packageBrowserViewType, vscode.ViewColumn.Active);
+  }
+  resolvePackageBrowser(panel: vscode.WebviewPanel) {
+    const key = `gallery:${++this.galleryId}`;
+    const context = this.attach(panel.webview, 'gallery', panel);
+    context.gallery = true;
+    this.panels.set(key, context);
+    panel.onDidDispose(() => {
+      context.detailsRequest = (context.detailsRequest ?? 0) + 1;
+      context.detailsController?.abort();
+      this.panels.delete(key);
+    });
+  }
   private attach(webview: vscode.Webview, mode: Mode, panel?: vscode.WebviewPanel): PanelContext {
     const context: PanelContext = { webview, mode, panel, extra: {} };
     webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
-    webview.html = webviewHtml(webview, this.context.extensionUri, mode === 'details' && this.allowRemoteImages());
+    webview.html = webviewHtml(webview, this.context.extensionUri, mode !== 'browser' && this.allowRemoteImages());
     this.subscriptions.push(webview.onDidReceiveMessage((raw: unknown) => {
       void Promise.resolve().then(() => this.handle(parseMessage(raw), context)).catch(error => this.report(error, context));
     }));
@@ -239,10 +276,22 @@ class ApmExtension implements vscode.Disposable {
       ...this.state, ...context.extra, mode: context.mode, trusted: vscode.workspace.isTrusted,
       host: this.hostLabel(),
       browserSearch: this.search,
+      ...(context.gallery ? { gallery: true, dependencyTrees: this.dependencyTreeViews(context) } : {}),
       errors: context.refreshError ? [...this.state.errors, context.refreshError] : this.state.errors,
       ...(context.scope ? { scopeKey: scopeKey(context.scope) } : {}), ...(context.item ? { item: context.item } : {})
     };
     void context.webview?.postMessage({ type: 'state', state: safePayload(state) });
+  }
+  private dependencyTreeViews(context: PanelContext): Record<string, DependencyTreeView> | undefined {
+    if (!context.dependencyTrees?.size) return undefined;
+    return Object.fromEntries([...context.dependencyTrees].map(([key, { root, loading, error, signature }]) => [key, {
+      ...(root ? { root } : {}), ...(loading ? { loading } : {}), ...(error ? { error } : {}),
+      ...(signature !== undefined && signature !== this.installedSignature(key) ? { stale: true } : {})
+    }]));
+  }
+  private installedSignature(key: string) {
+    return this.state.installed.filter(item => item.scope && scopeKey(item.scope) === key)
+      .map(item => `${String(item.metadata?.lockIdentity ?? item.id)}@${item.version}`).sort().join('\n');
   }
   private broadcast() {
     this.updateBadge();
@@ -969,6 +1018,41 @@ class ApmExtension implements vscode.Disposable {
       if (!controller.signal.aborted) throw error;
     } finally { this.nativeOperations.delete(context); }
   }
+  /** Loads `apm deps tree` into the package browser window instead of a text document, which would close a modal window. */
+  private async loadDependencyTree(context: PanelContext, scope: Scope) {
+    const key = scopeKey(scope), trees = context.dependencyTrees ??= new Map();
+    const previous = trees.get(key);
+    if (previous?.loading) return;
+    trees.set(key, { ...previous, loading: true, error: undefined });
+    this.send(context);
+    let next = previous;
+    try {
+      const result = await this.executeInspection({ ...scope }, `Dependency tree — ${scope.label}`,
+        ['deps', 'tree', ...(scope.kind === 'global' ? ['--global'] : [])]);
+      if (result) {
+        const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+        next = { output, exitCode: result.exitCode, signature: this.installedSignature(key) };
+        if (result.exitCode !== 0) next.error = `APM exited with code ${result.exitCode}. Open the report as text to review its output.`;
+        else if (!output) next.error = 'APM returned an empty dependency report. Review APM Output.';
+        else {
+          try { next.root = parseDependencyTree(redact(result.stdout)); }
+          catch (error) { next.error = `${error instanceof Error ? error.message : String(error)} Open the report as text to review its output.`; }
+        }
+      }
+    } catch (error) {
+      next = { error: redact(error instanceof Error ? error.message : String(error)) };
+      throw error;
+    } finally {
+      if (next) trees.set(key, next); else trees.delete(key);
+      if ([...this.panels.values()].includes(context)) this.send(context);
+    }
+  }
+  private async showDependencyTreeText(context: PanelContext, scope: Scope) {
+    const tree = context.dependencyTrees?.get(scopeKey(scope));
+    if (tree?.output === undefined || tree.loading) { await this.refreshDependencyTree(scope); return; }
+    await this.showTextResult(`Dependency tree — ${scope.label}`,
+      `Exit code: ${tree.exitCode}\n\n${tree.output || 'APM exited without returning report text.'}`);
+  }
   async refreshDependencyTree(capturedScope?: Scope) {
     const scope = { ...(capturedScope ?? this.scope()) };
     await this.showDependencyReport(scope, `Dependency tree — ${scope.label}`,
@@ -1245,7 +1329,7 @@ class ApmExtension implements vscode.Disposable {
     this.updateFilterContext();
     await this.refresh();
   }
-  private async openDetails(id: string, key?: string) {
+  private async openDetails(id: string, key?: string, gallery?: PanelContext) {
     this.requireTrust();
     const scope = key ? this.state.scopes.find(scope => scopeKey(scope) === key) : this.scope();
     if (!scope) throw new Error('This package scope is no longer available.');
@@ -1256,12 +1340,32 @@ class ApmExtension implements vscode.Disposable {
       ?? (key ? undefined : findInstalledPackage({ ...listed, scope: undefined }, this.state.installed))
       ?? (catalog ? { ...catalog, scope, installed: false, updateStatus: undefined, latestVersion: undefined, updateStale: undefined } : undefined);
     if (!item) throw new Error('Package is no longer available. Refresh and retry.');
-    await this.openPackageDetails(item, { ...(item.scope ?? scope) });
+    if (gallery) await this.showGalleryDetails(gallery, item, { ...(item.scope ?? scope) });
+    else await this.openPackageDetails(item, { ...(item.scope ?? scope) });
+  }
+  private async showGalleryDetails(context: PanelContext, item: PackageItem, scope: Scope) {
+    if (context.controller) throw new Error('Another action is already running on this page. Wait for it or cancel it.');
+    this.resetGalleryPage(context, 'details');
+    context.scope = scope; context.item = item;
+    await this.loadDetails(context);
+  }
+  private showPackageList(context: PanelContext) {
+    if (!context.gallery || context.mode !== 'details') return;
+    if (context.controller) throw new Error('Another action is already running on this page. Wait for it or cancel it.');
+    this.resetGalleryPage(context, 'gallery');
+    this.send(context);
+  }
+  private resetGalleryPage(context: PanelContext, mode: 'gallery' | 'details') {
+    context.detailsRequest = (context.detailsRequest ?? 0) + 1;
+    context.detailsController?.abort();
+    context.detailsController = undefined;
+    Object.assign(context, { mode, scope: undefined, item: undefined, extra: {}, navigation: undefined, retry: undefined,
+      preview: undefined, refreshError: undefined, authenticationRepository: undefined });
   }
   private async openPackageDetails(item: PackageItem, scope: Scope) {
     this.requireTrust();
     const key = `details:${scopeKey(scope)}:${item.sourceIdentity ?? item.id}`;
-    let entry = this.panels.get(key) ?? [...this.panels.values()].find(entry =>
+    let entry = this.panels.get(key) ?? [...this.panels.values()].find(entry => !entry.gallery &&
       entry.mode === 'details' && entry.scope && isSameScope(entry.scope, scope) && entry.item && samePackage(entry.item, item));
     if (!entry) {
       const panel = vscode.window.createWebviewPanel('apm.details', item.name, vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
@@ -1323,7 +1427,7 @@ class ApmExtension implements vscode.Disposable {
   private async handle(message: Message, context: PanelContext) {
     if (message.type !== 'ready' && message.type !== 'filters') context.extra.error = undefined;
     switch (message.type) {
-      case 'ready': this.send(context); if (context.mode === 'browser' || !this.state.version) await this.refresh(); break;
+      case 'ready': this.send(context); if (context.mode === 'browser' || context.mode === 'gallery' || !this.state.version) await this.refresh(); break;
       case 'refresh': await this.refreshAll(); break;
       case 'scope': {
         const scope = this.state.scopes.find(s => scopeKey(s) === message.key);
@@ -1336,18 +1440,26 @@ class ApmExtension implements vscode.Disposable {
         await this.selectScope(message.key); break;
       }
       case 'filters':
-        if (context.mode === 'browser' && message.search !== this.search) this.setSearch(message.search);
+        if ((context.mode === 'browser' || context.gallery) && message.search !== this.search) this.setSearch(message.search);
         break;
       case 'dependencies': {
         this.requireTrust();
         const scope = this.scope(context);
         if (!this.state.scopes.some(candidate => isSameScope(candidate, scope))) throw new Error('This package scope is no longer available. Select a current workspace or global scope.');
         if (scopeKey(scope) !== this.state.scopeKey) await this.selectScope(scopeKey(scope));
+        this.showPackageList(context);
         this.setSearch('@dependencies');
-        await vscode.commands.executeCommand('apm.browser.focus');
+        if (!context.gallery) await vscode.commands.executeCommand('apm.browser.focus');
         break;
       }
-      case 'dependencyTree': await this.refreshDependencyTree(this.scope(context)); break;
+      case 'dependencyTree': case 'dependencyTreeText': {
+        const scope = message.scopeKey === undefined ? this.scope(context) : this.state.scopes.find(candidate => scopeKey(candidate) === message.scopeKey);
+        if (!scope) throw new Error('This package scope is no longer available. Select a current workspace or global scope.');
+        if (message.type === 'dependencyTreeText') await this.showDependencyTreeText(context, scope);
+        else if (context.gallery && message.scopeKey !== undefined) await this.loadDependencyTree(context, scope);
+        else await this.refreshDependencyTree(scope);
+        break;
+      }
       case 'actions': await this.moreActions(); break;
       case 'dependencyWhy': {
         const scope = this.state.scopes.find(candidate => scopeKey(candidate) === message.scopeKey);
@@ -1363,7 +1475,7 @@ class ApmExtension implements vscode.Disposable {
       case 'openTarget': await this.openTarget(message.target, context); break;
       case 'retry':
         if (context.retry) await context.retry();
-        else if (context.mode === 'browser') await this.refreshAll();
+        else if (context.mode === 'browser' || context.mode === 'gallery') await this.refreshAll();
         else if (context.mode === 'details') await this.loadDetails(context);
         else throw new Error('Select and run an APM command before retrying.');
         break;
@@ -1373,7 +1485,8 @@ class ApmExtension implements vscode.Disposable {
         await openNavigation(target);
         break;
       }
-      case 'details': await this.openDetails(message.id, message.scopeKey); break;
+      case 'details': await this.openDetails(message.id, message.scopeKey, context.gallery ? context : undefined); break;
+      case 'back': this.showPackageList(context); break;
       case 'install': await this.installPackage({ ...this.scope(context) }); break;
       case 'marketplaces': await openSettings('apm.marketplaces'); break;
       case 'setup': await this.setup(); break;
@@ -1412,7 +1525,7 @@ class ApmExtension implements vscode.Disposable {
           const installed = findInstalledPackage({ ...context.item, scope: target }, this.state.installed);
           const item = installed ?? { ...(catalog ?? context.item), scope: target, installed: false,
             updateStatus: undefined, latestVersion: undefined, updateStale: undefined };
-          if (context.panel) {
+          if (context.panel && !context.gallery) {
             const entry = await this.openPackageDetails(item, target);
             await this.packageAction(action, entry, true);
             return;
@@ -1854,7 +1967,10 @@ export function activate(context: vscode.ExtensionContext) {
   const extension = new ApmExtension(context);
   context.subscriptions.push(extension, vscode.window.registerWebviewViewProvider('apm.browser', {
     resolveWebviewView: view => extension.resolveWebviewView(view)
-  }, { webviewOptions: { retainContextWhenHidden: true } }));
+  }, { webviewOptions: { retainContextWhenHidden: true } }), vscode.window.registerCustomEditorProvider(packageBrowserViewType, {
+    openCustomDocument: (uri: vscode.Uri): vscode.CustomDocument => ({ uri, dispose() {} }),
+    resolveCustomEditor: (_document: vscode.CustomDocument, panel: vscode.WebviewPanel) => extension.resolvePackageBrowser(panel)
+  }, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   for (const [command, callback] of [
     ...Object.keys(workflowCommands).filter(workflow => workflow !== 'previewInstall' && workflow !== 'policy').map(workflow => [`apm.${workflow}`, (uri?: unknown) => extension.workflow(workflow as Workflow, uri instanceof vscode.Uri ? uri : undefined)] as const),
     ['apm.targets', (uri?: unknown) => extension.showTargets(undefined, uri instanceof vscode.Uri ? uri : undefined)],
@@ -1871,6 +1987,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.lifecycle', () => extension.lifecycleWorkflows()],
     ['apm.reports.dependencies', () => extension.dependencyReports()],
     ['apm.refresh', () => extension.refreshAll()],
+    ['apm.openPackageBrowser', () => extension.openPackageBrowser()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
     ...(['catalog', 'installed', 'updates'] as const).map(section => [`apm.views.${section}`, () => extension.toggleSection(section)] as const),

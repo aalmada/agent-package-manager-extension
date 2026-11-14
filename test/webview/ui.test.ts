@@ -6,6 +6,7 @@ import { buildSync } from 'esbuild';
 import { descriptors } from '../../src/apm/commands';
 import type { BrowserSection, State, Message } from '../../src/protocol';
 import { renderMarkdown } from '../../src/views/markdown';
+import type { DependencyTreeNode } from '../../src/apm/dependencyTree';
 import { parseOutdated } from '../../src/apm/adapters';
 import { applyUpdateRows, getUpdateBadge, reconcileDetailContexts, withCatalogInfo, withInstallations } from '../../src/apm/packageState';
 
@@ -244,8 +245,12 @@ test('one browser view keeps search and filter controls above all sections', () 
 test('title actions use native overflow with Views before Settings', () => {
   const contributions = JSON.parse(readFileSync('package.json', 'utf8')).contributes;
   const actions = contributions.menus['view/title'];
-  assert.deepEqual(actions.filter((item: { group: string; when: string }) => item.group === 'navigation' && item.when === 'view == apm.browser').map((item: { command: string }) => item.command), ['apm.refresh']);
-  const overflow = actions.filter((item: { group: string }) => item.group !== 'navigation');
+  const navigation = actions.filter((item: { group: string; when: string }) => item.group.startsWith('navigation') && item.when === 'view == apm.browser')
+    .sort((a: { group: string }, b: { group: string }) => a.group.localeCompare(b.group));
+  assert.deepEqual(navigation.map((item: { command: string }) => item.command), ['apm.refresh', 'apm.openPackageBrowser'],
+    'The package browser opens between Refresh and the overflow menu');
+  assert.equal(contributions.commands.find((item: { command: string }) => item.command === 'apm.openPackageBrowser').icon, '$(screen-full)');
+  const overflow = actions.filter((item: { group: string }) => !item.group.startsWith('navigation'));
   assert.equal(overflow[0].submenu, 'apm.views');
   assert.equal(overflow[1].command, 'apm.settings');
   assert.ok(overflow[0].group < overflow[1].group);
@@ -889,4 +894,141 @@ test('plugin page buttons run package actions and show results in place', () => 
   const labels = [...page.document.querySelectorAll('.toolbar button')].map(b => b.textContent);
   assert.deepEqual(labels.slice(0, 2), ['Install', 'Install version…']);
   assert.equal(labels.includes('Audit'), false);
+});
+
+test('package browser groups cards by marketplace, filters in place and opens details with a back button', () => {
+  const page = browser();
+  try {
+    page.state.installed.push({ id: 'direct::tool', name: 'tool', marketplace: '', version: '3.0.0', installed: true, description: 'Direct install',
+      scope: { kind: 'global', path: '/home/.apm', label: 'Global (user)' } });
+    Object.assign(page.state, { mode: 'gallery', gallery: true, browserSearch: '' });
+    page.update();
+    const root = page.document.querySelector<HTMLElement>('#app')!;
+    assert.equal(root.className, 'gallery');
+    assert.deepEqual([...page.document.querySelectorAll('.gallery-nav-item')].map(item =>
+      [item.querySelector('.gallery-nav-label')?.textContent, item.querySelector('.gallery-nav-count')?.textContent]),
+    [['Catalog', '2'], ['Installed', '2'], ['Updates', '1'], ['Dependencies', '2']]);
+    assert.equal(page.document.querySelector('#gallery-nav-catalog')!.getAttribute('aria-current'), 'page');
+    assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Browse packages');
+    assert.deepEqual([...page.document.querySelectorAll('.gallery-group-heading > span:first-child')].map(node => node.textContent), ['one', 'two']);
+    assert.equal(page.document.querySelector('.gallery-main img'), null, 'Packages have no icons');
+
+    page.document.querySelector<HTMLButtonElement>('#gallery-nav-installed')!.click();
+    assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Installed packages');
+    assert.deepEqual([...page.document.querySelectorAll('.gallery-group-heading > span:first-child')].map(node => node.textContent), ['one', 'Other sources']);
+    assert.match(page.document.querySelector('.gallery-group:last-of-type .package-card')!.textContent!, /tool.*3\.0\.0.*Direct install.*Global/);
+    page.document.querySelector<HTMLButtonElement>('#gallery-nav-catalog')!.click();
+
+    const select = page.document.querySelector<HTMLSelectElement>('#gallery-marketplace')!;
+    select.value = 'two';
+    select.dispatchEvent(new page.dom.window.Event('change'));
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"@marketplace:two"}');
+    assert.deepEqual([...page.document.querySelectorAll('.package-card strong')].map(node => node.textContent), ['sample']);
+    page.state.browserSearch = '@marketplace:two'; page.update();
+    assert.equal(page.document.querySelector<HTMLSelectElement>('#gallery-marketplace')!.value, 'two');
+
+    const card = page.document.querySelector<HTMLButtonElement>('.package-card')!;
+    const cardId = card.id;
+    card.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"details","id":"two::sample"}');
+    Object.assign(page.state, { mode: 'details', item: page.state.catalog[1] });
+    page.update();
+    assert.equal(root.dataset.page, 'details');
+    assert.ok(page.document.querySelector('.gallery-nav'), 'Details keep the section navigation');
+    assert.equal(page.document.querySelector('#gallery-nav-catalog')!.getAttribute('aria-current'), null);
+    const back = page.document.querySelector<HTMLButtonElement>('#gallery-back')!;
+    assert.equal(page.document.activeElement, back);
+    back.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"back"}');
+    page.state.actionResult = { action: 'install', title: 'Install sample', status: 'running', command: 'apm install sample' };
+    page.update();
+    assert.equal(page.document.querySelector<HTMLButtonElement>('#gallery-back')!.disabled, true);
+
+    Object.assign(page.state, { mode: 'gallery', item: undefined, actionResult: undefined });
+    page.update();
+    assert.equal(root.dataset.page, 'list');
+    assert.equal(page.document.activeElement?.id, cardId, 'Returning restores focus to the opened card');
+  } finally { page.dom.window.close(); }
+});
+
+test('package browser dependencies page lists parents and loads an accessible tree only on request', () => {
+  const page = browser();
+  try {
+    const workspace = page.state.scopes[0], global = { kind: 'global' as const, path: '/home/.apm', label: 'Global (user)' };
+    const parent = { id: 'one::parent', name: 'parent', marketplace: 'one', version: '1.0.0', installed: true, direct: true, scope: workspace,
+      metadata: { lockIdentity: 'team/parent' } };
+    const child = { id: 'two::child', name: 'child', marketplace: 'two', version: '2.0.0', installed: true, direct: false, scope: workspace,
+      description: 'Shared helper', requiredBy: [{ name: 'parent', id: parent.id }, { name: 'team/missing' }], metadata: { lockIdentity: 'team/child' } };
+    Object.assign(page.state, { mode: 'gallery', gallery: true, browserSearch: '', scopes: [workspace, global], installed: [parent, child] });
+    page.update();
+    const messages = () => page.messages.map(message => JSON.stringify(message));
+    page.document.querySelector<HTMLButtonElement>('#gallery-nav-dependencies')!.click();
+    assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Dependencies');
+    assert.deepEqual([...page.document.querySelectorAll('.gallery-group-heading > span:first-child')].map(node => node.textContent),
+      ['Direct dependencies', 'Transitive dependencies']);
+    assert.equal(page.document.querySelector('#card-transitive-workspace\\:\\/project-two\\:\\:child .required-by')?.textContent, 'Required by parent, team/missing');
+
+    page.document.querySelector<HTMLButtonElement>('#dependency-view-tree')!.click();
+    assert.equal(page.document.querySelector('#dependency-view-tree')!.getAttribute('aria-pressed'), 'true');
+    assert.equal(page.document.querySelector('[role="tree"]'), null);
+    assert.ok(!messages().some(message => message.includes('dependencyTree')), 'Choosing the tree view does not run APM');
+    assert.deepEqual([...page.document.querySelectorAll<HTMLOptionElement>('#dependency-tree-scope option')].map(option => option.textContent), ['Workspace', 'Global']);
+    page.document.querySelector<HTMLButtonElement>('#dependency-tree-load')!.click();
+    assert.equal(messages().at(-1), '{"type":"dependencyTree","scopeKey":"workspace:/project"}');
+
+    page.state.dependencyTrees = { 'workspace:/project': { loading: true } }; page.update();
+    assert.equal(page.document.querySelector<HTMLButtonElement>('#dependency-tree-load')!.disabled, true);
+    assert.match(page.document.querySelector('[role="status"]')!.textContent!, /Loading dependency tree/);
+    const packageNode = (key: string, version: string, children: DependencyTreeNode[] = [], note?: DependencyTreeNode['note']): DependencyTreeNode =>
+      ({ label: `${key}@${version}`, packageName: key, version, ...(note ? { note } : {}), children });
+    page.state.dependencyTrees = { 'workspace:/project': { root: { label: 'project (local)', children: [
+      packageNode('team/parent', '1.0.0', [packageNode('team/child', '2.0.0', [packageNode('team/parent', '1.0.0', [], 'circular')]), { label: '16 skills', children: [] }])
+    ] } } };
+    page.update();
+    const items = () => [...page.document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    assert.deepEqual(items().map(item => [item.getAttribute('aria-level'), item.getAttribute('aria-label')]),
+      [['1', 'parent, 1.0.0'], ['2', 'child, 2.0.0'], ['3', 'parent, 1.0.0, Circular'], ['2', '16 skills']]);
+    assert.equal(items()[0].getAttribute('aria-expanded'), 'true');
+    assert.equal(items()[0].querySelector('.dependency-key')?.textContent, 'team/parent');
+    assert.deepEqual(items().map(item => item.tabIndex), [0, -1, -1, -1]);
+    const key = (name: string) => page.document.activeElement!.dispatchEvent(new page.dom.window.KeyboardEvent('keydown', { key: name, bubbles: true }));
+    items()[0].focus();
+    key('ArrowDown');
+    assert.equal(page.document.activeElement, items()[1]);
+    key('ArrowLeft');
+    assert.equal(items()[1].getAttribute('aria-expanded'), 'false');
+    assert.equal(items().length, 3);
+    assert.equal(page.document.activeElement, items()[1], 'Collapsing keeps keyboard focus');
+    key('ArrowRight');
+    assert.equal(items().length, 4);
+    key('Enter');
+    assert.equal(messages().at(-1), '{"type":"details","id":"two::child","scopeKey":"workspace:/project"}');
+    page.document.querySelector<HTMLButtonElement>('#dependency-tree-text')!.click();
+    assert.equal(messages().at(-1), '{"type":"dependencyTreeText","scopeKey":"workspace:/project"}');
+
+    page.state.browserSearch = 'helper'; page.update();
+    assert.deepEqual(items().map(item => item.getAttribute('aria-label')), ['parent, 1.0.0', 'child, 2.0.0', '16 skills'], 'Filters keep matching packages and their ancestors');
+    page.state.browserSearch = 'nothing'; page.update();
+    assert.match(page.document.querySelector('.gallery-content')!.textContent!, /No dependencies match your filters/);
+    page.state.browserSearch = '';
+    page.state.dependencyTrees!['workspace:/project'].stale = true; page.update();
+    assert.match(page.document.querySelector('.notice.warning')!.textContent!, /Reload it to see current dependencies/);
+    assert.equal(page.document.querySelector('#dependency-tree-load')!.textContent, 'Reload');
+    const scope = page.document.querySelector<HTMLSelectElement>('#dependency-tree-scope')!;
+    scope.value = 'global:/home/.apm'; scope.dispatchEvent(new page.dom.window.Event('change'));
+    assert.equal(page.document.querySelector('[role="tree"]'), null);
+    assert.equal(page.document.querySelector('#dependency-tree-load')!.textContent, 'Load dependency tree');
+    assert.equal((page.saved() as { dependencyView?: string }).dependencyView, 'tree');
+
+    Object.assign(page.state, { mode: 'details', item: child, scopeKey: 'workspace:/project' }); page.update();
+    assert.equal(page.document.querySelector('.dependency-relation')!.textContent,
+      'Transitive dependency required by parent, team/missing — update its parent to change the pin.');
+    page.document.querySelector<HTMLButtonElement>('.dependency-relation .link-button')!.click();
+    assert.equal(messages().at(-1), '{"type":"details","id":"one::parent","scopeKey":"workspace:/project"}');
+    [...page.document.querySelectorAll('button')].find(button => button.textContent === 'View workspace dependencies')!.click();
+    assert.equal(messages().at(-1), '{"type":"back"}', 'The window shows dependencies on its own page');
+
+    Object.assign(page.state, { mode: 'browser', gallery: false, item: undefined, browserSearch: '@dependencies' }); page.update();
+    assert.equal(page.document.querySelector('#section-body-transitive .badge:last-child')?.getAttribute('title'), 'Required by parent, team/missing');
+  } finally { page.dom.window.close(); }
 });

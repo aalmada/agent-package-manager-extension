@@ -23,7 +23,7 @@ Most operations are available from more than one place:
 
 | Where | What you can do there |
 | --- | --- |
-| **APM view** | Select the **APM** icon in the Activity Bar to browse and filter packages. Package pages offer install, preview, version, update, uninstall, audit, and dependency actions. |
+| **APM view** | Select the **APM** icon in the Activity Bar to browse and filter packages, or choose **Open Package Browser** in its toolbar for a large window with catalog, installed, update, and dependency pages. Package pages offer install, preview, version, update, uninstall, audit, and dependency actions. |
 | **Command Palette** | Run **APM:** commands to install packages, initialize, compile, validate, and audit projects, inspect dependencies, manage trust, and install MCP servers. |
 | **Context menus** | Right-click a folder, `apm.yml`, or a deployed file in the Explorer or editor, or use the buttons above an open `apm.yml`. |
 | **More APM Actions** | Open the view's **...** menu for one searchable list of dependency, trust, marketplace, MCP, and lifecycle workflows. |

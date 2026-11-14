@@ -162,6 +162,37 @@ test('direct repository installations match their catalog source without marketp
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test('installed transitive packages name the parents that require them', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-required-by-'));
+  try {
+    await mkdir(join(home, 'apm_modules'));
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [
+      { repo_url: 'team/parent', name: 'parent', version: '1.0.0' },
+      { repo_url: 'team/child', name: 'child', version: '2.0.0', depth: 2, resolved_by: 'team/parent' },
+      { repo_url: 'team/shared', name: 'shared', version: '3.0.0', depth: 2,
+        replacement: { source: 'fork/shared', requests: [{ parent: null }, { parent: 'team/parent' }, { parent: 'team/missing' }] } },
+      { repo_url: 'team/mono', is_virtual: true, virtual_path: 'a' },
+      { repo_url: 'team/mono', is_virtual: true, virtual_path: 'b' },
+      { repo_url: 'team/leaf', name: 'leaf', version: '4.0.0', depth: 2, resolved_by: 'team/mono' }
+    ] }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async () => ({ stdout: [
+      '| Package | Version | Source |',
+      ...['parent@1.0.0', 'child@2.0.0', 'shared@3.0.0', 'leaf@4.0.0'].map(entry => {
+        const [name, version] = entry.split('@');
+        return `| team/${name} | ${version} | github |`;
+      })
+    ].join('\n'), stderr: '', exitCode: 0 }));
+    const installed = await client.getInstalled({ kind: 'workspace', path: home, label: 'project' });
+    const byName = new Map(installed.map(item => [item.name, item]));
+    const parent = byName.get('parent')!;
+    assert.equal(parent.requiredBy, undefined);
+    assert.deepEqual(byName.get('child')?.requiredBy, [{ name: 'parent', id: parent.id }]);
+    assert.deepEqual(byName.get('shared')?.requiredBy, [{ name: 'parent', id: parent.id }, { name: 'team/missing' }]);
+    assert.deepEqual(byName.get('leaf')?.requiredBy, [{ name: 'team/mono' }]);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('missing package stores skip dependency-list calls but newly created stores are read immediately in both scopes', async t => {
   const home = await mkdtemp(join(tmpdir(), 'apm-store-scan-test-'));
   try {

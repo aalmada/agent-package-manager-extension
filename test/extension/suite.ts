@@ -109,6 +109,16 @@ async function steps() {
   await vscode.commands.executeCommand('apm.filter.dependencies');
   await vscode.commands.executeCommand('apm.filter.dependencies');
   await vscode.commands.executeCommand('apm.browser.focus');
+  assert.ok(commands.includes('apm.openPackageBrowser'));
+  await vscode.commands.executeCommand('apm.openPackageBrowser');
+  const packageBrowserOpen = () => vscode.window.tabGroups.all.flatMap(group => group.tabs)
+    .some(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'apm.packageBrowser');
+  await until('the package browser opens as a custom editor', packageBrowserOpen, 10_000);
+  await vscode.commands.executeCommand('apm.openPackageBrowser');
+  assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs)
+    .filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'apm.packageBrowser').length, 1, 'An open package browser is reused');
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  await until('the package browser closes', () => !packageBrowserOpen(), 10_000);
   await mkdir(join(nativeFolder.uri.fsPath, '.apm', 'instructions'), { recursive: true });
   const instructionPath = join(nativeFolder.uri.fsPath, '.apm', 'instructions', 'test.instructions.md');
   await writeFile(instructionPath, '---\ndescription: Test instruction\napplyTo: "**"\n---\nReview the code.\n');

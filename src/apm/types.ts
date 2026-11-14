@@ -10,6 +10,8 @@ export interface PackageItem {
   scope?: Scope;
   installations?: PackageItem[];
   direct?: boolean;
+  /** Lockfile parents of a transitive dependency; `id` is set when the parent is an installed package in the same scope. */
+  requiredBy?: { name: string; id?: string }[];
   updateStatus?: UpdateStatus;
   latestVersion?: string;
   updateStale?: boolean;

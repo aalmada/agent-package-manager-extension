@@ -26,7 +26,7 @@ class Task {
   constructor(readonly definition: object, readonly scope: unknown, readonly name: string, readonly source: string, readonly execution: ProcessExecution) {}
 }
 interface Execution { task: Task; terminate(): void }
-interface Panel { mode: 'native' | 'details' | 'browser'; extra: Partial<State>; item?: PackageItem; scope?: Scope; controller?: AbortController;
+interface Panel { mode: 'native' | 'details' | 'browser' | 'gallery'; gallery?: boolean; panel?: unknown; extra: Partial<State>; item?: PackageItem; scope?: Scope; controller?: AbortController;
   detailsController?: AbortController; detailsRequest?: number; authenticationRepository?: { provider: 'github'; origin: string; path: string } }
 interface Harness {
   toggleSection(section: PackageSection): Promise<void>;
@@ -59,6 +59,8 @@ interface Harness {
   lifecycleWorkflows(): Promise<void>;
   dependencyReports(): Promise<void>;
   moreActions(): Promise<void>;
+  openPackageBrowser(): Promise<void>;
+  resolvePackageBrowser(panel: object): void;
 }
 
 function harness(options: { failStart?: boolean; finishDuringStart?: boolean; trusted?: boolean; root?: string;
@@ -1085,6 +1087,53 @@ test('dependency tree and why reports stay in the selected package scope', async
   assert.equal(host.executionScopes[1]?.kind, 'global');
 });
 
+test('the package browser loads dependency trees in place per scope and reuses the report as text', async () => {
+  let output = { stdout: 'project (local)\n└── owner/package@1.2.0\n    └── 16 skills', stderr: '', exitCode: 0 };
+  const host = harness({ output: () => output });
+  const workspace = host.extension.state.scopes[0], key = `${workspace.kind}:${workspace.path}`;
+  assert.equal(workspace.kind, 'workspace');
+  host.extension.state.installed = [{
+    id: 'owner/package', name: 'package', marketplace: '', version: '1.2.0', installed: true, scope: workspace, metadata: { lockIdentity: 'owner/package' }
+  }];
+  const posted: State[] = [];
+  const gallery: Panel & { webview: object } = { mode: 'gallery', gallery: true, panel: {}, extra: {}, webview: { postMessage: async (message: { state: State }) => { posted.push(message.state); } } };
+  Reflect.deleteProperty(host.extension, 'send');
+  host.extension.panels.set('gallery:1', gallery);
+
+  await host.extension.handle({ type: 'dependencyTree', scopeKey: key }, gallery);
+  assert.equal(JSON.stringify(host.argv), JSON.stringify([['deps', 'tree']]));
+  assert.equal(host.previews.length, 0, 'Loading in place opens no editor, which would close the modal window');
+  assert.equal(posted[0].dependencyTrees?.[key]?.loading, true);
+  let tree = posted.at(-1)!.dependencyTrees?.[key];
+  assert.equal(tree?.loading, undefined);
+  assert.equal(tree?.root?.children[0].packageName, 'owner/package');
+  assert.equal(tree?.root?.children[0].children[0].label, '16 skills');
+  assert.equal(tree?.stale, undefined);
+
+  host.extension.state.installed = [{ ...host.extension.state.installed[0], version: '1.3.0' }];
+  host.extension.broadcast();
+  assert.equal(posted.at(-1)!.dependencyTrees?.[key]?.stale, true, 'Package changes mark the loaded tree stale without rerunning APM');
+  assert.equal(host.argv.length, 1);
+
+  await host.extension.handle({ type: 'dependencyTreeText', scopeKey: key }, gallery);
+  assert.equal(host.argv.length, 1, 'Open as text reuses the loaded report');
+  assert.match(host.previews[0].content, /Exit code: 0[\s\S]*owner\/package@1\.2\.0/);
+
+  output = { stdout: '', stderr: 'lockfile missing', exitCode: 1 };
+  await host.extension.handle({ type: 'dependencyTree', scopeKey: key }, gallery);
+  tree = posted.at(-1)!.dependencyTrees?.[key];
+  assert.match(tree?.error ?? '', /exited with code 1/);
+  assert.equal(tree?.root, undefined);
+  await host.extension.handle({ type: 'dependencyTreeText', scopeKey: key }, gallery);
+  assert.match(host.previews[1].content, /Exit code: 1[\s\S]*lockfile missing/);
+
+  await assert.rejects(host.extension.handle({ type: 'dependencyTree', scopeKey: 'workspace:/closed' }, gallery), /no longer available/);
+  await host.extension.handle({ type: 'dependencyTree', scopeKey: key }, { mode: 'browser', extra: {} });
+  assert.equal(host.previews.length, 3, 'Outside the package browser window the tree opens as a text report');
+  assert.throws(() => parseMessage({ type: 'dependencyTree', scopeKey: 1 }), /Invalid dependency tree request/);
+  assert.throws(() => parseMessage({ type: 'dependencyTreeText' }), /Unknown/);
+});
+
 test('More APM actions picker exposes recently added workflows', async () => {
   const host = harness({ picks: [8] });
   let invoked = false;
@@ -1390,6 +1439,93 @@ test('catalog and direct-install entries open the same scoped details panel and 
   assert.equal(host.executionScopes[0]?.path, workspace.path);
   dispose.forEach(close => close());
   assert.equal(host.extension.panels.size, 0);
+});
+
+test('the package browser opens details in place, returns to its list and stays separate from details panels', async () => {
+  const host = harness();
+  const workspace = host.extension.state.scopes[0];
+  const item: PackageItem = { id: 'one::sample', name: 'sample', marketplace: 'one', version: '1.0.0', installed: false };
+  host.extension.state.catalog = [item];
+  const posted: { state: State }[] = [], loaded: Panel[] = [];
+  Reflect.set(host.extension, 'loadDetails', async (panel: Panel) => { loaded.push(panel); panel.extra = { readmeHtml: '<p>README</p>' }; });
+  const gallery: Panel & { webview: object } = { mode: 'gallery', gallery: true, panel: {}, extra: {}, webview: { postMessage: async (message: { state: State }) => { posted.push(message); } } };
+  Reflect.deleteProperty(host.extension, 'send');
+  host.extension.panels.set('gallery:1', gallery);
+  await host.extension.handle({ type: 'details', id: item.id }, gallery);
+  assert.equal(loaded[0], gallery);
+  assert.equal(gallery.mode, 'details');
+  assert.equal(gallery.item?.id, item.id);
+  assert.equal(gallery.scope?.path, workspace.path);
+
+  let created = 0;
+  Reflect.set(host.vscode.window, 'createWebviewPanel', () => {
+    created++;
+    return { webview: {}, reveal() {}, onDidDispose() {} };
+  });
+  Reflect.set(host.extension, 'attach', (_webview: unknown, mode: 'details', panel: unknown) => ({ mode, panel, extra: {} }));
+  await host.extension.handle({ type: 'details', id: item.id }, { mode: 'browser', extra: {} });
+  assert.equal(created, 1, 'Sidebar details never reuse the package browser page');
+  assert.notEqual(loaded[1], gallery);
+
+  gallery.controller = new AbortController();
+  await assert.rejects(host.extension.handle({ type: 'back' }, gallery), /Another action is already running/);
+  assert.equal(gallery.mode, 'details');
+  gallery.controller = undefined;
+  const request = gallery.detailsRequest ?? 0;
+  await host.extension.handle({ type: 'back' }, gallery);
+  assert.equal(gallery.mode, 'gallery');
+  assert.equal(gallery.item, undefined);
+  assert.equal(gallery.scope, undefined);
+  assert.equal(JSON.stringify(gallery.extra), '{}');
+  assert.ok((gallery.detailsRequest ?? 0) > request, 'Late details results are discarded');
+  const state = posted.at(-1)!.state;
+  assert.equal(state.mode, 'gallery');
+  assert.equal(state.gallery, true);
+  assert.equal(state.item, undefined);
+  assert.equal(state.readmeHtml, undefined);
+});
+
+test('the package browser command prefers a modal editor, falls back to an editor tab and reuses an open browser', async () => {
+  const host = harness();
+  const calls: unknown[][] = [];
+  let modal = false, modalFails = false;
+  Reflect.set(host.vscode.Uri, 'from', (parts: object) => parts);
+  Reflect.set(host.vscode.Uri, 'joinPath', () => ({}));
+  Reflect.set(host.vscode.commands, 'executeCommand', async (...args: unknown[]) => {
+    calls.push(args);
+    if (args[0] === '_workbench.openWith' && modalFails) throw new Error('Modal editors are unavailable');
+  });
+  const configuration = host.vscode.workspace.getConfiguration;
+  Reflect.set(host.vscode.workspace, 'getConfiguration', (section?: string) => section === 'workbench.editor'
+    ? { inspect: (key: string) => key === 'useModal' && modal ? { defaultValue: 'some' } : undefined }
+    : configuration());
+  const uri = { scheme: 'apm-browser', path: '/Agent Package Manager' };
+
+  await host.extension.openPackageBrowser();
+  assert.equal(JSON.stringify(calls), JSON.stringify([['vscode.openWith', uri, 'apm.packageBrowser', 1]]), 'Older VS Code opens a normal editor tab');
+  calls.length = 0; modal = true;
+  await host.extension.openPackageBrowser();
+  assert.equal(JSON.stringify(calls), JSON.stringify([['_workbench.openWith', uri, 'apm.packageBrowser', [-4, { pinned: true }]]]));
+  calls.length = 0; modalFails = true;
+  await host.extension.openPackageBrowser();
+  assert.deepEqual(calls.map(call => call[0]), ['_workbench.openWith', 'vscode.openWith']);
+
+  let revealed = 0;
+  const dispose: (() => void)[] = [];
+  Reflect.set(host.extension, 'attach', (webview: unknown, mode: 'gallery', panel: unknown) => ({ webview, mode, panel, extra: {} }));
+  host.extension.resolvePackageBrowser({ webview: {}, reveal: () => { revealed++; }, onDidDispose: (listener: () => void) => { dispose.push(listener); } });
+  const [key, context] = [...host.extension.panels].find(([, entry]) => entry.gallery)!;
+  assert.match(key, /^gallery:/);
+  assert.equal(context.mode, 'gallery');
+  calls.length = 0;
+  await host.extension.openPackageBrowser();
+  assert.equal(revealed, 1);
+  assert.deepEqual(calls, []);
+  const controller = new AbortController();
+  context.detailsController = controller;
+  dispose.forEach(close => close());
+  assert.equal(controller.signal.aborted, true);
+  assert.ok(![...host.extension.panels.values()].some(entry => entry.gallery));
 });
 
 test('updating a global duplicate verifies only that installation and invalidates only its update cache', async () => {

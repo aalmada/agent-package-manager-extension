@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { descriptors } from '../../src/apm/commands';
+import type { DependencyTreeNode } from '../../src/apm/dependencyTree';
 import type { State } from '../../src/protocol';
 import { withInstallations } from '../../src/apm/packageState';
 
@@ -398,5 +399,116 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.locator('.findings')).toContainText('Remediation: Review the source prompt.');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`audit-coverage-${theme}.png`), fullPage: true });
+  });
+
+  test(`package browser shows a two-column gallery and in-place details in ${theme}`, async ({ page }, testInfo) => {
+    const dark = theme !== 'light';
+    await page.setViewportSize({ width: 1200, height: 640 });
+    await page.setContent('<main id="app"></main>');
+    await page.addStyleTag({ content: `:root {
+      --vscode-font-family: Arial, sans-serif; --vscode-font-size:13px;
+      --vscode-foreground:${dark ? '#ddd' : '#222'};
+      --vscode-editor-background:${dark ? '#1e1e1e' : '#fff'};
+      --vscode-sideBar-background:${dark ? '#181818' : '#f3f3f3'};
+      --vscode-widget-border:${theme === 'high-contrast' ? '#fff' : dark ? '#313131' : '#e5e5e5'};
+      --vscode-input-background:${dark ? '#252526' : '#fff'};
+      --vscode-input-border:${theme === 'high-contrast' ? '#fff' : '#454545'};
+      --vscode-button-background:#0078d4; --vscode-button-foreground:white;
+      --vscode-descriptionForeground:${dark ? '#aaa' : '#555'};
+      --vscode-badge-background:${dark ? '#444' : '#d6d6d6'}; --vscode-badge-foreground:${dark ? '#fff' : '#111'};
+      --vscode-list-hoverBackground:${dark ? '#2b2d2e' : '#e5e5e5'};
+      --vscode-list-inactiveSelectionBackground:${dark ? '#37373d' : '#e4e6f1'};
+      --vscode-focusBorder:#0078d4; --vscode-progressBar-background:#0078d4;
+    }` });
+    await page.addStyleTag({ path: 'dist/webview.css' });
+    await page.evaluate(() => {
+      Object.defineProperty(window, 'acquireVsCodeApi', { value: () => ({ getState: () => undefined, setState: () => {}, postMessage: (message: unknown) => {
+        document.documentElement.dataset.lastMessage = JSON.stringify(message);
+      } }) });
+    });
+    await page.addScriptTag({ path: 'dist/webview.js' });
+    const catalog = Array.from({ length: 24 }, (_, i) => ({
+      id: `${i % 2 ? 'team-skills' : 'copilot-plugins'}::package-${i}`, name: `package-${String(i).padStart(2, '0')}`,
+      marketplace: i % 2 ? 'team-skills' : 'copilot-plugins', description: `Agent workflow ${i} with a description long enough to wrap inside a card.`,
+      version: `1.${i}.0`, installed: i === 0
+    }));
+    const workspace = { kind: 'workspace' as const, label: 'My project', path: '/project' };
+    const state: State = {
+      mode: 'gallery', gallery: true, trusted: true, busy: false, errors: [], version: '0.35.0', browserSearch: '', projectPresent: true,
+      scopes: [workspace], scopeKey: 'workspace:/project', commands: descriptors, availableCommands: ['install', 'view'],
+      marketplaces: [{ name: 'copilot-plugins', source: 'github/copilot-plugins' }, { name: 'team-skills', source: 'example/team-skills' }],
+      catalog: withInstallations(catalog, [{ ...catalog[0], scope: workspace }]), installed: [{ ...catalog[0], scope: workspace }]
+    };
+    await postMessage(page, { type: 'state', state });
+    await expect(page.locator('.gallery-nav-count')).toHaveText(['24', '1', '0', '1', '12', '12']);
+    await expect(page.locator('.gallery-group-heading > span:first-child')).toHaveText(['copilot-plugins', 'team-skills']);
+    await expect(page.locator('.gallery-main img')).toHaveCount(0);
+    const cards = page.locator('.package-card');
+    const [first, second] = [(await cards.nth(0).boundingBox())!, (await cards.nth(1).boundingBox())!];
+    expect(second.y).toBe(first.y);
+    expect(second.x).toBeGreaterThan(first.x + first.width);
+    await expect(cards.first().locator('.badge')).toHaveText(['Workspace: Installed']);
+    expect(await cards.first().locator('.description').evaluate(element => element.scrollWidth <= element.clientWidth
+      && element.getBoundingClientRect().height > parseFloat(getComputedStyle(element).lineHeight) * 1.5)).toBe(true);
+    await expectBorderlessBadges(page);
+    const nav = (await page.locator('.gallery-nav').boundingBox())!, main = (await page.locator('#gallery-main').boundingBox())!;
+    expect(nav.x + nav.width).toBeLessThan(main.x);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`package-browser-${theme}.png`) });
+
+    const scrolled = await page.locator('#gallery-main').evaluate(element => { element.scrollTop = 200; return element.scrollTop; });
+    expect(scrolled).toBe(200);
+    await expect(page.locator('.gallery-controls')).toBeInViewport();
+    expect((await page.locator('.gallery-controls').boundingBox())!.y).toBeCloseTo(main.y + 1, 0);
+    await postMessage(page, { type: 'state', state: { ...state, busy: true } });
+    await expect(page.getByRole('progressbar', { name: 'Refreshing packages' })).toBeVisible();
+    expect(await page.locator('#gallery-main').evaluate(element => element.scrollTop)).toBe(scrolled);
+    await postMessage(page, { type: 'state', state });
+
+    const opened = page.locator('.package-card', { hasText: 'package-07' });
+    await opened.click();
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"details","id":"team-skills::package-7"}');
+    await postMessage(page, { type: 'state', state: { ...state, mode: 'details', item: catalog[7], readmeHtml: '<p>Package documentation.</p>' } });
+    const back = page.getByRole('button', { name: 'Back to packages' });
+    await expect(back).toBeFocused();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('package-07');
+    const backBox = (await back.boundingBox())!, titleBox = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(backBox.x + backBox.width).toBeLessThan(titleBox.x);
+    expect(await page.locator('#gallery-main').evaluate(element => element.scrollTop)).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath(`package-browser-details-${theme}.png`) });
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-last-message', '{"type":"back"}');
+    await postMessage(page, { type: 'state', state });
+    await expect(opened).toBeFocused();
+    expect(await page.locator('#gallery-main').evaluate(element => element.scrollTop)).toBe(scrolled);
+
+    await page.setViewportSize({ width: 520, height: 640 });
+    const narrowNav = (await page.locator('.gallery-nav').boundingBox())!;
+    expect(narrowNav.y + narrowNav.height).toBeLessThanOrEqual((await page.locator('#gallery-main').boundingBox())!.y);
+    expect((await cards.nth(1).boundingBox())!.y).toBeGreaterThan((await cards.nth(0).boundingBox())!.y);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.emulateMedia({ forcedColors: 'active' });
+    await expect(page.locator('#gallery-nav-catalog')).toHaveCSS('forced-color-adjust', 'none');
+    await page.emulateMedia({ forcedColors: 'none' });
+
+    await page.setViewportSize({ width: 1200, height: 640 });
+    const installed = [{ ...catalog[0], scope: workspace, direct: true, metadata: { lockIdentity: 'github/copilot-plugins/package-0' } }];
+    const node = (packageName: string, version: string, children: DependencyTreeNode[] = []): DependencyTreeNode => ({ label: `${packageName}@${version}`, packageName, version, children });
+    const tree = { label: 'My project (local)', children: [
+      node('github/copilot-plugins/package-0', '1.0.0', [node('example/shared-helpers', '2.4.1', [node('example/text-tools', '0.9.0')]), { label: '3 skills', children: [] }])
+    ] };
+    await postMessage(page, { type: 'state', state: { ...state, installed, dependencyTrees: { 'workspace:/project': { root: tree } } } });
+    await page.locator('#gallery-nav-dependencies').click();
+    await page.getByRole('button', { name: 'Tree' }).click();
+    const treeItems = page.getByRole('treeitem');
+    await expect(treeItems).toHaveCount(4);
+    const rows = page.locator('.dependency-row');
+    await expect(rows.first().locator('strong')).toHaveText('package-00');
+    expect((await rows.nth(1).boundingBox())!.x).toBeLessThan((await rows.nth(1).locator('strong').boundingBox())!.x - 16);
+    await treeItems.first().focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(treeItems.nth(1)).toBeFocused();
+    await expect(rows.nth(1)).not.toHaveCSS('outline-style', 'none');
+    await page.screenshot({ path: testInfo.outputPath(`package-browser-dependency-tree-${theme}.png`) });
   });
 }

@@ -13,7 +13,7 @@ Most operations have more than one entry point. Use whichever fits your workflow
 | Entry point | Use it for |
 | --- | --- |
 | **APM view** | Select the **APM** icon in the Activity Bar to browse packages, filter them, and open package pages with install, preview, update, uninstall, and audit actions. |
-| **View toolbar** | **Refresh**, and the **...** menu with **Views**, **Settings**, and **APM: More APM Actions**. |
+| **View toolbar** | **Refresh**, **Open Package Browser** for a large browsing window, and the **...** menu with **Views**, **Settings**, and **APM: More APM Actions**. |
 | **Command Palette** | Run any **APM:** command, such as **APM: Install Package** or **APM: Compile**. See [Commands](commands.md). |
 | **More APM Actions** | A searchable picker of dependency, trust, marketplace, MCP, and lifecycle workflows, in the view's **...** menu. |
 | **Context menus and editor title** | Right-click a folder, `apm.yml`, or any file in the Explorer or editor, or use the buttons above an open `apm.yml`. |
@@ -24,11 +24,11 @@ Most operations have more than one entry point. Use whichever fits your workflow
 ## Contents
 
 - [Getting started](getting-started.md): requirements, installation, CLI setup, and your first package.
-- [Package browser](package-browser.md): the view, search and filters, badges, refresh, and package pages.
+- [Package browser](package-browser.md): the view, the package browser window, search and filters, badges, refresh, and package pages.
 - [Managing packages](managing-packages.md): install, choose versions, preview, update, uninstall, and audit.
 - [Marketplaces](marketplaces.md): add marketplaces, source formats, and marketplace health checks.
 - [APM projects](projects.md): initialize, edit manifests, compile, validate, audit, targets, tasks, and lifecycle scripts.
-- [Dependencies](dependencies.md): dependency mode, the dependency tree, explanations, file owners, and SBOMs.
+- [Dependencies](dependencies.md): dependency mode, required-by parents, the dependency tree, explanations, file owners, and SBOMs.
 - [MCP servers](mcp-servers.md): discover and install MCP servers, and use a private registry.
 - [Private repositories](private-repositories.md): GitHub accounts, tokens, enterprise hosts, and rate limits.
 - [Security and trust](security-and-trust.md): Workspace Trust, confirmations, executable trust, and privacy.
@@ -42,7 +42,7 @@ Most operations have more than one entry point. Use whichever fits your workflow
 | --- | --- | --- | --- |
 | [Install the APM CLI](getting-started.md#set-up-the-apm-cli) | **Install APM CLI** | **APM: Install or Upgrade CLI** | `apm.executablePath` |
 | [Add a marketplace](marketplaces.md#add-or-remove-a-marketplace) | **Add marketplace**, or **...** > **Settings** | **APM: Open Marketplace Settings** | `apm.marketplaces` |
-| [Find a package](package-browser.md#search-and-filters) | Search box and filter (funnel) menu | | |
+| [Find a package](package-browser.md#search-and-filters) | Search box and filter (funnel) menu; **Open Package Browser** for a larger window | **APM: Open Package Browser** | |
 | [Install a package](managing-packages.md#install-a-package) | **Install** on a package page | **APM: Install Package** | `apm.config.target` for default targets |
 | [Preview a change](managing-packages.md#preview-changes) | **Preview install**, **Preview version…**, **Preview update** | | |
 | [Update a package](managing-packages.md#update-a-package) | **Updates** section; **Update** on a package page | | |
@@ -50,7 +50,7 @@ Most operations have more than one entry point. Use whichever fits your workflow
 | [Initialize a project](projects.md#initialize-a-project) | **Initialize APM project** | **APM: Initialize Project**; Explorer folder context menu | |
 | [Compile or validate](projects.md#compile-preview-and-validate) | | **APM: Compile**, **APM: Preview Compilation**, **APM: Validate Manifest and Primitives**; `apm.yml` editor title; tasks | `apm.config.autoIntegrate` |
 | [Run manifest scripts](projects.md#manifest-scripts) | | **APM: Run Script**; **Tasks: Run Task** | `apm.tasks.includeScripts` |
-| [Inspect dependencies](dependencies.md) | **Dependencies** filter; **View dependency tree**; **Explain dependency** | **APM: View Dependency Tree**, **APM: Explain Dependency**, **APM: Dependency Reports**; More APM Actions | |
+| [Inspect dependencies](dependencies.md) | **Dependencies** filter or package browser page; **View dependency tree** or **Tree**; **Explain dependency** | **APM: View Dependency Tree**, **APM: Explain Dependency**, **APM: Dependency Reports**; More APM Actions | |
 | [Find which package deployed a file](dependencies.md#find-a-files-owner) | | **APM: Find File Owner**; Explorer and editor context menus | |
 | [Install an MCP server](mcp-servers.md#install-an-mcp-server) | | **APM: Install MCP Server**; More APM Actions | `apm.config.mcpRegistryUrl` |
 | [Approve or deny executables](security-and-trust.md#executable-trust-and-policy) | | **APM: Manage Executable Trust**; More APM Actions | |

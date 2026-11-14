@@ -2,13 +2,24 @@ import type { CommandDescriptor, Marketplace, PackageItem, Scope } from './apm/t
 import { record } from './apm/adapters';
 import { packageActions, type ActionResult, type PackageAction } from './apm/actions';
 import { isWorkflow, type Workflow, type ResolvedTarget } from './apm/workflows';
+import type { DependencyTreeNode } from './apm/dependencyTree';
 
-export type Mode = 'browser' | 'details';
+/** `gallery` is the large package browser list; its details pages use `details` with `gallery` set. */
+export type Mode = 'browser' | 'details' | 'gallery';
 export const browserSections = ['catalog', 'installed', 'updates', 'direct', 'transitive', 'unclassified'] as const;
 export type BrowserSection = typeof browserSections[number];
 export type PackageSection = Extract<BrowserSection, 'catalog' | 'installed' | 'updates'>;
+/** A dependency tree loaded into the package browser window for one scope. */
+export interface DependencyTreeView {
+  root?: DependencyTreeNode;
+  loading?: boolean;
+  error?: string;
+  /** Installed packages in the scope changed after the tree was loaded. */
+  stale?: boolean;
+}
 export interface State {
   mode: Mode;
+  gallery?: boolean;
   trusted: boolean;
   scopes: Scope[];
   scopeKey: string;
@@ -35,10 +46,15 @@ export interface State {
   readmeHtml?: string;
   readmeImagesBlocked?: { https: boolean; insecure: boolean };
   actionResult?: ActionResult;
+  /** Keyed by scope key; only the package browser window loads trees. */
+  dependencyTrees?: Record<string, DependencyTreeView>;
 }
 export type Message =
-  | { type: 'ready' | 'refresh' | 'install' | 'dependencies' | 'dependencyTree' | 'actions' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' }
+  | { type: 'ready' | 'refresh' | 'install' | 'dependencies' | 'actions' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' | 'back' }
   | { type: 'scope'; key: string }
+  /** Without `scopeKey`, or outside the package browser window, opens the text report for the page's scope. */
+  | { type: 'dependencyTree'; scopeKey?: string }
+  | { type: 'dependencyTreeText'; scopeKey: string }
   | { type: 'filters'; search: string }
   | { type: 'details'; id: string; scopeKey?: string }
   | { type: 'dependencyWhy'; id: string; scopeKey: string }
@@ -50,9 +66,14 @@ export type Message =
 
 export function parseMessage(value: unknown): Message {
   if (!record(value) || typeof value.type !== 'string') throw new Error('Invalid webview message.');
-  const simple = ['ready', 'refresh', 'install', 'dependencies', 'dependencyTree', 'actions', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
-    'chooseScope', 'targets', 'configureTargets', 'retry'];
+  const simple = ['ready', 'refresh', 'install', 'dependencies', 'actions', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
+    'chooseScope', 'targets', 'configureTargets', 'retry', 'back'];
   if (simple.includes(value.type)) return { type: value.type } as Message;
+  if (value.type === 'dependencyTree') {
+    if (value.scopeKey !== undefined && typeof value.scopeKey !== 'string') throw new Error('Invalid dependency tree request.');
+    return { type: 'dependencyTree', ...(typeof value.scopeKey === 'string' ? { scopeKey: value.scopeKey } : {}) };
+  }
+  if (value.type === 'dependencyTreeText' && typeof value.scopeKey === 'string') return { type: 'dependencyTreeText', scopeKey: value.scopeKey };
   if (value.type === 'dependencyWhy' && typeof value.id === 'string' && typeof value.scopeKey === 'string') {
     return { type: 'dependencyWhy', id: value.id, scopeKey: value.scopeKey };
   }

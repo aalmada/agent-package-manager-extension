@@ -118,7 +118,78 @@ button.badge:hover { background: var(--vscode-badge-background); text-decoration
 .readme th, .readme td { border: 1px solid var(--vscode-widget-border); padding: 6px; }
 .readme pre { padding: 12px; background: var(--vscode-textCodeBlock-background); }
 @media (max-width: 500px) { .editor { padding: 16px; } .detail-fields { grid-template-columns: 1fr; gap: 4px; } .detail-fields dd { margin-bottom: 10px; } }
-@media (forced-colors: active) { button, .badge, .count-badge, .content-count, .content-item { border: 1px solid ButtonText; } }
+.gallery { height: 100vh; display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr); gap: 8px; padding: 4px 8px 8px; overflow: hidden; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+.gallery-nav { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; }
+.gallery-nav-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--vscode-foreground); text-align: left; }
+.gallery-nav-item:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
+.gallery-nav-item.selected, .gallery-nav-item.selected:hover { background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground)); }
+.gallery-nav-item:focus-visible { outline-offset: -1px; }
+.gallery-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-nav-count { color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: normal; }
+.gallery-main { min-height: 0; overflow-y: auto; background: var(--vscode-editor-background); border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; }
+.gallery-content { max-width: 820px; margin: 0 auto; padding: 28px 32px 40px; }
+.gallery-header { display: flex; align-items: flex-start; gap: 12px; }
+.gallery-titles { flex: 1; min-width: 0; }
+.gallery-titles h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.gallery-titles p { margin: 0; }
+.gallery-controls { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 14px 0 12px; background: var(--vscode-editor-background); }
+.gallery-controls .searchbar { flex: 1; }
+.marketplace-select { width: auto; max-width: 220px; flex: 0 0 auto; padding: 7px 6px; border-radius: 4px; }
+.gallery-progress { position: absolute; left: 0; right: 0; bottom: 4px; height: 2px; overflow: hidden; }
+.gallery-progress::before { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--vscode-progressBar-background); animation: gallery-progress 1.2s linear infinite; }
+@keyframes gallery-progress { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.dependency-views { margin: 4px 0 8px; gap: 0; }
+.dependency-views button { border-radius: 0; }
+.dependency-views button:first-child { border-radius: 2px 0 0 2px; }
+.dependency-views button:last-child { border-radius: 0 2px 2px 0; }
+.dependency-views [aria-pressed="true"], .dependency-views [aria-pressed="true"]:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.dependency-tree-toolbar { margin: 0 0 10px; }
+.dependency-tree-toolbar .scope-select { width: auto; flex: 0 0 auto; }
+.dependency-tree, .dependency-tree ul { list-style: none; margin: 0; padding: 0; }
+.dependency-node:focus { outline: 0; }
+.dependency-node:focus-visible > .dependency-row { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; background: var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground)); }
+.dependency-row { display: flex; align-items: center; gap: 8px; min-height: 24px; padding-right: 8px; border-radius: 3px; cursor: pointer; overflow-wrap: anywhere; }
+.dependency-row:hover { background: var(--vscode-list-hoverBackground); }
+.dependency-row .twistie { flex: 0 0 auto; margin: 0 2px 3px 3px; }
+.dependency-row.collapsed .twistie { margin-bottom: 0; }
+.twistie-space { flex: 0 0 12px; }
+.dependency-key { font-size: 11px; min-width: 0; }
+.required-by { font-size: 12px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.link-button { padding: 0; border: 0; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; text-decoration: underline; }
+.link-button:hover { background: transparent; color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
+.gallery-group { margin-top: 14px; }
+.gallery-group-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin: 0 0 4px; overflow-wrap: anywhere; }
+.package-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 16px; }
+.package-card { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--vscode-foreground); text-align: left; }
+.package-card .description { white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.4; }
+.package-card:hover { background: var(--vscode-list-hoverBackground); }
+.package-card:focus-visible { background: var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground)); outline-offset: -1px; }
+.gallery-empty { padding: 16px 0; }
+.gallery-empty .empty { padding: 0 0 12px; }
+.gallery-more { margin-top: 16px; }
+.gallery-welcome { max-width: 480px; margin: 32px auto; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.gallery-welcome p { margin: 0; }
+.gallery .page-header { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 8px; }
+.gallery .page-header > :not(.back-button) { grid-column: 2; }
+.gallery .page-header h1 { font-size: 22px; margin: 0; }
+.gallery .page-header p { margin: 6px 0 0; }
+@media (max-width: 600px) {
+  .gallery { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .gallery-nav { flex-direction: row; overflow-x: auto; }
+  .gallery-nav-item { width: auto; flex: 0 0 auto; }
+  .gallery-content { padding: 16px; }
+  .gallery-controls { flex-wrap: wrap; }
+  .marketplace-select { max-width: none; flex: 1 1 100%; }
+}
+@media (forced-colors: active) {
+  button, .badge, .count-badge, .content-count, .content-item { border: 1px solid ButtonText; }
+  .gallery-nav-item.selected { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .gallery-nav-item.selected .gallery-nav-count { color: HighlightText; }
+  .gallery-progress::before { background: Highlight; }
+  .link-button { border: 0; color: LinkText; }
+  .dependency-views [aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .dependency-node:focus-visible > .dependency-row { outline-color: Highlight; }
+}
 .action-result { border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); border-left: 3px solid var(--vscode-focusBorder); padding: 10px 12px; margin: 0 0 14px; }
 .action-result.success { border-left-color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
 .action-result.failed { border-left-color: var(--vscode-errorForeground); }

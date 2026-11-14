@@ -2,7 +2,7 @@
   "name": "apm-package-manager",
   "displayName": "APM - Agent Package Manager",
   "description": "Visual package, marketplace, and workflow management for Microsoft's Agent Package Manager.",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "publisher": "antao-almada",
   "license": "MIT",
   "repository": {
@@ -63,6 +63,18 @@
         }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "apm.packageBrowser",
+        "displayName": "APM Package Browser",
+        "selector": [
+          {
+            "filenamePattern": "*.apm-package-browser"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "apm.initialize",
@@ -156,6 +168,11 @@
         "command": "apm.refresh",
         "title": "APM: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "apm.openPackageBrowser",
+        "title": "APM: Open Package Browser",
+        "icon": "$(screen-full)"
       },
       {
         "command": "apm.marketplaces",
@@ -366,7 +383,12 @@
         {
           "command": "apm.refresh",
           "when": "view == apm.browser",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "apm.openPackageBrowser",
+          "when": "view == apm.browser",
+          "group": "navigation@2"
         },
         {
           "submenu": "apm.views",
@@ -419,47 +441,47 @@
       "webview/context": [
         {
           "command": "apm.filter.installed",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.installed)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && !(apm.filter.installed)",
           "group": "1_status@1"
         },
         {
           "command": "apm.filter.installed.checked",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.installed)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && (apm.filter.installed)",
           "group": "1_status@1"
         },
         {
           "command": "apm.filter.updates",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.updates)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && !(apm.filter.updates)",
           "group": "1_status@2"
         },
         {
           "command": "apm.filter.updates.checked",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.updates)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && (apm.filter.updates)",
           "group": "1_status@2"
         },
         {
           "command": "apm.filter.dependencies",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && !(apm.filter.dependencies)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && !(apm.filter.dependencies)",
           "group": "1_status@3"
         },
         {
           "command": "apm.filter.dependencies.checked",
-          "when": "(webviewId == 'apm.browser' && webviewSection == 'filter') && (apm.filter.dependencies)",
+          "when": "((webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter') && (apm.filter.dependencies)",
           "group": "1_status@3"
         },
         {
           "submenu": "apm.filter.scope",
-          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "when": "(webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter'",
           "group": "2_filters@1"
         },
         {
           "submenu": "apm.filter.marketplace",
-          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "when": "(webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter'",
           "group": "2_filters@2"
         },
         {
           "submenu": "apm.filter.sort",
-          "when": "webviewId == 'apm.browser' && webviewSection == 'filter'",
+          "when": "(webviewId == 'apm.browser' || webviewId == 'apm.packageBrowser') && webviewSection == 'filter'",
           "group": "3_sort@1"
         }
       ],

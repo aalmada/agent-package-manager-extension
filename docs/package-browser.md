@@ -18,12 +18,27 @@ Each section has a collapsible header with a right-aligned count of the items th
 The top-right toolbar of the view has:
 
 - **Refresh**: reload packages and check marketplaces and updates now.
+- **Open Package Browser** (full-screen icon): browse packages in a large window. See [Package browser window](#package-browser-window).
 - The **...** menu:
   - **Views**: show or hide **Catalog**, **Installed**, and **Updates**. Visibility is saved per workspace and is independent of search filters.
   - **Settings**: open the extension's settings in the Settings editor. See [Settings](settings.md).
   - **APM: More APM Actions**: open the **More APM Actions** picker of dependency, trust, marketplace, MCP, and lifecycle workflows. It appears only in trusted workspaces. See [Commands](commands.md#more-apm-actions).
 
 **Refresh** and **Settings** are available only from this toolbar, not from the Command Palette.
+
+## Package browser window
+
+When the side bar is too small to scan many packages, select **Open Package Browser** in the view toolbar, or run **APM: Open Package Browser** from the Command Palette. The browser opens as a large modal window over the editor, similar to VS Code's customization windows; use its title bar to maximize or close it, or press `Escape` to close it.
+
+![The package browser window with Catalog, Installed, Updates, and Dependencies on the left and packages grouped by marketplace in two columns](images/package-browser-window.png)
+
+- The left side lists **Catalog**, **Installed**, **Updates**, and **Dependencies** with the number of matching packages. Select one to show it, or use the arrow keys.
+- The search box and filter (funnel) menu work as in the view and share the same search. The **All marketplaces** list limits the results to one marketplace.
+- Packages are grouped by marketplace, in as many columns as fit, with their full descriptions. Packages without a marketplace, such as direct Git installations that no single marketplace lists, appear under **Other sources**.
+- **Dependencies** groups installed packages into direct and transitive dependencies under **List**, and shows each transitive package's **Required by** parents. **Tree** loads APM's dependency tree in the window after you choose **Load dependency tree**. See [Tree in the package browser window](dependencies.md#tree-in-the-package-browser-window).
+- Select a package to open its [details](#package-details) in the same window. Select the back arrow (**Back to packages**) to return to the list at the same position.
+
+Running the command again shows the open window instead of opening another one. When `workbench.editor.useModal` is `off`, or your VS Code version does not support modal editors, the browser opens in an editor tab instead.
 
 ## Search and filters
 
@@ -73,7 +88,7 @@ Other badges:
 
 | Badge | Meaning |
 | --- | --- |
-| **Transitive** | Installed as a dependency of another package, not declared directly. |
+| **Transitive** | Installed as a dependency of another package, not declared directly. Hover it to see the packages that require it. |
 | **Cached catalog** | The marketplace could not be refreshed, so its last known entries are shown. |
 
 The **APM** Activity Bar icon shows a badge with the number of global and workspace updates, regardless of search filters, plus one when the extension recommends a CLI upgrade. Its tooltip identifies results saved from an earlier check. The badge disappears when there are no updates, the CLI is unavailable, or the workspace is untrusted.
@@ -89,13 +104,14 @@ Catalog installation badges appear as soon as installed packages are loaded, wit
 
 ## Package details
 
-Select a package to open its page in an editor tab. **Catalog**, **Installed**, and **Updates** open the same details tab for the same package and installation scope, including packages installed directly from a Git repository. Installed packages show their installed version, local contents, and update/uninstall actions regardless of which list you opened them from.
+Select a package to open its page in an editor tab. In the [package browser window](#package-browser-window), the page opens in the same window instead. **Catalog**, **Installed**, and **Updates** open the same details tab for the same package and installation scope, including packages installed directly from a Git repository. Installed packages show their installed version, local contents, and update/uninstall actions regardless of which list you opened them from.
 
 ![A package page with actions, tags, contents, package information, and README](images/package-details.png)
 
 The page shows:
 
 - Compact installation badges with the active scope marked, without a separate workspace-name line. Keyword tags from package metadata use the same badge style.
+- Whether the package is a direct or transitive dependency. A transitive package links to the packages that require it; see [See why a package is installed](dependencies.md#see-why-a-package-is-installed).
 - **Actions** for the package in that scope. See [Managing packages](managing-packages.md).
 - **Contents**: skills, agents, instructions, prompts, Copilot extensions, and other primitives. Items that exist locally open the verified file; items missing from local metadata are listed without a link.
 - **Package information**: other metadata from the package manifest and APM, such as author, license, and repository.

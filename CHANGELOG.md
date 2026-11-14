@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Add a large package browser window, opened from the **Open Package Browser** icon in the view toolbar or **APM: Open Package Browser**, with Catalog, Installed, Updates, and Dependencies pages, full package descriptions, and in-place package details.
+- Browse dependencies in the window as a list of direct and transitive packages, or load an interactive, keyboard-accessible dependency tree for the workspace or global scope. The tree runs `apm deps tree` only when you choose **Load dependency tree** or **Reload**, and can be opened as text.
+- Show which packages require each transitive dependency on package cards, the **Transitive** badge tooltip, and the package page.
+
 ## 0.4.4
 
 - List the extension in the Marketplace AI category.
