@@ -453,12 +453,43 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expectBorderlessBadges(page);
     const nav = (await page.locator('.gallery-nav').boundingBox())!, main = (await page.locator('#gallery-main').boundingBox())!;
     expect(nav.x + nav.width).toBeLessThan(main.x);
+    const filters = page.getByRole('complementary', { name: 'Package filters' });
+    const filterBox = (await filters.boundingBox())!;
+    expect(filterBox.x + filterBox.width).toBeLessThan(main.x);
+    expect(filterBox.y).toBeGreaterThan(nav.y + nav.height);
+    const order = filters.getByRole('group', { name: 'Order by', exact: true });
+    await expect(filters.locator('legend')).toHaveText(['Order by', 'Scope', 'Marketplace']);
+    await expect(order.getByRole('radio')).toHaveCount(3);
+    const orderBox = (await order.boundingBox())!, scopeBox = (await filters.getByRole('group', { name: 'Scope', exact: true }).boundingBox())!;
+    expect(orderBox.y + orderBox.height).toBeLessThan(scopeBox.y);
+    expect(orderBox.x + orderBox.width).toBeLessThan(main.x);
+    await expect(page.locator('.gallery-controls select')).toHaveCount(0);
+    await expect(page.locator('.filter-button')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`package-browser-${theme}.png`) });
+
+    await filters.getByRole('radio', { name: 'team-skills', exact: true }).check();
+    await expect(cards).toHaveCount(12);
+    await order.getByRole('radio', { name: 'Name (A-Z)', exact: true }).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(cards.first().locator('strong')).toHaveText('package-23');
+    await expect(order.getByRole('radio', { name: 'Name (Z-A)', exact: true })).toBeChecked();
+    await expect(order.getByRole('radio', { name: 'Name (Z-A)', exact: true })).toBeFocused();
+    await filters.getByRole('radio', { name: 'All marketplaces', exact: true }).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(filters.getByRole('radio', { name: 'copilot-plugins', exact: true })).toBeChecked();
+    await expect(filters.getByRole('radio', { name: 'copilot-plugins', exact: true })).toBeFocused();
+    await expect(cards.first().locator('strong')).toHaveText('package-22');
+    await filters.getByRole('radio', { name: 'Workspace', exact: true }).check();
+    await expect(cards).toHaveCount(1);
+    await page.getByRole('button', { name: 'Clear search and filters', exact: true }).click();
+    await expect(cards).toHaveCount(24);
+    await expect(order.getByRole('radio', { name: 'Name (A-Z)', exact: true })).toBeChecked();
 
     const scrolled = await page.locator('#gallery-main').evaluate(element => { element.scrollTop = 200; return element.scrollTop; });
     expect(scrolled).toBe(200);
     await expect(page.locator('.gallery-controls')).toBeInViewport();
+    await expect(filters.getByRole('radio', { name: 'All marketplaces', exact: true })).toBeInViewport();
     expect((await page.locator('.gallery-controls').boundingBox())!.y).toBeCloseTo(main.y + 1, 0);
     await postMessage(page, { type: 'state', state: { ...state, busy: true } });
     await expect(page.getByRole('progressbar', { name: 'Refreshing packages' })).toBeVisible();
@@ -487,6 +518,14 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     expect(narrowNav.y + narrowNav.height).toBeLessThanOrEqual((await page.locator('#gallery-main').boundingBox())!.y);
     expect((await cards.nth(1).boundingBox())!.y).toBeGreaterThan((await cards.nth(0).boundingBox())!.y);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await filters.getByRole('radio', { name: 'team-skills', exact: true }).check();
+    await expect(cards).toHaveCount(12);
+    await order.getByRole('radio', { name: 'Name (Z-A)', exact: true }).check();
+    await expect(cards.first().locator('strong')).toHaveText('package-23');
+    await page.getByRole('button', { name: 'Clear search and filters', exact: true }).click();
+    await page.screenshot({ path: testInfo.outputPath(`package-browser-narrow-${theme}.png`) });
+    await page.setViewportSize({ width: 320, height: 640 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.emulateMedia({ forcedColors: 'active' });
     await expect(page.locator('#gallery-nav-catalog')).toHaveCSS('forced-color-adjust', 'none');
     await page.emulateMedia({ forcedColors: 'none' });
@@ -503,6 +542,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     const treeItems = page.getByRole('treeitem');
     await expect(treeItems).toHaveCount(4);
     const rows = page.locator('.dependency-row');
+    for (const radio of await order.getByRole('radio').all()) await expect(radio).toBeDisabled();
     await expect(rows.first().locator('strong')).toHaveText('package-00');
     expect((await rows.nth(1).boundingBox())!.x).toBeLessThan((await rows.nth(1).locator('strong').boundingBox())!.x - 16);
     await treeItems.first().focus();
@@ -510,5 +550,16 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(treeItems.nth(1)).toBeFocused();
     await expect(rows.nth(1)).not.toHaveCSS('outline-style', 'none');
     await page.screenshot({ path: testInfo.outputPath(`package-browser-dependency-tree-${theme}.png`) });
+
+    await page.locator('#gallery-nav-catalog').click();
+    await postMessage(page, { type: 'state', state: { ...state, marketplaces: Array.from({ length: 30 }, (_, i) => ({
+      name: `marketplace-${i}-with-a-long-name`, source: `example/marketplace-${i}`
+    })) } });
+    const lastFilter = filters.getByRole('radio', { name: 'marketplace-9-with-a-long-name', exact: true });
+    await lastFilter.check();
+    await expect(lastFilter).toBeChecked();
+    await expect(lastFilter).toBeInViewport();
+    expect(await page.locator('#gallery-sidebar').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }

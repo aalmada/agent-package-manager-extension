@@ -86,7 +86,7 @@ function render() {
   stopResize?.();
   const focused = document.activeElement instanceof HTMLElement ? document.activeElement.id : '';
   const selection = document.activeElement instanceof HTMLInputElement && document.activeElement.type === 'text' ? document.activeElement.selectionStart : null;
-  const scroll = new Map([...root.querySelectorAll<HTMLElement>('.section-body')].map(body => [body.id, body.scrollTop]));
+  const scroll = new Map([...root.querySelectorAll<HTMLElement>('.section-body, .gallery-sidebar')].map(body => [body.id, body.scrollTop]));
   const main = document.getElementById('gallery-main');
   const page = root.dataset.page, pageItem = root.dataset.item;
   if (main && page === 'list') galleryScroll = main.scrollTop;
@@ -101,7 +101,7 @@ function render() {
   if (state.mode === 'browser') renderBrowser();
   else if (gallery) renderGallery();
   else renderDetails(root);
-  for (const body of root.querySelectorAll<HTMLElement>('.section-body')) body.scrollTop = scroll.get(body.id) ?? 0;
+  for (const body of root.querySelectorAll<HTMLElement>('.section-body, .gallery-sidebar')) body.scrollTop = scroll.get(body.id) ?? 0;
   const nextMain = document.getElementById('gallery-main');
   if (nextMain) nextMain.scrollTop = root.dataset.page === 'list' ? galleryScroll : page === 'details' && pageItem === itemKey ? detailsScroll : 0;
   if (gallery && page && page !== root.dataset.page) {
@@ -136,7 +136,7 @@ function welcome(className: string) {
   }
   return node;
 }
-function searchBar() {
+function searchBar(showMenu = true) {
   const searchbar = el('div', 'searchbar');
   const input = el('input'); input.type = 'text'; input.id = 'search'; input.placeholder = 'Search packages or @filters'; input.title = 'Search by name or description. Filters: @marketplace:<name>, @installed, @updates, @dependencies, @sort:<order>.'; input.setAttribute('aria-label', 'Filter packages by text or use @marketplace:<name>, @installed, @updates, @dependencies, or @sort:<order>'); input.value = search;
   input.title += ' Scope filters: @scope:workspace, @scope:global.';
@@ -144,14 +144,17 @@ function searchBar() {
   input.addEventListener('input', () => { search = input.value; limits = {}; save(); render(); reportFilters(); });
   const clear = iconButton('Clear Search Results and Filters', 'clearAll', () => { applySearch(''); document.getElementById('search')?.focus(); });
   clear.setAttribute('aria-label', 'Clear search and filters'); clear.disabled = !search;
-  const filter = iconButton('Filter and sort packages', 'filter', event => {
-    const box = filter.getBoundingClientRect();
-    event.preventDefault(); event.stopPropagation();
-    filter.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
-  }, 'filter-button');
-  filter.setAttribute('aria-haspopup', 'menu');
-  filter.dataset.vscodeContext = JSON.stringify({ webviewSection: 'filter', preventDefaultContextMenuItems: true });
-  searchbar.append(input, clear, filter);
+  searchbar.append(input, clear);
+  if (showMenu) {
+    const filter = iconButton('Filter and sort packages', 'filter', event => {
+      const box = filter.getBoundingClientRect();
+      event.preventDefault(); event.stopPropagation();
+      filter.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
+    }, 'filter-button');
+    filter.setAttribute('aria-haspopup', 'menu');
+    filter.dataset.vscodeContext = JSON.stringify({ webviewSection: 'filter', preventDefaultContextMenuItems: true });
+    searchbar.append(filter);
+  }
   return searchbar;
 }
 function renderBrowser() {
@@ -408,6 +411,7 @@ function selectGallerySection(section: GallerySection) {
 function renderGallery() {
   const ready = state.trusted && !!state.version;
   const current = currentGallerySection();
+  const sidebar = el('div', 'gallery-sidebar'); sidebar.id = 'gallery-sidebar';
   const nav = el('nav', 'gallery-nav');
   nav.setAttribute('aria-label', 'Package sections');
   for (const section of gallerySections) {
@@ -429,7 +433,9 @@ function renderGallery() {
   const main = el('div', 'gallery-main'); main.id = 'gallery-main';
   const content = el('div', 'gallery-content');
   main.append(content);
-  root.append(nav, main);
+  sidebar.append(nav);
+  if (ready && state.mode !== 'details') sidebar.append(galleryFilterPanel(current));
+  root.append(sidebar, main);
   if (!ready) content.append(welcome('gallery-welcome'));
   else if (state.mode === 'details') renderDetails(content);
   else renderGalleryList(content, current);
@@ -443,8 +449,7 @@ function renderGalleryList(content: HTMLElement, section: GallerySection) {
   refresh.id = 'gallery-refresh'; refresh.disabled = state.busy;
   head.append(titles, refresh);
   const controls = el('div', 'gallery-controls');
-  controls.append(searchBar());
-  if (state.marketplaces.length) controls.append(marketplaceSelect());
+  controls.append(searchBar(false));
   if (state.busy) {
     const progress = el('div', 'gallery-progress');
     progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-label', 'Refreshing packages');
@@ -628,16 +633,57 @@ function activateTreeItem(entry: HTMLElement, key: string) {
   if (entry.dataset.id) { galleryFocus = treeFocus = entry.id; send({ type: 'details', id: entry.dataset.id, scopeKey: key }); }
   else toggleTreeItem(entry);
 }
-function marketplaceSelect() {
-  const select = el('select', 'marketplace-select');
-  select.id = 'gallery-marketplace'; select.title = 'Filter by marketplace'; select.setAttribute('aria-label', 'Filter by marketplace');
-  const current = filterTokens(search).marketplace;
+function galleryFilterGroup(title: string, key: 'sort' | 'scope' | 'marketplace', options: { label: string; value: string; disabled?: boolean }[], current: string) {
+  const group = el('fieldset', 'gallery-filter-group');
+  group.id = `gallery-${key}`;
+  group.append(el('legend', '', title));
+  for (const option of options) {
+    const label = el('label', 'gallery-filter-option');
+    const input = el('input');
+    input.type = 'radio'; input.name = `gallery-${key}`; input.id = `gallery-${key}-${encodeURIComponent(option.value)}`;
+    input.value = option.value; input.checked = option.value === current; input.disabled = !!option.disabled;
+    input.addEventListener('change', () => {
+      if (input.checked) applySearch(withToken(search, `@${key}:`, key === 'sort' && input.value === 'name' ? '' : input.value));
+    });
+    label.append(input, el('span', '', option.label));
+    group.append(label);
+  }
+  return group;
+}
+function galleryFilterPanel(section: GallerySection) {
+  const panel = el('aside', 'gallery-filters');
+  panel.setAttribute('aria-label', 'Package filters');
+  panel.append(el('h2', '', 'Filters'));
+  const tokens = filterTokens(search);
+  const order = galleryFilterGroup('Order by', 'sort', [
+    { label: 'Name (A-Z)', value: 'name' }, { label: 'Name (Z-A)', value: 'name-desc' }, { label: 'Marketplace', value: 'marketplace' }
+  ], tokens.sort);
+  order.disabled = section === 'dependencies' && dependencyView === 'tree';
+  if (order.disabled) order.title = 'Dependency trees keep APM dependency order. Switch to List to sort packages.';
+  panel.append(order);
+  const folders = state.scopes.filter(scope => scope.kind === 'workspace');
+  const scope = galleryFilterGroup('Scope', 'scope', [
+    { label: 'All scopes', value: '' },
+    { label: 'Workspace', value: 'workspace', disabled: !folders.length },
+    { label: 'Global', value: 'global', disabled: !state.scopes.some(scope => scope.kind === 'global') }
+  ], tokens.scope);
+  if (folders.length > 1) {
+    const label = el('label', 'gallery-workspace');
+    label.append(el('span', '', 'Workspace folder'));
+    const select = el('select'); select.id = 'gallery-workspace';
+    select.append(...folders.map(folder => new Option(folder.label, scopeKey(folder))));
+    select.value = scopeKey(folders.find(folder => scopeKey(folder) === state.scopeKey) ?? folders[0]);
+    select.disabled = state.busy;
+    select.addEventListener('change', () => send({ type: 'scope', key: select.value }));
+    label.append(select); scope.append(label);
+  }
+  panel.append(scope);
   const names = [...new Set(state.marketplaces.map(marketplace => marketplace.name))].sort((a, b) => a.localeCompare(b));
-  if (current && !names.includes(current)) names.push(current);
-  select.append(new Option('All marketplaces', ''), ...names.map(name => new Option(name, name)));
-  select.value = current;
-  select.addEventListener('change', () => applySearch(withToken(search, '@marketplace:', select.value)));
-  return select;
+  if (tokens.marketplace && !names.includes(tokens.marketplace)) names.push(tokens.marketplace);
+  panel.append(galleryFilterGroup('Marketplace', 'marketplace', [
+    { label: 'All marketplaces', value: '' }, ...names.map(name => ({ label: name, value: name }))
+  ], tokens.marketplace));
+  return panel;
 }
 function renderGalleryGroups(content: HTMLElement, section: GallerySection, groups: { key: BrowserSection; title: string; items: PackageItem[] }[], emptyNodes: () => HTMLElement[]) {
   const total = groups.reduce((sum, group) => sum + group.items.length, 0);

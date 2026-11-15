@@ -30,19 +30,23 @@ The top-right toolbar of the view has:
 
 When the side bar is too small to scan many packages, select **Open Package Browser** in the view toolbar, or run **APM: Open Package Browser** from the Command Palette. The browser opens as a large modal window over the editor, similar to VS Code's customization windows; use its title bar to maximize or close it, or press `Escape` to close it.
 
-![The package browser window with Catalog, Installed, Updates, and Dependencies on the left and packages grouped by marketplace in two columns](images/package-browser-window.png)
+![The package browser window with page navigation and Order by, Scope, and Marketplace radio groups on the left, and packages in two columns](images/package-browser-window.png)
 
 - The left side lists **Catalog**, **Installed**, **Updates**, and **Dependencies** with the number of matching packages. Select one to show it, or use the arrow keys.
-- The search box and filter (funnel) menu work as in the view and share the same search. The **All marketplaces** list limits the results to one marketplace.
+- Below the page navigation, **Filters** shows matching radio-button groups: **Order by**, **Scope**, then **Marketplace**. Select **All scopes** or **All marketplaces** to remove that restriction. In multi-root workspaces, **Workspace folder** selects the current project.
+- **Order by** offers **Name (A-Z)**, **Name (Z-A)**, and **Marketplace**. Name ordering applies within each group; dependency trees keep APM's order, so the ordering choices are disabled in **Tree**.
+- The controls share the same search and `@` tokens as the APM view. Typing a filter updates its selected choice, and **Clear** resets the search, filters, and order. The window uses visible controls instead of a funnel menu; the compact APM view keeps its funnel.
 - Packages are grouped by marketplace, in as many columns as fit, with their full descriptions. Packages without a marketplace, such as direct Git installations that no single marketplace lists, appear under **Other sources**.
 - **Dependencies** groups installed packages into direct and transitive dependencies under **List**, and shows each transitive package's **Required by** parents. **Tree** loads APM's dependency tree in the window after you choose **Load dependency tree**. See [Tree in the package browser window](dependencies.md#tree-in-the-package-browser-window).
 - Select a package to open its [details](#package-details) in the same window. Select the back arrow (**Back to packages**) to return to the list at the same position.
+
+The filter panel scrolls independently of the package list. At narrow widths, it moves above the list and remains scrollable.
 
 Running the command again shows the open window instead of opening another one. When `workbench.editor.useModal` is `off`, or your VS Code version does not support modal editors, the browser opens in an editor tab instead.
 
 ## Search and filters
 
-Type in the search box to match package names, descriptions, and marketplaces. To narrow the lists, choose an option in the filter (funnel) menu or type an `@` token in the search box; the menu inserts the same tokens. Combine tokens with text, and choose **Clear** to reset the search. **Installed**, **Updates**, and **Dependencies** are mutually exclusive; choosing one replaces the others.
+Type in the search box to match package names, descriptions, and marketplaces. To narrow the lists, use the APM view's filter (funnel) menu, the package browser window's filter panel, or an `@` token in the search box; the controls insert the same tokens. Combine tokens with text, and choose **Clear** to reset the search. **Installed**, **Updates**, and **Dependencies** are mutually exclusive; choosing one replaces the others.
 
 ![The search box filtered with @installed @scope:workspace, showing only workspace installations](images/search-filters.png)
 
@@ -55,7 +59,7 @@ Type in the search box to match package names, descriptions, and marketplaces. T
 | One marketplace | **Marketplace** > **Choose Marketplace...**; **All Marketplaces** clears it | `@marketplace:<name>` |
 | Sort order | **Sort By** > **Name (A-Z)**, **Name (Z-A)**, or **Marketplace** | `@sort:name`, `@sort:name-desc`, or `@sort:marketplace` |
 
-Choosing the active scope again clears the scope filter. In a multi-root workspace, choosing **Workspace** also selects the current folder. Scope filters only change what you see; installing always asks for a destination separately.
+In the funnel menu, choosing the active scope again clears the scope filter; choosing **Workspace** in a multi-root workspace also asks for the current folder. In the window's panel, use **All scopes** to clear the filter and **Workspace folder** to change projects. Scope filters only change what you see; installing always asks for a destination separately.
 
 ## Badges
 

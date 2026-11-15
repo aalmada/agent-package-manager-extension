@@ -919,13 +919,12 @@ test('package browser groups cards by marketplace, filters in place and opens de
     assert.match(page.document.querySelector('.gallery-group:last-of-type .package-card')!.textContent!, /tool.*3\.0\.0.*Direct install.*Global/);
     page.document.querySelector<HTMLButtonElement>('#gallery-nav-catalog')!.click();
 
-    const select = page.document.querySelector<HTMLSelectElement>('#gallery-marketplace')!;
-    select.value = 'two';
-    select.dispatchEvent(new page.dom.window.Event('change'));
+    assert.equal(page.document.querySelector('.filter-button'), null, 'The gallery exposes filters instead of a funnel menu');
+    page.document.querySelector<HTMLInputElement>('#gallery-marketplace input[value="two"]')!.click();
     assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"@marketplace:two"}');
     assert.deepEqual([...page.document.querySelectorAll('.package-card strong')].map(node => node.textContent), ['sample']);
     page.state.browserSearch = '@marketplace:two'; page.update();
-    assert.equal(page.document.querySelector<HTMLSelectElement>('#gallery-marketplace')!.value, 'two');
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-marketplace input:checked')!.value, 'two');
 
     const card = page.document.querySelector<HTMLButtonElement>('.package-card')!;
     const cardId = card.id;
@@ -935,6 +934,7 @@ test('package browser groups cards by marketplace, filters in place and opens de
     page.update();
     assert.equal(root.dataset.page, 'details');
     assert.ok(page.document.querySelector('.gallery-nav'), 'Details keep the section navigation');
+    assert.equal(page.document.querySelector('.gallery-filters'), null, 'List filters do not interfere with package details');
     assert.equal(page.document.querySelector('#gallery-nav-catalog')!.getAttribute('aria-current'), null);
     const back = page.document.querySelector<HTMLButtonElement>('#gallery-back')!;
     assert.equal(page.document.activeElement, back);
@@ -948,6 +948,93 @@ test('package browser groups cards by marketplace, filters in place and opens de
     page.update();
     assert.equal(root.dataset.page, 'list');
     assert.equal(page.document.activeElement?.id, cardId, 'Returning restores focus to the opened card');
+  } finally { page.dom.window.close(); }
+});
+
+test('gallery filter panel and ordering combine with text and stay synchronized with shared search', () => {
+  const page = browser();
+  try {
+    const workspace = page.state.scopes[0], global = { kind: 'global' as const, path: '/home/.apm', label: 'Global (user)' };
+    const item = page.state.installed[0];
+    const installed = [
+      { ...item, id: 'one::alpha', name: 'alpha', scope: workspace, direct: true, description: 'shared helper' },
+      { ...item, id: 'one::zulu', name: 'zulu', scope: workspace, direct: false, description: 'shared helper' },
+      { ...item, id: 'one::global', name: 'global', scope: global, description: 'shared helper' },
+      { ...item, id: 'two::beta', name: 'beta', marketplace: 'two', scope: workspace, description: 'shared helper' }
+    ];
+    Object.assign(page.state, { mode: 'gallery', gallery: true, scopes: [workspace, global], installed,
+      catalog: withInstallations(installed.map(entry => ({ ...entry, scope: undefined, installed: false })), installed), browserSearch: 'helper' });
+    page.update();
+    const names = () => [...page.document.querySelectorAll('.package-card strong')].map(node => node.textContent);
+    const check = (key: string, value: string) => page.document.querySelector<HTMLInputElement>(`#gallery-${key} input[value="${value}"]`)!.click();
+    const order = () => page.document.querySelector<HTMLInputElement>('#gallery-sort input:checked')!.value;
+    check('scope', 'workspace'); check('marketplace', 'one'); check('sort', 'name-desc');
+    assert.deepEqual(names(), ['zulu', 'alpha']);
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"helper @scope:workspace @marketplace:one @sort:name-desc"}');
+    assert.equal(page.document.querySelector('#gallery-nav-catalog .gallery-nav-count')!.textContent, '2');
+    for (const section of ['installed', 'updates', 'dependencies']) {
+      page.document.querySelector<HTMLButtonElement>(`#gallery-nav-${section}`)!.click();
+      assert.equal(page.document.querySelectorAll('.package-card').length, 2);
+      assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-scope input:checked')!.value, 'workspace');
+      assert.equal(order(), 'name-desc');
+    }
+    page.document.querySelector<HTMLButtonElement>('#dependency-view-tree')!.click();
+    assert.equal(page.document.querySelectorAll('#gallery-sort input:disabled').length, 3);
+    const messageCount = page.messages.length;
+    check('sort', 'name');
+    assert.equal(page.messages.length, messageCount);
+    assert.equal(order(), 'name-desc');
+    page.document.querySelector<HTMLButtonElement>('#dependency-view-list')!.click();
+    assert.equal(page.document.querySelectorAll('#gallery-sort input:disabled').length, 0);
+
+    page.state.browserSearch = 'helper @scope:global @sort:marketplace';
+    page.update();
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-marketplace input:checked')!.value, '');
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-scope input:checked')!.value, 'global');
+    assert.equal(order(), 'marketplace');
+    assert.deepEqual(names(), ['global']);
+    page.document.querySelector<HTMLButtonElement>('#gallery-nav-catalog')!.click();
+    check('scope', ''); check('sort', 'name');
+    assert.deepEqual(names(), ['alpha', 'global', 'zulu', 'beta']);
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"helper"}');
+
+    const input = page.document.querySelector<HTMLInputElement>('#search')!;
+    input.value = 'helper @marketplace:"missing alias" @sort:name-desc'; input.dispatchEvent(new page.dom.window.Event('input'));
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-marketplace input:checked')!.value, 'missing alias');
+    assert.equal(order(), 'name-desc');
+    check('marketplace', '');
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"helper @sort:name-desc"}');
+    page.document.querySelector<HTMLButtonElement>('[aria-label="Clear search and filters"]')!.click();
+    assert.equal(order(), 'name');
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-scope input:checked')!.value, '');
+    assert.equal((page.saved() as { search: string }).search, '');
+    assert.ok(page.messages.every(message => message.type === 'ready' || message.type === 'filters'), 'Filtering and sorting never run APM');
+  } finally { page.dom.window.close(); }
+});
+
+test('gallery filter panel supports workspace selection and global-only browsing', () => {
+  const page = browser();
+  try {
+    const other = { kind: 'workspace' as const, path: '/other', label: 'Other project' };
+    Object.assign(page.state, { mode: 'gallery', gallery: true, browserSearch: '@scope:workspace' });
+    page.state.scopes.push(other);
+    page.update();
+    const select = page.document.querySelector<HTMLSelectElement>('#gallery-workspace')!;
+    assert.equal(select.value, 'workspace:/project');
+    select.value = 'workspace:/other'; select.dispatchEvent(new page.dom.window.Event('change'));
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"scope","key":"workspace:/other"}');
+    page.state.scopeKey = 'workspace:/other'; page.update();
+    assert.equal(page.document.querySelector<HTMLSelectElement>('#gallery-workspace')!.value, 'workspace:/other');
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-scope input:checked')!.value, 'workspace');
+
+    Object.assign(page.state, { scopes: [{ kind: 'global', path: '/home/.apm', label: 'Global (user)' }], scopeKey: 'global:/home/.apm', browserSearch: '' });
+    page.update();
+    assert.equal(page.document.querySelector('#gallery-workspace'), null);
+    assert.equal(page.document.querySelector<HTMLInputElement>('#gallery-scope input[value="workspace"]')!.disabled, true);
+    page.document.querySelector<HTMLInputElement>('#gallery-scope input[value="global"]')!.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"filters","search":"@scope:global"}');
+    page.state.trusted = false; page.update();
+    assert.equal(page.document.querySelector('.gallery-filters'), null);
   } finally { page.dom.window.close(); }
 });
 

@@ -167,7 +167,7 @@ interface Shot { file: string; width: number; height: number; state: State; sear
 const shots: Shot[] = [
   { file: 'package-browser.png', width: 340, height: 820, state: browserState(), saved: { sizes: { catalog: 185, installed: 140, updates: 55 } } },
   { file: 'package-browser-window.png', width: 1100, height: 560, state: browserState({ mode: 'gallery', gallery: true, browserSearch: '' }) },
-  { file: 'package-browser-dependency-tree.png', width: 1100, height: 380, saved: { gallerySection: 'dependencies', dependencyView: 'tree' },
+  { file: 'package-browser-dependency-tree.png', width: 1100, height: 560, saved: { gallerySection: 'dependencies', dependencyView: 'tree' },
     state: browserState({ mode: 'gallery', gallery: true, browserSearch: '', dependencyTrees: { [`workspace:${workspace.path}`]: { root: workspaceTree } } }) },
   { file: 'search-filters.png', width: 340, height: 360, state: browserState(), search: '@installed @scope:workspace' },
   { file: 'dependencies.png', width: 340, height: 480, state: browserState(), search: '@dependencies' },

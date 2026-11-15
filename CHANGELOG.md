@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Replace the package browser window's filter menu with a left filter panel containing **Order by**, **Scope**, and **Marketplace** radio groups, plus a workspace selector in multi-root workspaces. The panel stays synchronized with the search box, and ordering is disabled while viewing a dependency tree.
+
 ## 0.5.0
 
 - Add a large package browser window, opened from the **Open Package Browser** icon in the view toolbar or **APM: Open Package Browser**, with Catalog, Installed, Updates, and Dependencies pages, full package descriptions, and in-place package details.

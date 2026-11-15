@@ -7,7 +7,7 @@ Inspect what APM installed and why, trace deployed files back to their packages,
 Dependency actions use the view's current scope:
 
 - By default, this is the first workspace folder, or **Global (user)** when no folder is open.
-- In a multi-root workspace, choose **Scope** > **Workspace** in the filter menu to pick another folder.
+- In a multi-root workspace, choose **Scope** > **Workspace** in the filter menu, or **Workspace folder** in the package browser window's left filter panel, to pick another folder.
 - **View global dependencies** on a global package's page switches to the global scope; **View workspace dependencies** switches to that package's workspace folder.
 
 ## Browse dependencies
@@ -51,7 +51,7 @@ The extension runs `apm deps tree` (with `--global` for the global scope) only w
 
 - Choose **Workspace** or **Global** to pick the scope. A `@scope:` filter limits the tree to that scope.
 - Each package shows its name, version, and, when it differs from the name, APM's dependency key. Rows such as **2 skills** summarize a package's contents. **Circular** marks a dependency cycle, and **Not placed: run apm install** marks a dependency APM could not place in the tree.
-- Search text and the marketplace filter keep matching packages and the packages that lead to them.
+- Search text and **Marketplace** in the left filter panel keep matching packages and the packages that lead to them. **Order by** is disabled for trees to preserve APM's dependency order.
 - Select an installed package, or press `Enter` or `Space`, to open its details in the window; **Back to packages** returns to the tree. Use `Up` and `Down` to move, `Right` and `Left` to expand, collapse, or move between parent and child, and `Home` and `End` to jump to the first or last row.
 - **Reload** runs the report again. If installed packages change after loading, a notice asks you to reload.
 - **Open as text** opens the loaded report in a read-only document without running APM again. When the window is modal, opening the document closes it.
