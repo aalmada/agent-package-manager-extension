@@ -66,3 +66,5 @@ Browser-only VS Code and virtual workspaces are not supported. Package changes r
 - [APM documentation](https://microsoft.github.io/apm/).
 - [Report an issue](https://github.com/aalmada/agent-package-manager-extension/issues).
 - [Contributing](CONTRIBUTING.md).
+- [Code of conduct](CODE_OF_CONDUCT.md).
+- [Security policy and private reporting](SECURITY.md).

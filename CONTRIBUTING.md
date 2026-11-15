@@ -2,9 +2,19 @@
 
 Thanks for helping improve APM for VS Code. Keep changes focused, include tests for behavior changes, and update user documentation when a change affects how the extension is used.
 
+## Before you start
+
+- Follow the [code of conduct](CODE_OF_CONDUCT.md).
+- Search [existing issues](https://github.com/aalmada/agent-package-manager-extension/issues) before submitting a [bug report or feature request](https://github.com/aalmada/agent-package-manager-extension/issues/new/choose).
+- Report vulnerabilities privately using the [security policy](SECURITY.md), not a public issue.
+- For a substantial feature or design change, open an issue to agree on scope before implementing it. Small fixes and documentation improvements can go straight to a pull request.
+- Look for [`good first issue`](https://github.com/aalmada/agent-package-manager-extension/labels/good%20first%20issue) or [`help wanted`](https://github.com/aalmada/agent-package-manager-extension/labels/help%20wanted) labels. Comment before starting an existing issue to avoid duplicating work.
+
+APM owns package resolution and mutations; this repository supplies the VS Code interface and adapters. If a problem reproduces directly in the CLI, check [Microsoft APM's issues](https://github.com/microsoft/apm/issues).
+
 ## Development setup
 
-Install dependencies and run the core checks:
+Fork the repository, clone your fork, and create a focused branch from `main`. Use Node.js 22, matching CI. Install dependencies from the lockfile and run the core checks:
 
 ```bash
 npm ci
@@ -84,3 +94,22 @@ The script downloads the pinned APM source and statically reads its Click declar
 ## Pull requests
 
 Before submitting a pull request, run the checks relevant to your change. For changes to command forms or CLI compatibility, include contract and real-CLI test results where possible. Do not include credentials or private marketplace data in tests, screenshots, or logs.
+
+Open the pull request against `main` and fill in the template with the motivation, related issues, and validation results. Use a draft pull request when you want early feedback. Documentation-only changes do not require local code checks.
+
+CI runs on Linux, Windows, and macOS. Merging requires those checks to pass, the branch to be up to date, one approving review, and review conversations to be resolved. New commits dismiss stale approvals. Administrators retain a bypass for exceptional maintenance; contributors cannot bypass these requirements. A maintainer is automatically requested for review through [CODEOWNERS](.github/CODEOWNERS).
+
+Contributions are accepted under the repository's [MIT license](LICENSE). No contributor license agreement or Developer Certificate of Origin sign-off is currently required.
+
+## GitHub maintenance
+
+Issue forms, the pull request template, CODEOWNERS, and Dependabot configuration live in [`.github/`](.github/). These become active after they are merged into the default branch. Keep GitHub Actions pinned to full commit SHAs when reviewing dependency updates. Dependabot proposes weekly npm and Actions updates; it does not manage APM dependencies.
+
+The following settings are managed on GitHub, not by these files. Recheck them when transferring or recreating the repository:
+
+- Protect `main` with required checks `test (ubuntu-latest)`, `test (windows-latest)`, and `test (macos-latest)`, using the GitHub Actions app. Require up-to-date branches, one approval, stale-review dismissal, and resolved conversations. Block force pushes and branch deletion.
+- Enable private vulnerability reporting and retain secret scanning, push protection, and Dependabot security updates.
+- Keep the default Actions token read-only and prevent Actions from creating or approving pull requests. Review workflows from forks before allowing them to run; never execute untrusted pull request code through `pull_request_target` with privileged credentials.
+- Automatically delete merged branches. Apply `bug`, `enhancement`, `documentation`, `good first issue`, and `help wanted` labels as appropriate; issue-form labels must already exist.
+
+Discussions, funding links, automatic merging, and additional bots are optional. Add them only when there is a clear use and capacity to maintain them; inactive-issue automation can discourage contributors.

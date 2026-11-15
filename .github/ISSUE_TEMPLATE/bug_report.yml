@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible problem with the VS Code extension.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [existing issues](https://github.com/aalmada/agent-package-manager-extension/issues) and the [troubleshooting guide](https://github.com/aalmada/agent-package-manager-extension/blob/main/docs/troubleshooting.md) first.
+        For suspected vulnerabilities, use [private reporting](https://github.com/aalmada/agent-package-manager-extension/security/advisories/new), not this form.
+        Remove tokens, private repository names, personal paths, and other sensitive data from examples, screenshots, and logs.
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: Find the APM extension version in VS Code's Extensions view.
+      placeholder: "0.x.y"
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version
+      description: Copy the version from Help > About.
+    validations:
+      required: true
+  - type: input
+    id: apm-version
+    attributes:
+      label: APM CLI version
+      description: Run `apm --version`, or state that the CLI is unavailable.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the OS and architecture where the extension runs, local or Remote Development (SSH, WSL, container), and workspace or global package scope if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal example with public or fictional package data and the exact command or UI action.
+      placeholder: |
+        1. Open a trusted workspace...
+        2. Run...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the error message and whether the same operation fails when run directly with the APM CLI.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics or screenshots
+      description: Optional relevant excerpts from the APM Output channel. Review everything for sensitive data before submitting; do not attach raw logs.

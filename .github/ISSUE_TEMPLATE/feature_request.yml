@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest an improvement to the VS Code extension.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [existing issues](https://github.com/aalmada/agent-package-manager-extension/issues) and the [user guide](https://github.com/aalmada/agent-package-manager-extension/blob/main/docs/user-guide.md) first.
+        This repository provides the VS Code interface; APM owns package resolution and mutations.
+        Keep examples free of credentials and private package data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe what you are trying to accomplish and the limitation you encounter.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Describe the desired workflow and where it belongs in VS Code.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing extension workflows or APM CLI commands you tried.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional mockups or examples using fictional data.

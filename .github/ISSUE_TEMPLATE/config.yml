@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/aalmada/agent-package-manager-extension/security/advisories/new
+    about: Do not disclose vulnerabilities or credentials in public issues.
+  - name: User guide and troubleshooting
+    url: https://github.com/aalmada/agent-package-manager-extension/blob/main/docs/user-guide.md
+    about: Find setup instructions, supported workflows, and troubleshooting guidance.
+  - name: Microsoft APM CLI issues
+    url: https://github.com/microsoft/apm/issues
+    about: Report package resolution or CLI problems that reproduce without this extension upstream.
