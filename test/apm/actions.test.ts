@@ -41,6 +41,19 @@ test('updating a tagged package installs the advertised release instead of refre
   assert.throws(() => packageUpdateCommand({ ...tagged, direct: false }), /parent dependency/);
 });
 
+test('branch updates use the canonical lockfile key instead of the materialization path', () => {
+  const item: PackageItem = { ...installed, metadata: {
+    cliIdentity: 'Example-Org/Private-Repo/plugins/dotnet',
+    lockIdentity: 'example-org/private-repo/plugins/dotnet',
+    update: { source: 'git branch' }
+  } };
+  assert.deepEqual(packageUpdateCommand(item), { id: 'update', packages: 'example-org/private-repo/plugins/dotnet' });
+  assert.equal(packageIdentity(item, item, false), 'Example-Org/Private-Repo/plugins/dotnet');
+  assert.deepEqual(packageUpdateCommand({ ...item, latestVersion: 'v2', metadata: {
+    ...item.metadata, update: { source: 'git tags' }
+  } }), { id: 'install', packages: 'Example-Org/Private-Repo/plugins/dotnet#v2' });
+});
+
 test('a zero-exit update is successful only when the refreshed package is current', () => {
   const result: ActionResult = { action: 'update', title: 'Update dotnet', status: 'success', command: 'apm update dotnet', output: 'All dependencies already at their latest matching refs.' };
   assert.equal(verifyPackageUpdate(result, { ...installed, updateStatus: 'current' }).status, 'success');

@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ApmClient } from '../../src/apm/client';
 import { record } from '../../src/apm/adapters';
+import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, withInstallations } from '../../src/apm/packageState';
 import { redact } from '../../src/apm/redact';
-import { findInstalledPackage, withInstallations } from '../../src/apm/packageState';
 import { packageIdentity } from '../../src/apm/actions';
+import { sectionPackages } from '../../src/webview/filter';
 
 test('process runner keeps exact arguments, separates streams and preserves exit codes', async () => {
   const client = new ApmClient({ executable: process.execPath, cwd: process.cwd() });
@@ -303,6 +304,89 @@ test('deployed-skill recovery preserves aliases, hosts and marketplaces without 
     assert.equal(listed.length, 1);
     assert.equal(listed[0].id, recovered[0].id);
     assert.equal(listed[0].metadata?.deployedSkillPath, undefined);
+  } finally { await rm(home, { recursive: true }); }
+});
+
+test('installed recovery matches GitHub repository casing without folding virtual paths', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-installed-case-test-'));
+  try {
+    const repo = 'Example-Org/Private-Repo';
+    const dependencies = ['Review', 'review'].map(name => ({
+      repo_url: repo, host: 'github.com', name, virtual_path: `plugins/${name}`, is_virtual: true,
+      package_type: 'skill_bundle', version: '1.0.0', discovered_via: 'catalog', marketplace_plugin_name: name,
+      deployed_files: [`.agents/skills/${name}/SKILL.md`]
+    }));
+    for (const dep of dependencies) {
+      await mkdir(join(home, '.agents/skills', dep.name), { recursive: true });
+      await writeFile(join(home, dep.deployed_files[0]), '# Skill');
+    }
+    await mkdir(join(home, 'apm_modules'));
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async () => ({
+      stdout: `| Package | Version | Source |\n| example-org/private-repo/plugins/Review | 1.0.0 | github |`,
+      stderr: '', exitCode: 0
+    }));
+    const scope = { kind: 'workspace' as const, path: home, label: 'project' };
+    const installed = await client.getInstalled(scope);
+    assert.deepEqual(installed.map(item => item.id), ['catalog::Review', 'catalog::review']);
+    assert.equal(installed[0].metadata?.cliIdentity, 'example-org/private-repo/plugins/Review');
+    assert.equal(installed[0].metadata?.lockIdentity, `${repo}/plugins/Review`);
+    assert.equal(installed[0].metadata?.deployedPackagePaths, undefined);
+    assert.ok(Array.isArray(installed[1].metadata?.deployedPackagePaths));
+    const catalog = dependencies.map(dep => ({
+      id: `catalog::${dep.name}`, name: dep.name, marketplace: 'catalog', version: '2.0.0', installed: false
+    }));
+    const updates = applyUpdateRows(applyCatalogVersions(installed, catalog), []);
+    assert.equal(sectionPackages('installed', { installed: updates, catalog }).length, 2);
+    assert.equal(sectionPackages('updates', { installed: updates, catalog }).length, 2);
+    assert.ok(withInstallations(catalog, updates).every(item => item.installations?.length === 1));
+  } finally { await rm(home, { recursive: true }); }
+});
+
+test('installed recovery keeps local and non-GitHub repository identities case-sensitive', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-installed-case-sensitive-test-'));
+  try {
+    const path = '.agents/skills/sample/SKILL.md';
+    await mkdir(join(home, '.agents/skills/sample'), { recursive: true });
+    await mkdir(join(home, 'apm_modules'));
+    await writeFile(join(home, path), '# Skill');
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({ dependencies: [
+      { repo_url: 'Team/Private', host: 'git.example.com', package_type: 'skill_bundle', deployed_files: [path] },
+      { repo_url: '_local/Local', source: 'local', local_path: '/packages/Local', package_type: 'skill_bundle', deployed_files: [path] }
+    ] }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async () => ({
+      stdout: '| Package | Version | Source |\n| team/private | 1.0 | git |\n| _local/local | 1.0 | local |',
+      stderr: '', exitCode: 0
+    }));
+    const items = await client.getInstalled({ kind: 'workspace', path: home, label: 'project' });
+    assert.equal(items.length, 4);
+    assert.deepEqual(items.map(item => item.metadata?.lockIdentity), [undefined, undefined, 'git.example.com/Team/Private', '/packages/Local']);
+  } finally { await rm(home, { recursive: true }); }
+});
+
+test('global installed recovery recognizes configured GitHub hosts with case-preserving CLI paths', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-installed-enterprise-case-test-'));
+  try {
+    const root = join(home, '.apm'), path = '.github/agents/sample.agent.md';
+    await mkdir(join(root, '.github/agents'), { recursive: true });
+    await mkdir(join(root, 'apm_modules'));
+    await writeFile(join(root, path), '# Sample');
+    await writeFile(join(root, 'apm.lock.yaml'), JSON.stringify({ dependencies: [{
+      repo_url: 'team/private', host: 'github.example.com', virtual_path: 'plugins/Sample', is_virtual: true,
+      package_type: 'marketplace_plugin', discovered_via: 'catalog', marketplace_plugin_name: 'Sample', deployed_files: [path]
+    }] }));
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home,
+      repositoryHosts: () => [{ origin: 'https://github.example.com', provider: 'github' }] });
+    t.mock.method(client, 'execute', async () => ({
+      stdout: '| Package | Version | Source |\n| Team/Private/plugins/Sample | 1.0 | github |', stderr: '', exitCode: 0
+    }));
+    const items = await client.getInstalled({ kind: 'global', path: root, label: 'Global' });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, 'catalog::Sample');
+    assert.equal(items[0].metadata?.cliIdentity, 'Team/Private/plugins/Sample');
+    assert.equal(items[0].metadata?.lockIdentity, 'github.example.com/team/private/plugins/Sample');
   } finally { await rm(home, { recursive: true }); }
 });
 

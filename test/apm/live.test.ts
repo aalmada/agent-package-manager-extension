@@ -25,6 +25,31 @@ test('real global listing works without a workspace or global manifest', { skip:
   } finally { await rm(home, { recursive: true }); }
 });
 
+test('real dependency scan reconciles repository casing with recovered marketplace packages', { skip: !executable, timeout: 30_000 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-installed-real-case-'));
+  try {
+    const packagePath = join(home, 'apm_modules', 'Example-Org', 'Private-Repo', 'plugins', 'sample');
+    const deployed = '.agents/skills/sample/SKILL.md';
+    await mkdir(packagePath, { recursive: true });
+    await mkdir(join(home, '.agents/skills/sample'), { recursive: true });
+    await writeFile(join(packagePath, 'apm.yml'), 'name: sample\nversion: 1.0.0\n');
+    await writeFile(join(home, deployed), '# Sample');
+    await writeFile(join(home, 'apm.lock.yaml'), JSON.stringify({
+      lockfile_version: '1', apm_version: '0.35.0', dependencies: [{
+        repo_url: 'example-org/private-repo', name: 'sample', host: 'github.com',
+        resolved_commit: '0000000000000000000000000000000000000000',
+        version: '1.0.0', virtual_path: 'plugins/sample', is_virtual: true, package_type: 'skill_bundle',
+        discovered_via: 'catalog', marketplace_plugin_name: 'sample', deployed_files: [deployed]
+      }]
+    }));
+    const client = new ApmClient({ executable: executable!, cwd: home, home });
+    const items = await client.getInstalled({ kind: 'workspace', path: home, label: 'project' });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, 'catalog::sample');
+    assert.equal(items[0].metadata?.cliIdentity, 'Example-Org/Private-Repo/plugins/sample');
+  } finally { await rm(home, { recursive: true }); }
+});
+
 test('real initialization preserves every native answer in the selected project', { skip: !executable, timeout: 30_000 }, async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-init-native-'));
   try {

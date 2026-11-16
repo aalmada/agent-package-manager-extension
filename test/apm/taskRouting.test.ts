@@ -1528,6 +1528,39 @@ test('the package browser command prefers a modal editor, falls back to an edito
   assert.ok(![...host.extension.panels.values()].some(entry => entry.gallery));
 });
 
+test('update previews and their application use canonical keys in the selected installation scope', async () => {
+  for (const kind of ['workspace', 'global']) {
+    const host = harness();
+    const scope = host.extension.state.scopes.find(scope => scope.kind === kind)!;
+    const canonical = 'example-org/private-repo/plugins/dotnet';
+    const item: PackageItem = {
+      id: 'catalog::dotnet', name: 'dotnet', marketplace: 'catalog', version: '1', installed: true, scope,
+      updateStatus: 'outdated', latestVersion: 'abcdef12', metadata: {
+        cliIdentity: 'Example-Org/Private-Repo/plugins/dotnet', lockIdentity: canonical, update: { source: 'git branch' }
+      }
+    };
+    host.extension.state.installed = [item];
+    host.panel.mode = 'details'; host.panel.item = item; host.panel.scope = scope;
+    Reflect.set(host.extension, 'refresh', async () => {
+      const current = { ...item, updateStatus: 'current' as const };
+      host.extension.state.installed = [current];
+      host.panel.item = current;
+    });
+    const global = kind === 'global' ? ['--global'] : [];
+    await host.extension.packageAction('previewUpdate', host.panel);
+    await host.extension.packageAction('applyPreview', host.panel);
+    await host.extension.packageAction('update', host.panel);
+    assert.deepEqual(host.argv.map(args => Array.from(args)), [
+      ['update', '--dry-run', ...global, canonical],
+      ['update', '--yes', ...global, canonical],
+      ['update', '--yes', ...global, canonical]
+    ]);
+    assert.ok(host.executionScopes.every(target => target?.path === scope.path));
+    assert.equal(host.confirmations.length, 2, 'Applying and updating retain explicit mutation approval');
+    assert.equal(host.prompts.length, 0, 'Updates do not select a different installation destination');
+  }
+});
+
 test('updating a global duplicate verifies only that installation and invalidates only its update cache', async () => {
   const host = harness();
   const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;

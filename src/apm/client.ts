@@ -208,6 +208,8 @@ export class ApmClient {
     try { lock = parseYaml(await readFile(join(scope.path, 'apm.lock.yaml'), 'utf8')); }
     catch (error) { if (!isMissing(error)) throw new ApmError(`Cannot read lockfile: ${String(error)}`); }
     const dependencies: Record<string, unknown>[] = record(lock) && Array.isArray(lock.dependencies) ? lock.dependencies.filter(record) : [];
+    const githubHosts = new Set(['github.com', ...(this.config.repositoryHosts?.() ?? [])
+      .filter(host => host.provider === 'github').map(host => new URL(host.origin).host.toLowerCase())]);
     const deployments = record(lock) && Array.isArray(lock.deployments) ? lock.deployments.filter(record) : [];
     const deploymentByPath = new Map<string, Record<string, unknown>>();
     for (const entry of deployments) {
@@ -217,7 +219,7 @@ export class ApmClient {
     }
     for (const dep of dependencies) {
       if (!['claude_skill', 'skill_bundle', 'marketplace_plugin'].includes(String(dep.package_type)) ||
-        !Array.isArray(dep.deployed_files) || items.some(item => matchesDependency(item.name, dep))) continue;
+        !Array.isArray(dep.deployed_files) || items.some(item => matchesDependency(item.name, dep, githubHosts))) continue;
       const identity = dependencyIdentity(dep);
       if (!identity) continue;
       const standalone = dep.package_type === 'claude_skill';
@@ -242,7 +244,7 @@ export class ApmClient {
       });
     }
     return withRequiredBy(items.map(item => {
-      const matching = dependencies.filter(dep => matchesDependency(item.name, dep));
+      const matching = dependencies.filter(dep => matchesDependency(item.name, dep, githubHosts));
       if (matching.length !== 1) return item;
       const dep = matching[0];
       const marketplace = typeof dep.discovered_via === 'string' ? dep.discovered_via : '';
@@ -394,12 +396,18 @@ function withRequiredBy(items: PackageItem[], dependencies: Record<string, unkno
   });
 }
 
-function matchesDependency(identity: string, dep: Record<string, unknown>): boolean {
+function matchesDependency(identity: string, dep: Record<string, unknown>, githubHosts: ReadonlySet<string>): boolean {
   const repo = typeof dep.repo_url === 'string' ? dep.repo_url : '';
   const virtual = typeof dep.virtual_path === 'string' && dep.is_virtual ? `/${dep.virtual_path}` : '';
   const local = typeof dep.anchored_local_path === 'string' ? `local:${dep.anchored_local_path}` : dep.local_path;
   const host = typeof dep.host === 'string' ? dep.host.toLowerCase() : '';
-  return [dep.alias, local, dep.local_path, repo + virtual, `${host}/${repo}${virtual}`, dependencyIdentity(dep)].includes(identity);
+  if ([dep.alias, local, dep.local_path, repo + virtual, `${host}/${repo}${virtual}`, dependencyIdentity(dep)].includes(identity)) return true;
+  if (!repo || dep.source === 'local' || dep.local_path || repo.startsWith('_local/') ||
+    !(dep.registry_prefix || dep.source === 'registry' || githubHosts.has(host || 'github.com'))) return false;
+  const matchesRepo = (value: string) => value.slice(0, repo.length).toLowerCase() === repo.toLowerCase() &&
+    value.slice(repo.length) === virtual;
+  return matchesRepo(identity) || (!!host && identity.slice(0, host.length + 1).toLowerCase() === `${host}/` &&
+    matchesRepo(identity.slice(host.length + 1)));
 }
 
 function isMissing(error: unknown): boolean {

@@ -61,7 +61,7 @@ APM's dry-run output is a plan, not a file-by-file diff. Offline plans can be in
 | Package page | Choose **Update**. It appears when an update is available. |
 | APM view | Find outdated packages in **Updates**, or filter with `@updates`. |
 
-Packages pinned to a tag move to the latest tag reported by APM. The extension runs `apm install <package>#<tag>` to change the manifest pin. Other packages use `apm update`.
+Packages pinned to a tag move to the latest tag reported by APM. The extension runs `apm install <package>#<tag>` to change the manifest pin. Other packages use `apm update` with the canonical lockfile identity, which can differ in casing from the installed directory. **Preview update** uses the same package identity as **Update**.
 
 After updating, the extension checks the refreshed package status. It reports an unverified or still-outdated result instead of assuming that a successful exit means the package was upgraded.
 

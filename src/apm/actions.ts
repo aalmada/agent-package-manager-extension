@@ -59,7 +59,8 @@ export function packageIdentity(item: PackageItem, installed: PackageItem | unde
 export function packageUpdateCommand(item: PackageItem): { id: 'install' | 'update'; packages: string } {
   const identity = packageIdentity(item, item, false);
   const update = record(item.metadata?.update) ? item.metadata.update : undefined;
-  if (update?.source !== 'git tags') return { id: 'update', packages: identity };
+  if (update?.source !== 'git tags') return { id: 'update',
+    packages: typeof item.metadata?.lockIdentity === 'string' ? item.metadata.lockIdentity : identity };
   if (item.direct === false) throw new Error('Update the parent dependency to change a transitive package version.');
   const latest = item.latestVersion;
   if (!latest || latest === '-' || /…|\.\.\./.test(latest)) throw new Error('APM did not report a usable latest tag. Choose a version explicitly.');
