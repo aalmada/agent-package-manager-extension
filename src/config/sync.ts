@@ -104,7 +104,7 @@ export class SettingsSync {
       if (!Array.isArray(legacy)) throw new Error('The previous apm.marketplaceEntries setting must be an array before it can be migrated.');
       const entries = legacy.map((value, index) => {
         try { return legacyEntry(value, workspaceRoot); }
-        catch (error) { throw new Error(`Cannot migrate marketplace entry ${index + 1}: ${error instanceof Error ? error.message : String(error)}`); }
+        catch (error) { throw new Error(`Cannot migrate marketplace entry ${index + 1}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       });
       const current = this.marketplaceSetting();
       const merged = [...new Set([...current, ...entries])];
