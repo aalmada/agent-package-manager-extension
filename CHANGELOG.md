@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Fix duplicate Installed and Updates entries when GitHub repository casing differs between the lockfile and installed directory, while preserving case-sensitive package subpaths.
+- Use canonical lockfile identities for updates and update previews so mixed-case installed paths do not cause package-not-found errors.
+
 ## 0.5.1
 
 - Replace the package browser window's filter menu with a left filter panel containing **Order by**, **Scope**, and **Marketplace** radio groups, plus a workspace selector in multi-root workspaces. The panel stays synchronized with the search box, and ordering is disabled while viewing a dependency tree.
