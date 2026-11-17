@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0
+
+- Show available package updates as color-coded Patch, Minor, or Major changes.
+- Offer a confirmed **Force Update** retry for file collisions that APM can resolve, while keeping invalid local materialization evidence on APM's explicit recovery path.
+
 ## 0.5.2
 
 - Fix duplicate Installed and Updates entries when GitHub repository casing differs between the lockfile and installed directory, while preserving case-sensitive package subpaths.

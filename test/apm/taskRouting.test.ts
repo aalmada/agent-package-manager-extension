@@ -79,6 +79,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   const confirmations: string[] = [];
   const confirmationDetails: string[] = [];
   const errors: string[] = [];
+  const errorActions: string[][] = [];
   const progressLocations: unknown[] = [];
   const pickers: { title: string }[] = [];
   const prompts: string[] = [], notices: string[] = [], previews: { title: string; content: string }[] = [], opened: string[] = [], commands: string[] = [];
@@ -140,7 +141,9 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
       },
       showErrorMessage: async (message: string, ...actions: unknown[]) => {
         assert.ok(actions.every(action => typeof action === 'string'), 'Errors must be non-modal notifications');
-        errors.push(message); return options.errorChoice;
+        errors.push(message);
+        errorActions.push(actions.filter((action): action is string => typeof action === 'string'));
+        return options.errorChoice;
       },
       createQuickPick: () => {
         const picker = {
@@ -222,7 +225,7 @@ function harness(options: { failStart?: boolean; finishDuringStart?: boolean; tr
   const run = (id: string, commandOptions: Record<string, unknown> = {}) =>
     extension.runCommand({ type: 'command', id, args: {}, options: commandOptions }, panel);
   return {
-    extension, panel, run, finish, executions, argv, executionInputs, executionScopes, choices, messages, confirmations, confirmationDetails, progressLocations, pickers, prompts, notices, errors, previews, opened, commands, contexts, saved, vscode,
+    extension, panel, run, finish, executions, argv, executionInputs, executionScopes, choices, messages, confirmations, confirmationDetails, progressLocations, pickers, prompts, notices, errors, errorActions, previews, opened, commands, contexts, saved, vscode,
     counts: () => ({ serializations, refreshes, terminations, processListeners: processListeners.size, endListeners: endListeners.size })
   };
 }
@@ -1586,4 +1589,62 @@ test('updating a global duplicate verifies only that installation and invalidate
   assert.equal(snapshots.has('global:/home/test/.apm'), false);
   assert.equal(snapshots.has('workspace:/project'), true);
   assert.equal(host.prompts.length, 0, 'Updates never ask for another destination');
+});
+
+test('file-conflict update failures offer a confirmed force retry', async () => {
+  const host = harness({
+    errorChoice: 'Force Update',
+    output: args => args.includes('--force')
+      ? { stdout: '', stderr: '', exitCode: 0 }
+      : { stdout: 'Error updating dependencies: Locally-authored files have changed; use --force to overwrite them.',
+        stderr: '', exitCode: 1 }
+  });
+  const scope = host.extension.state.scopes.find(scope => scope.kind === 'workspace')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    scope, updateStatus: 'outdated', latestVersion: '2', metadata: { lockIdentity: 'org/sample' } };
+  host.extension.state.installed = [item];
+  host.panel.mode = 'details'; host.panel.item = item; host.panel.scope = scope;
+
+  await host.extension.packageAction('update', host.panel);
+  assert.match(host.errors[0] ?? '', /APM exited with code 1/, 'The diagnostic is in command output, not the notification message');
+  assert.ok(host.errorActions[0]?.includes('Force Update'));
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(host.argv.length, 2, 'Choosing Force Update retries the update once');
+  assert.ok(host.argv[1]?.includes('--force'));
+  assert.equal(host.argv[1]?.at(-1), 'org/sample', 'The retry keeps the canonical package identity');
+  assert.deepEqual(host.executionScopes.map(target => target?.path), [scope.path, scope.path]);
+  assert.ok(host.confirmations[1]?.includes('WARNING: --force can overwrite locally-authored files'));
+  assert.ok(!host.errorActions[1]?.includes('Force Update'), 'A force retry does not offer another force retry');
+});
+
+test('unrelated update failures do not offer force update', async () => {
+  const host = harness({ output: () => ({ stdout: '', stderr: 'Registry unavailable.', exitCode: 1 }) });
+  const scope = host.extension.state.scopes.find(scope => scope.kind === 'workspace')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    scope, updateStatus: 'outdated', latestVersion: '2', metadata: { lockIdentity: 'org/sample' } };
+  host.extension.state.installed = [item];
+  host.panel.mode = 'details'; host.panel.item = item; host.panel.scope = scope;
+
+  await host.extension.packageAction('update', host.panel);
+
+  assert.equal(host.argv.length, 1);
+  assert.ok(!host.errorActions[0]?.includes('Force Update'));
+});
+
+test('invalid local materialization evidence does not offer an ineffective force retry', async () => {
+  const host = harness({
+    output: () => ({ stdout: 'Invalid local materialization evidence: installation binding does not match. Existing files without trustworthy evidence will not be overwritten.',
+      stderr: '', exitCode: 1 })
+  });
+  const scope = host.extension.state.scopes.find(scope => scope.kind === 'workspace')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    scope, updateStatus: 'outdated', latestVersion: '2', metadata: { lockIdentity: 'org/sample' } };
+  host.extension.state.installed = [item];
+  host.panel.mode = 'details'; host.panel.item = item; host.panel.scope = scope;
+
+  await host.extension.packageAction('update', host.panel);
+
+  assert.match(host.errors[0] ?? '', /APM exited with code 1/);
+  assert.ok(!host.errorActions[0]?.includes('Force Update'));
 });

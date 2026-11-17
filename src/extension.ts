@@ -44,6 +44,7 @@ interface PanelContext {
   extra: Partial<State>;
   navigation?: Map<string, NavigationTarget>;
   retry?: () => Promise<void>;
+  forceUpdate?: () => Promise<void>;
   authenticationRepository?: Repository;
   preview?: { id: string; args: Record<string, string>; options: Record<string, unknown>; title: string; action: PackageAction };
   /** Package browser window only; survives moving between its list and details pages. */
@@ -57,6 +58,10 @@ const packageBrowserUri = () => vscode.Uri.from({ scheme: 'apm-browser', path: '
 const modalEditorGroup = -4;
 function supportsModalEditors() {
   return vscode.workspace.getConfiguration('workbench.editor').inspect?.('useModal')?.defaultValue !== undefined;
+}
+function isFileUpdateConflict(message: string): boolean {
+  if (/\b(?:invalid local materialization evidence|installation binding does not match|files without trustworthy evidence)\b/i.test(message)) return false;
+  return /\b(?:files?|paths?)\b.{0,100}\b(?:changed|modified|conflict|collision|overwrit\w*)\b|\b(?:changed|modified|conflict|collision|overwrit\w*)\b.{0,100}\b(?:files?|paths?)\b|\blocally.authored files?\b/i.test(message);
 }
 
 class ApmExtension implements vscode.Disposable {
@@ -310,6 +315,11 @@ class ApmExtension implements vscode.Disposable {
   private notifyError(message: string, context?: PanelContext) {
     const labels = recoveryActions(message).map(action => ({ output: 'Show APM Output', doctor: 'Run Doctor', authentication: 'Authentication Help', policy: 'Explain Policy', targets: 'Show Targets', retry: 'Retry' })[action]);
     if (context?.retry && !labels.includes('Retry')) labels.push('Retry');
+    const forceUpdate = context?.forceUpdate;
+    const failureDetails = context?.extra.actionResult?.output;
+    const canForceUpdate = !!forceUpdate && context?.extra.actionResult?.action === 'update' &&
+      context.extra.actionResult.status === 'failed' && isFileUpdateConflict([message, failureDetails].filter(Boolean).join('\n'));
+    if (canForceUpdate) labels.unshift('Force Update');
     if (labels.includes('Authentication Help')) labels.unshift('Manage Repository Accounts', 'Sign in to GitHub');
     const item = context?.item;
     const source = labels.includes('Authentication Help') && item && !item.marketplace ? packageIdentity(item, item.installed ? item : undefined, true) : undefined;
@@ -323,6 +333,7 @@ class ApmExtension implements vscode.Disposable {
       else if (choice === 'Authentication Help') void vscode.env.openExternal(vscode.Uri.parse('https://microsoft.github.io/apm/getting-started/authentication/'));
       else if (choice === 'Sign in to GitHub') void this.signIn().catch(error => this.report(error, context));
       else if (choice === 'Manage Repository Accounts') void this.manageAccounts(repository, scope).catch(error => this.report(error, context));
+      else if (choice === 'Force Update' && canForceUpdate && forceUpdate) void forceUpdate().catch(error => this.report(error, context));
       else if (choice === 'Retry' && context?.retry) void context.retry().catch(error => this.report(error, context));
     });
   }
@@ -1511,11 +1522,12 @@ class ApmExtension implements vscode.Disposable {
         break;
     }
   }
-  private async packageAction(action: PackageAction, context: PanelContext, scopeChosen = false) {
+  private async packageAction(action: PackageAction, context: PanelContext, scopeChosen = false, forceUpdate = false) {
     this.requireTrust();
     if (context.mode !== 'details' || !context.item) throw new Error('Open a package page to run package actions.');
     if (context.controller) throw new Error('Another action is already running on this page. Wait for it or cancel it.');
     context.controller = new AbortController();
+    context.forceUpdate = undefined;
     try {
       if (!scopeChosen && ['install', 'installWithOptions', 'previewInstall', 'previewWithOptions'].includes(action)) {
         const target = await this.installScope(this.scope(context));
@@ -1536,14 +1548,18 @@ class ApmExtension implements vscode.Disposable {
       }
       const item = context.item, scope = this.scope(context);
       context.retry = () => this.packageAction(action, context);
+      if (action === 'update' && !forceUpdate) context.forceUpdate = () => this.packageAction('update', context, false, true);
       const installed = findInstalledPackage({ ...item, scope }, this.state.installed)
         ?? (item.installed && (!item.scope || isSameScope(item.scope, scope)) ? item : undefined);
-      await this.dispatchPackageAction(action, context, item, installed, scope, scope.kind === 'global');
+      await this.dispatchPackageAction(action, context, item, installed, scope, scope.kind === 'global', forceUpdate);
     } finally {
       context.controller = undefined;
     }
+    if (action === 'update' && context.extra.actionResult?.status === 'failed') {
+      this.report(new Error(context.extra.error || context.extra.actionResult.summary || 'Package update failed.'), context);
+    }
   }
-  private async dispatchPackageAction(action: PackageAction, context: PanelContext, item: PackageItem, installed: PackageItem | undefined, scope: Scope, global: boolean) {
+  private async dispatchPackageAction(action: PackageAction, context: PanelContext, item: PackageItem, installed: PackageItem | undefined, scope: Scope, global: boolean, forceUpdate = false) {
     switch (action) {
       case 'install': {
         await this.runPackageCommand(context, action, `Install ${item.name}`, 'install', { packages: packageIdentity(item, installed, true) }, global ? { '--global': true } : {}, true);
@@ -1589,7 +1605,8 @@ class ApmExtension implements vscode.Disposable {
       case 'update': {
         if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
         const command = packageUpdateCommand(installed);
-        await this.runPackageCommand(context, action, `Update ${item.name}${command.id === 'install' ? ` to ${installed.latestVersion}` : ''}`, command.id, { packages: command.packages }, global ? { '--global': true } : {}, true);
+        await this.runPackageCommand(context, action, `Update ${item.name}${command.id === 'install' ? ` to ${installed.latestVersion}` : ''}`, command.id, { packages: command.packages },
+          { ...(global ? { '--global': true } : {}), ...(forceUpdate ? { '--force': true } : {}) }, true);
         break;
       }
       case 'audit': {
@@ -1672,9 +1689,13 @@ class ApmExtension implements vscode.Disposable {
     const flags = Object.keys(options);
     if (!await client.supports(descriptor.command, flags)) throw new Error(`This APM CLI does not support ${descriptor.label} with ${flags.join(' ') || 'these arguments'}. Upgrade APM.`);
     if (mutating) {
+      const forceWarning = options['--force'] === true
+        ? 'WARNING: --force can overwrite locally-authored files and deploy despite critical security findings. ' : '';
+      const confirmationLabel = action === 'uninstall' ? 'Uninstall' : action === 'update'
+        ? options['--force'] === true ? 'Force Update' : 'Update' : 'Install';
       const confirmation = await vscode.window.showWarningMessage(
-        `${title}? Scope: ${scope.label}. Host: ${this.hostLabel()}. APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
-        action === 'uninstall' ? 'Uninstall' : action === 'update' ? 'Update' : 'Install');
+        `${title}? Scope: ${scope.label}. Host: ${this.hostLabel()}. ${forceWarning}APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
+        confirmationLabel);
       if (!confirmation) return;
       if (descriptor.options.some(o => o.name === '--yes') && await client.supports(descriptor.command, ['--yes'])) argv = buildCommandArguments(descriptor, args, { ...options, '--yes': true });
     }
@@ -1718,7 +1739,7 @@ class ApmExtension implements vscode.Disposable {
           summary: redact(error instanceof Error ? error.message : String(error)) };
       } finally {
         this.send(context);
-        if (context.extra.actionResult?.status === 'failed') this.report(new Error(context.extra.error || context.extra.actionResult.summary || `${title} failed. Review APM Output.`), context);
+        if (context.extra.actionResult?.status === 'failed' && action !== 'update') this.report(new Error(context.extra.error || context.extra.actionResult.summary || `${title} failed. Review APM Output.`), context);
       }
     };
     if (!mutating) { await execute(); return; }
@@ -1732,8 +1753,8 @@ class ApmExtension implements vscode.Disposable {
     if (context.extra.actionResult) {
       const result = verifyPackageUpdate(context.extra.actionResult, context.item, this.state.error ?? context.refreshError);
       context.extra.actionResult = result;
-      if (action === 'update' && result.status === 'failed' && result.summary && !context.extra.error) this.report(new Error(result.summary), context);
-      else this.send(context);
+      if (action === 'update' && result.status === 'failed' && result.summary && !context.extra.error) context.extra.error = result.summary;
+      this.send(context);
     }
     if (context.detailsRequest === previousRequest) await this.loadDetails(context);
   }

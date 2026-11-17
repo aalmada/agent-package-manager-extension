@@ -65,13 +65,15 @@ Packages pinned to a tag move to the latest tag reported by APM. The extension r
 
 After updating, the extension checks the refreshed package status. It reports an unverified or still-outdated result instead of assuming that a successful exit means the package was upgraded.
 
+When APM reports a deployed-file collision that `--force` can resolve, the error notification offers **Force Update**. Choosing it retries the update in the same scope with `--force`, after a separate confirmation. APM may overwrite locally-authored files and deploy despite critical security findings, so use this only when you accept those risks. **Force Update** does not bypass APM's local materialization-evidence checks. If command output reports invalid or untrustworthy evidence, follow APM's recovery instructions in the output; preserve local edits and repair the invalid receipt as directed before retrying.
+
 ## Uninstall a package
 
 Choose **Uninstall** on the package page. The package is removed from the scope shown on the page only.
 
 ## Confirmations and progress
 
-Install, update, and uninstall ask for confirmation in a non-modal notification. The message names the scope, the execution host, and the risk: APM may write manifests and deployed files or run package scripts. Choose **Install**, **Update**, or **Uninstall** to proceed; dismissing the notification makes no changes.
+Install, update, and uninstall ask for confirmation in a non-modal notification. The message names the scope, the execution host, and the risk: APM may write manifests and deployed files or run package scripts. Choose **Install**, **Update**, or **Uninstall** to proceed; dismissing the notification makes no changes. A **Force Update** retry has a separate confirmation that warns it may overwrite local files and deploy despite critical security findings.
 
 While an action runs, the package page shows progress and a **Cancel** button. When it finishes, the page shows a summary, any audit findings, and APM's output. Full logs are in the **APM** output channel.
 
