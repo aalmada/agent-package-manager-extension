@@ -43,9 +43,9 @@ export function filterPackages(items: PackageItem[], filters: Filters): PackageI
       : item.updateStatus === 'outdated')) &&
     terms.every(term => `${item.name} ${item.description ?? ''} ${marketplaceLabel(item)}`.toLowerCase().includes(term)))
     .sort((a, b) => {
-      let order = 0;
-      if (sort === 'marketplace') order = marketplaceLabel(a).localeCompare(marketplaceLabel(b));
-      else order = a.name.localeCompare(b.name) * (sort === 'name-desc' ? -1 : 1);
+      const order = sort === 'marketplace'
+        ? marketplaceLabel(a).localeCompare(marketplaceLabel(b))
+        : a.name.localeCompare(b.name) * (sort === 'name-desc' ? -1 : 1);
       return order || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
     });
 }

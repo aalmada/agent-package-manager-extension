@@ -61,7 +61,7 @@ function markerItemPath(kind: ContentKind, directory: string, marker: string): s
 function parseObject(text: string, path: string, yaml = false): Record<string, unknown> {
   let value: unknown;
   try { value = yaml ? parseYaml(text) : JSON.parse(text); }
-  catch (error) { throw new Error(`Cannot parse ${path}: ${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) { throw new Error(`Cannot parse ${path}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
   if (!record(value)) throw new Error(`${path} must contain an object.`);
   return value;
 }
