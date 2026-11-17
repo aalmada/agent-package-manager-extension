@@ -67,11 +67,13 @@ Package lists and details pages use the same scope/status badges. An update or u
 
 | Section | Up to date | Newer version available |
 | --- | --- | --- |
-| **Catalog** and package details | **Workspace: Installed**, **Global: Installed** | **Workspace: Update available**, **Global: Update available** |
-| **Installed** | **Workspace**, **Global** | **Workspace: Update available**, **Global: Update available** |
-| **Updates** | | **Workspace**, **Global** |
+| **Catalog** and package details | **Workspace: Installed**, **Global: Installed** | **Workspace: Minor update**, **Global: Minor update** |
+| **Installed** | **Workspace**, **Global** | **Workspace: Minor update**, **Global: Minor update** |
+| **Updates** | | **Workspace: Minor update**, **Global: Minor update** |
 
 A package installed in both scopes has two badges in **Catalog**, and a separate entry for each scope in **Installed** and **Updates**. When a scope filter is active, **Catalog** shows only the badge for that scope. Update status is conveyed by text, not an extra border.
+
+For stable SemVer versions, update badges are colored and labeled **Patch update** (blue), **Minor update** (green), or **Major update** (amber) based on the version component that changed. A major update may include incompatible changes, so package details show a warning and recommend reviewing release notes. The label describes only the version bump, not the exact release contents. For `0.x`, pre-release, or unparseable versions, the badge stays **Update available** rather than guessing. The text label remains visible so the meaning does not rely on color alone.
 
 Direct Git installations also appear as installed in **Catalog** when their repository and package subdirectory match a catalog entry. Matching does not rely on the package name alone. If exactly one marketplace lists that source, **Installed**, **Updates**, and package details show that marketplace name instead of the repository, and marketplace search, filter, and sort include the package. A source listed by several marketplaces keeps its repository label.
 
@@ -83,7 +85,7 @@ The status part of a scope badge can also be:
 
 | Status | Meaning |
 | --- | --- |
-| **Update available (cached)**, or **Cached** in **Updates** | The update result comes from an earlier check. |
+| **Patch/Minor/Major update (cached)**, or **Update available (cached)** | The update result comes from an earlier check. |
 | **Showing saved update status** | The latest update check failed, so the last known result is shown. |
 | **Could not check for updates** | APM could not determine the update status. |
 | **Version could not be compared** | APM could not compare the installed version with the latest one. |

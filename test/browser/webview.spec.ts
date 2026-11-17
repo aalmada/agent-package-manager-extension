@@ -41,6 +41,10 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       --vscode-button-hoverBackground:#026ec1; --vscode-descriptionForeground:${dark ? '#aaa' : '#555'};
       --vscode-badge-background:#444; --vscode-badge-foreground:white;
       --vscode-focusBorder:#0078d4; --vscode-editorWarning-foreground:#cca700;
+      --vscode-textLink-foreground:${dark ? '#4daafc' : '#006ab1'};
+      --vscode-testing-iconPassed:${dark ? '#73c991' : '#388a34'};
+      --vscode-inputValidation-warningBackground:${dark ? '#4b3b00' : '#fff4ce'};
+      --vscode-inputValidation-warningForeground:${dark ? '#f6d365' : '#9a6700'};
       --vscode-list-hoverBackground:${dark ? '#2b2d2e' : '#e5e5e5'};
       --vscode-icon-foreground:${dark ? '#ccc' : '#333'};
       --vscode-menu-background:${dark ? '#252526' : '#fff'};
@@ -61,10 +65,10 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       marketplaces: [{ name: 'copilot-plugins', source: 'github/copilot-plugins' }, { name: 'team-skills', source: 'example/team-skills' }],
       checkedAt: '2026-11-05T10:00:00Z',
       catalog: [
-        { id: 'copilot-plugins::code-review', name: 'code-review', marketplace: 'copilot-plugins', description: 'Review code with focused agent workflows', version: '2.1.0', installed: true, updateStatus: 'outdated' },
+        { id: 'copilot-plugins::code-review', name: 'code-review', marketplace: 'copilot-plugins', description: 'Review code with focused agent workflows', version: '2.1.0', installed: true, updateStatus: 'outdated', latestVersion: '2.1.0' },
         { id: 'team-skills::frontend-design', name: 'frontend-design', marketplace: 'team-skills', description: 'Build accessible, polished interfaces', version: '1.3.0', installed: false }
       ],
-      installed: [{ id: 'copilot-plugins::code-review', name: 'code-review', marketplace: 'copilot-plugins', description: 'Review code with focused agent workflows', version: '2.0.0', installed: true, updateStatus: 'outdated' }]
+      installed: [{ id: 'copilot-plugins::code-review', name: 'code-review', marketplace: 'copilot-plugins', description: 'Review code with focused agent workflows', version: '2.0.0', installed: true, updateStatus: 'outdated', latestVersion: '2.1.0' }]
     };
     await postMessage(page, { type: 'state', state });
     await expect(page.locator('.package-row')).toHaveCount(4);
@@ -98,12 +102,17 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await postMessage(page, { type: 'state', state: mixed });
     await expect(page.locator('.count-badge')).toHaveText(['2', '2', '2']);
     await expect(page.locator('#section-body-catalog .package-row').first().locator('.badge'))
-      .toHaveText(['Global: Update available', 'Workspace: Update available']);
+      .toHaveText(['Global: Major update', 'Workspace: Minor update']);
     const installedRows = page.locator('#section-body-installed .package-row');
     const updateRows = page.locator('#section-body-updates .package-row');
-    await expect(installedRows.nth(0).locator('.badge')).toHaveText(['Global: Update available']);
-    await expect(installedRows.nth(1).locator('.badge')).toHaveText(['Workspace: Update available']);
-    await expect(updateRows.locator('.badge')).toHaveText(['Global', 'Workspace']);
+    await expect(installedRows.nth(0).locator('.badge')).toHaveText(['Global: Major update']);
+    await expect(installedRows.nth(0).locator('.badge')).toHaveClass(/update-type-major/);
+    await expect(installedRows.nth(1).locator('.badge')).toHaveText(['Workspace: Minor update']);
+    await expect(installedRows.nth(1).locator('.badge')).toHaveClass(/update-type-minor/);
+    await expect(updateRows.locator('.badge')).toHaveText(['Global: Major update', 'Workspace: Minor update']);
+    const majorColor = await installedRows.nth(0).locator('.badge').evaluate(element => getComputedStyle(element).backgroundColor);
+    const minorColor = await installedRows.nth(1).locator('.badge').evaluate(element => getComputedStyle(element).backgroundColor);
+    expect(majorColor).not.toBe(minorColor);
     await expectBorderlessBadges(page);
     await page.screenshot({ path: testInfo.outputPath(`dual-scope-${theme}.png`), fullPage: true });
     await installedRows.first().click();
@@ -125,7 +134,7 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
       catalog: withInstallations(state.catalog, [global]) } });
     await expect(page.locator('#search')).toBeVisible();
     await expect(page.locator('.count-badge')).toHaveText(['2', '1', '1']);
-    await expect(page.locator('#section-body-installed .badge')).toHaveText(['Global: Update available']);
+    await expect(page.locator('#section-body-installed .badge')).toHaveText(['Global: Major update']);
     await expect(page.locator('#section-body-catalog').getByText(/^Workspace:/)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const crowded = { ...state, catalog: Array.from({ length: 60 }, (_, i) => ({ ...state.catalog[0], id: `catalog-${i}`, name: `Package ${i}` })) };

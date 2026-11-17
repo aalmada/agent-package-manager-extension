@@ -3,6 +3,7 @@ import type { PackageAction } from '../apm/actions';
 import type { PackageItem, Scope } from '../apm/types';
 import { dependencyTreeItem, type DependencyTreeNode } from '../apm/dependencyTree';
 import { marketplaceLabel, samePackage } from '../apm/packageState';
+import { versionUpdateKind } from '../apm/versions';
 import { renderActionResult, renderDetailSections } from './details';
 import { el } from './dom';
 import { filterPackages, filterTokens, sectionPackages, withStatus, withToken, type Filters } from './filter';
@@ -54,8 +55,12 @@ function badge(text: string) { return el('span', 'badge', text); }
 function origin(item: PackageItem) { return marketplaceLabel(item) || item.source || 'Direct source'; }
 function installationTag(section: BrowserSection | 'details', installation: PackageItem, select?: () => void) {
   const outdated = installation.updateStatus === 'outdated';
-  const status = section === 'updates' ? installation.updateStale ? 'Cached' : undefined
-    : outdated ? installation.updateStale ? 'Update available (cached)' : 'Update available'
+  const kind = outdated ? versionUpdateKind(installation.version, installation.latestVersion) : undefined;
+  const updateLabel = kind === undefined ? undefined : kind === 'available' ? 'Update available'
+    : `${kind[0].toUpperCase()}${kind.slice(1)} update`;
+  const status = section === 'updates' ? outdated ? `${updateLabel}${installation.updateStale ? ' (cached)' : ''}`
+    : installation.updateStale ? 'Cached' : undefined
+    : outdated ? `${updateLabel}${installation.updateStale ? ' (cached)' : ''}`
       : installation.updateStale ? 'Showing saved update status'
         : installation.updateStatus === 'failed' || installation.updateStatus === 'unknown' ? 'Could not check for updates'
           : installation.updateStatus === 'not-comparable' ? 'Version could not be compared'
@@ -63,7 +68,17 @@ function installationTag(section: BrowserSection | 'details', installation: Pack
   const scope = installation.scope ? scopeKindLabel(installation.scope) : undefined;
   const text = scope && status ? `${scope}: ${status}` : scope ?? status;
   if (!text) return undefined;
-  return select ? button(text, select, 'badge') : badge(text);
+  const tag = select ? button(text, select, 'badge') : badge(text);
+  if (kind) {
+    tag.classList.add('update-type', `update-type-${kind}`);
+    if (installation.latestVersion) {
+      const note = kind === 'major' ? 'This may include incompatible changes; review release notes before updating.'
+        : kind === 'available' ? 'Review release notes to understand the changes.'
+          : 'This label describes the SemVer version bump; review release notes for exact changes.';
+      tag.title = `${installation.version} → ${installation.latestVersion}. ${note}`;
+    }
+  }
+  return tag;
 }
 function packageAction(text: string, name: PackageAction, className = '') {
   const node = button(text, () => send({ type: 'packageAction', action: name }), className);
@@ -776,14 +791,20 @@ function renderDetails(container: HTMLElement) {
   if (state.actionResult?.preview && state.actionResult.status === 'success') toolbar.append(packageAction('Review and apply preview options', 'applyPreview'));
   container.append(toolbar);
   if (state.actionResult) container.append(renderActionResult(state.actionResult, () => send({ type: 'cancel' }), id => send({ type: 'navigate', id })));
+  const updateKind = item.updateStatus === 'outdated'
+    ? versionUpdateKind(item.version, item.latestVersion) : undefined;
+  const updateLabel = updateKind && updateKind !== 'available'
+    ? `${updateKind[0].toUpperCase()}${updateKind.slice(1)} update available` : 'Update available';
   const updateMessage = item.updateStatus === 'outdated'
-    ? `Update available${item.latestVersion ? `: ${item.latestVersion}` : ''}.${item.updateStale ? ' This is the last known result; refresh to verify.' : ''}`
+    ? `${updateLabel}${item.latestVersion ? `: ${item.version} → ${item.latestVersion}` : ''}.${updateKind === 'major' ? ' This may include incompatible changes; review release notes before updating.'
+      : updateKind === 'available' ? ' Review release notes to understand the changes.'
+        : ' SemVer describes the version bump, not the exact release contents; review release notes for details.'}${item.updateStale ? ' This is the last known result; refresh to verify.' : ''}`
     : item.updateStatus === 'current' ? 'This package is up to date.'
       : item.updateStatus === 'failed' || item.updateStatus === 'unknown'
         ? `Could not check for updates${item.updateStale ? '; showing the last known result' : ''}.`
         : item.updateStatus === 'not-comparable' ? 'Could not compare this package version with the latest version.'
           : item.updateStatus === 'unchecked' ? 'Update status has not been checked yet.' : undefined;
-  if (updateMessage) container.append(el('p', `notice${item.updateStale ? ' warning' : ''}`, updateMessage));
+  if (updateMessage) container.append(el('p', `notice${item.updateStale || updateKind === 'major' ? ' warning' : ''}`, updateMessage));
   container.append(renderDetailSections(item, state.details, state.busy, id => send({ type: 'navigate', id })));
   if (state.readmeHtml) {
     const article = el('article', 'readme'); article.innerHTML = state.readmeHtml; container.append(article);

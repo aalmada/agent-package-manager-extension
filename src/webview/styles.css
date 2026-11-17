@@ -87,8 +87,16 @@ p { line-height: 1.5; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .badge, .count-badge, .content-count { border: 0; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .badge { border-radius: 10px; padding: 2px 6px; font-size: 10px; display: inline-block; overflow-wrap: anywhere; }
+.badge.update-type { font-size: 11px; font-weight: 600; }
+.badge.update-type-patch { background: var(--vscode-textLink-foreground, var(--vscode-badge-background)); color: var(--vscode-editor-background, var(--vscode-badge-foreground)); }
+.badge.update-type-minor { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green, var(--vscode-badge-background))); color: var(--vscode-editor-background, var(--vscode-badge-foreground)); }
+.badge.update-type-major { background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWarning-foreground, var(--vscode-badge-background))); color: var(--vscode-inputValidation-warningForeground, var(--vscode-editor-background, var(--vscode-badge-foreground))); }
 button.badge:hover { background: var(--vscode-badge-background); text-decoration: underline; }
+button.badge.update-type-patch:hover { background: var(--vscode-textLink-foreground, var(--vscode-badge-background)); }
+button.badge.update-type-minor:hover { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green, var(--vscode-badge-background))); }
+button.badge.update-type-major:hover { background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWarning-foreground, var(--vscode-badge-background))); }
 .installation-tags [aria-pressed="true"] { font-weight: 600; }
+button.badge.update-type[aria-pressed="false"] { font-weight: normal; }
 .empty { padding: 8px 12px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .section-body > button { margin: 0 12px 10px; }
 .details-section { border-top: 1px solid var(--vscode-widget-border, var(--vscode-input-border, transparent)); margin-top: 24px; padding-top: 1px; }

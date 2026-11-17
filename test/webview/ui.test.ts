@@ -85,7 +85,8 @@ test('dual installations have two catalog tags, separate scoped rows and unambig
     assert.equal(page.document.querySelector('#section-heading-updates .count-badge')?.textContent, '2');
     const updateRows = [...page.document.querySelectorAll<HTMLButtonElement>('#section-body-updates .package-row')];
     assert.equal(updateRows.length, 2);
-    assert.deepEqual(updateRows.map(row => row.querySelector('.badge')?.textContent), ['Global', 'Workspace']);
+    assert.deepEqual(updateRows.map(row => row.querySelector('.badge')?.textContent),
+      ['Global: Update available', 'Workspace: Update available']);
     updateRows[1].click();
     assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
     page.state.browserSearch = '@scope:workspace'; page.update();
@@ -139,7 +140,7 @@ test('scope tags fold installation and update-check status without repeating the
     page.update();
     assert.deepEqual(tags('#section-body-catalog'), [['Global: Installed', 'Workspace: Update available (cached)'], []]);
     assert.deepEqual(tags('#section-body-installed'), [['Global'], ['Workspace: Update available (cached)']]);
-    assert.deepEqual(tags('#section-body-updates'), [['Workspace: Cached']]);
+    assert.deepEqual(tags('#section-body-updates'), [['Workspace: Update available (cached)']]);
   } finally { page.dom.window.close(); }
 });
 test('catalog and details show both direct and marketplace installations of the same source', () => {
@@ -697,13 +698,33 @@ test('plugin details describe update state and mark cached results', () => {
   const page = browser();
   try {
     page.state.mode = 'details';
-    page.state.item = { ...page.state.installed[0], updateStatus: 'outdated', latestVersion: '1.0.0', updateStale: true };
+    page.state.item = { ...page.state.installed[0], version: '1.0.0', updateStatus: 'outdated', latestVersion: '2.0.0', updateStale: true };
     page.state.details = {};
     page.update();
     const notice = page.document.querySelector('.notice.warning');
-    assert.match(notice?.textContent ?? '', /Update available: 1\.0\.0/);
+    assert.match(notice?.textContent ?? '', /Major update available: 1\.0\.0 → 2\.0\.0/);
+    assert.match(notice?.textContent ?? '', /may include incompatible changes/);
     assert.match(notice?.textContent ?? '', /last known result; refresh to verify/);
     assert.doesNotMatch(notice?.textContent ?? '', /outdated/);
+  } finally { page.dom.window.close(); }
+});
+
+test('update rows show SemVer bump badges with a generic fallback for unstable versions', () => {
+  const page = browser('updates');
+  try {
+    const item = { ...page.state.installed[0], scope: page.state.scopes[0] };
+    for (const [current, latest, label] of [
+      ['1.2.3', '1.2.4', 'Patch update'],
+      ['1.2.3', '1.3.0', 'Minor update'],
+      ['1.2.3', '2.0.0', 'Major update'],
+      ['0.2.3', '0.3.0', 'Update available']
+    ]) {
+      page.state.installed = [{ ...item, version: current, latestVersion: latest, updateStatus: 'outdated' }];
+      page.update();
+      const badge = page.document.querySelector<HTMLSpanElement>('#section-body-updates .badge');
+      assert.equal(badge?.textContent, `Workspace: ${label}`);
+      if (label !== 'Update available') assert.ok(badge?.classList.contains(`update-type-${label.split(' ')[0].toLowerCase()}`));
+    }
   } finally { page.dom.window.close(); }
 });
 
