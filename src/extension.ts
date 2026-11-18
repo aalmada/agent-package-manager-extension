@@ -255,6 +255,11 @@ class ApmExtension implements vscode.Disposable {
     }
     await vscode.commands.executeCommand('vscode.openWith', uri, packageBrowserViewType, vscode.ViewColumn.Active);
   }
+  closeAllPackageDetails() {
+    for (const entry of [...this.panels.values()]) {
+      if (entry.mode === 'details' && !entry.gallery) entry.panel?.dispose();
+    }
+  }
   resolvePackageBrowser(panel: vscode.WebviewPanel) {
     const key = `gallery:${++this.galleryId}`;
     const context = this.attach(panel.webview, 'gallery', panel);
@@ -2009,6 +2014,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['apm.reports.dependencies', () => extension.dependencyReports()],
     ['apm.refresh', () => extension.refreshAll()],
     ['apm.openPackageBrowser', () => extension.openPackageBrowser()],
+    ['apm.closeAllTabs', () => extension.closeAllPackageDetails()],
     ['apm.marketplaces', () => openSettings('apm.marketplaces')],
     ['apm.settings', () => openSettings(`@ext:${context.extension.id}`)],
     ...(['catalog', 'installed', 'updates'] as const).map(section => [`apm.views.${section}`, () => extension.toggleSection(section)] as const),

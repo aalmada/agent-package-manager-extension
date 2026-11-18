@@ -175,6 +175,11 @@
         "icon": "$(screen-full)"
       },
       {
+        "command": "apm.closeAllTabs",
+        "title": "Close All APM Tabs",
+        "category": "APM"
+      },
+      {
         "command": "apm.marketplaces",
         "title": "APM: Open Marketplace Settings"
       },
@@ -771,6 +776,12 @@
         {
           "command": "apm.filter.sort.marketplace.checked",
           "when": "false"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "apm.closeAllTabs",
+          "group": "1_close@60"
         }
       ]
     },

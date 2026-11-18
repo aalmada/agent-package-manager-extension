@@ -60,6 +60,7 @@ interface Harness {
   dependencyReports(): Promise<void>;
   moreActions(): Promise<void>;
   openPackageBrowser(): Promise<void>;
+  closeAllPackageDetails(): void;
   resolvePackageBrowser(panel: object): void;
 }
 
@@ -1442,6 +1443,22 @@ test('catalog and direct-install entries open the same scoped details panel and 
   assert.equal(host.executionScopes[0]?.path, workspace.path);
   dispose.forEach(close => close());
   assert.equal(host.extension.panels.size, 0);
+});
+
+test('close all APM tabs closes standalone detail panels but preserves package browser tabs', () => {
+  const host = harness();
+  const closed: string[] = [];
+  const entry = (id: string, gallery = false): Panel => ({
+    mode: 'details', gallery, panel: { dispose: () => closed.push(id) }, extra: {}
+  });
+  host.extension.panels.set('details:one', entry('one'));
+  host.extension.panels.set('details:two', entry('two'));
+  host.extension.panels.set('gallery:details', entry('gallery', true));
+  host.extension.panels.set('gallery:list', { mode: 'gallery', gallery: true, panel: { dispose: () => closed.push('list') }, extra: {} });
+
+  host.extension.closeAllPackageDetails();
+
+  assert.deepEqual(closed, ['one', 'two']);
 });
 
 test('the package browser opens details in place, returns to its list and stays separate from details panels', async () => {
