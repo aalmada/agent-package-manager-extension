@@ -93,7 +93,8 @@ async function steps() {
   await apm().update('allowRemoteImages', undefined, vscode.ConfigurationTarget.Global);
   assert.equal(apm().get('allowRemoteImages'), false);
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle', 'apm.reports.dependencies', 'apm.closeAllTabs']) assert.ok(commands.includes(command), command);
+  for (const command of ['apm.initialize', 'apm.previewCompile', 'apm.compile', 'apm.validate', 'apm.auditWorkspace', 'apm.targets', 'apm.doctor', 'apm.runScript', 'apm.mcp.discover', 'apm.mcp.install', 'apm.lifecycle', 'apm.reports.dependencies']) assert.ok(commands.includes(command), command);
+  assert.ok(!commands.includes('apm.closeAllTabs'));
   assert.ok(!commands.includes('apm.getStarted'));
   for (const command of ['apm.tools', 'apm.previewInstall', 'apm.chooseScope', 'apm.policy']) assert.ok(!commands.includes(command), command);
   assert.equal(apm().get('tasks.includeScripts'), false);
@@ -114,8 +115,6 @@ async function steps() {
   const packageBrowserOpen = () => vscode.window.tabGroups.all.flatMap(group => group.tabs)
     .some(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'apm.packageBrowser');
   await until('the package browser opens as a custom editor', packageBrowserOpen, 10_000);
-  await vscode.commands.executeCommand('apm.closeAllTabs');
-  assert.equal(packageBrowserOpen(), true, 'Closing APM detail tabs leaves the package browser open');
   await vscode.commands.executeCommand('apm.openPackageBrowser');
   assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs)
     .filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'apm.packageBrowser').length, 1, 'An open package browser is reused');

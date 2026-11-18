@@ -27,7 +27,7 @@ class Task {
 }
 interface Execution { task: Task; terminate(): void }
 interface Panel { mode: 'native' | 'details' | 'browser' | 'gallery'; gallery?: boolean; panel?: unknown; extra: Partial<State>; item?: PackageItem; scope?: Scope; controller?: AbortController;
-  detailsController?: AbortController; detailsRequest?: number; authenticationRepository?: { provider: 'github'; origin: string; path: string } }
+  detailsController?: AbortController; detailsRequest?: number; retry?: () => Promise<void>; authenticationRepository?: { provider: 'github'; origin: string; path: string } }
 interface Harness {
   toggleSection(section: PackageSection): Promise<void>;
   state: State;
@@ -60,7 +60,6 @@ interface Harness {
   dependencyReports(): Promise<void>;
   moreActions(): Promise<void>;
   openPackageBrowser(): Promise<void>;
-  closeAllPackageDetails(): void;
   resolvePackageBrowser(panel: object): void;
 }
 
@@ -1283,6 +1282,7 @@ test('package install previews choose a destination but applying and uninstallin
     await writeFile(join(root, 'apm.yml'), 'name: project\n');
     const host = harness({ root, picks: [1] });
     host.panel.mode = 'details';
+    host.panel.panel = {};
     host.panel.item = { id: 'one::sample', name: 'sample', marketplace: 'one', version: '1', installed: false };
     await host.extension.packageAction('previewInstall', host.panel);
     assert.deepEqual(Array.from(host.argv[0]), ['install', '--dry-run', '--global', 'sample@one']);
@@ -1386,7 +1386,7 @@ test('refresh lists and checks both scopes independently and keeps global result
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('catalog and direct-install entries open the same scoped details panel and preserve mutation identities', async () => {
+test('one details panel follows package and scope selections while preserving mutation identities', async () => {
   const host = harness();
   const workspace = host.extension.state.scopes[0], global = host.extension.state.scopes[2];
   const catalog: PackageItem = {
@@ -1407,9 +1407,12 @@ test('catalog and direct-install entries open the same scoped details panel and 
   assert.equal(host.extension.state.installed[1].marketplace, '');
   let created = 0, revealed = 0;
   const dispose: (() => void)[] = [], loaded: Panel[] = [];
-  Reflect.set(host.vscode.window, 'createWebviewPanel', (type: string) => {
+  let nativePanel: { title: string; iconPath?: unknown } | undefined;
+  Reflect.set(host.vscode.Uri, 'joinPath', (_base: unknown, ...parts: string[]) => parts.join('/'));
+  Reflect.set(host.vscode.window, 'createWebviewPanel', (type: string, title: string) => {
     assert.equal(type, 'apm.details'); created++;
-    return { webview: {}, reveal: () => { revealed++; }, onDidDispose: (listener: () => void) => { dispose.push(listener); } };
+    nativePanel = { title };
+    return Object.assign(nativePanel, { webview: {}, reveal: () => { revealed++; }, onDidDispose: (listener: () => void) => { dispose.push(listener); } });
   });
   Reflect.set(host.extension, 'attach', (_webview: unknown, mode: 'details', panel: unknown) => ({ mode, panel, extra: {} }));
   Reflect.set(host.extension, 'loadDetails', async (panel: Panel) => { loaded.push(panel); });
@@ -1422,13 +1425,17 @@ test('catalog and direct-install entries open the same scoped details panel and 
   assert.equal(created, 1);
   assert.equal(revealed, 2);
   assert.equal(host.extension.panels.size, 1);
+  assert.equal(nativePanel?.title, 'APM: authoring');
+  assert.equal(nativePanel?.iconPath, 'media/apm.svg');
 
   await host.extension.handle({ type: 'details', id: user.id, scopeKey: `global:${global.path}` }, browser);
   const globalPanel = loaded[2];
   await host.extension.handle({ type: 'details', id: catalog.id, scopeKey: `global:${global.path}` }, browser);
   assert.equal(loaded[3], globalPanel);
   assert.equal(globalPanel.item, host.extension.state.installed[0]);
-  assert.equal(created, 2, 'Global and workspace operations retain separate scopes');
+  assert.equal(globalPanel, workspacePanel);
+  assert.equal(globalPanel.scope?.path, global.path);
+  assert.equal(created, 1);
 
   host.extension.state.installed = [];
   await host.extension.handle({ type: 'details', id: catalog.id }, browser);
@@ -1437,28 +1444,70 @@ test('catalog and direct-install entries open the same scoped details panel and 
   host.extension.state.installed = [direct];
   await host.extension.handle({ type: 'details', id: direct.id, scopeKey: `workspace:${workspace.path}` }, browser);
   assert.equal(loaded[5], workspacePanel);
-  assert.equal(created, 2);
+  assert.equal(created, 1);
+  assert.equal(workspacePanel.scope?.path, workspace.path);
   await host.extension.packageAction('uninstall', workspacePanel);
   assert.deepEqual(Array.from(host.argv[0]), ['uninstall', 'team/catalog/plugins/authoring']);
   assert.equal(host.executionScopes[0]?.path, workspace.path);
+  const other: PackageItem = { id: 'other', name: 'other', marketplace: 'catalog', version: '1', installed: false };
+  host.extension.state.catalog.push(other);
+  const pending = new AbortController();
+  workspacePanel.detailsController = pending;
+  workspacePanel.extra = { readmeHtml: 'old', actionResult: { action: 'uninstall', status: 'success', summary: 'old', title: 'old', command: 'uninstall' } };
+  await host.extension.handle({ type: 'details', id: other.id }, browser);
+  assert.equal(created, 1);
+  assert.equal(nativePanel?.title, 'APM: other');
+  assert.equal(pending.signal.aborted, true);
+  assert.equal(workspacePanel.extra.readmeHtml, undefined);
+  assert.equal(workspacePanel.extra.actionResult, undefined);
+  workspacePanel.controller = new AbortController();
+  await assert.rejects(host.extension.handle({ type: 'details', id: direct.id }, browser), /Another action is already running/);
+  assert.equal(nativePanel?.title, 'APM: other');
+  workspacePanel.controller = undefined;
   dispose.forEach(close => close());
   assert.equal(host.extension.panels.size, 0);
+  await host.extension.handle({ type: 'details', id: other.id }, browser);
+  assert.equal(created, 2, 'Closing the tab allows a fresh panel to open');
 });
 
-test('close all APM tabs closes standalone detail panels but preserves package browser tabs', () => {
+test('switching details discards a late package response', async () => {
   const host = harness();
-  const closed: string[] = [];
-  const entry = (id: string, gallery = false): Panel => ({
-    mode: 'details', gallery, panel: { dispose: () => closed.push(id) }, extra: {}
-  });
-  host.extension.panels.set('details:one', entry('one'));
-  host.extension.panels.set('details:two', entry('two'));
-  host.extension.panels.set('gallery:details', entry('gallery', true));
-  host.extension.panels.set('gallery:list', { mode: 'gallery', gallery: true, panel: { dispose: () => closed.push('list') }, extra: {} });
+  const prototype = Object.getPrototypeOf(host.extension);
+  const first: PackageItem = { id: 'first', name: 'first', marketplace: 'one', version: '1', installed: false };
+  const second: PackageItem = { ...first, id: 'second', name: 'second' };
+  host.extension.state.catalog = [first, second];
+  Reflect.set(host.vscode.Uri, 'joinPath', () => ({}));
+  Reflect.set(host.vscode.window, 'createWebviewPanel', () => ({ webview: {}, reveal() {}, onDidDispose() {} }));
+  Reflect.set(host.extension, 'attach', (_webview: unknown, mode: 'details', panel: unknown) => ({ mode, panel, extra: {} }));
+  Reflect.set(host.extension, 'loadDetails', prototype.loadDetails);
+  let finishFirst: ((details: object) => void) | undefined;
+  Reflect.set(host.extension, 'client', () => ({ getDetails: (item: PackageItem) => item.id === first.id
+    ? new Promise(resolve => { finishFirst = resolve; }) : Promise.resolve({ description: 'second' }) }));
+  const browser: Panel = { mode: 'browser', extra: {} };
+  const pending = host.extension.handle({ type: 'details', id: first.id }, browser);
+  await host.extension.handle({ type: 'details', id: second.id }, browser);
+  finishFirst!({ description: 'first' });
+  await pending;
+  const panel = host.extension.panels.get('details')!;
+  assert.equal(panel.item?.id, second.id);
+  assert.equal(panel.extra.details?.description, 'second');
+});
 
-  host.extension.closeAllPackageDetails();
-
-  assert.deepEqual(closed, ['one', 'two']);
+test('a stale retry notification cannot run an action on a different package', async () => {
+  const host = harness();
+  let resolveChoice: ((choice: string) => void) | undefined;
+  Reflect.set(host.vscode.window, 'showErrorMessage', () => new Promise(resolve => { resolveChoice = resolve; }));
+  let retries = 0;
+  const panel: Panel = { mode: 'details', extra: {}, item: { id: 'first', name: 'first', marketplace: '', version: '1', installed: false },
+    retry: async () => { retries++; } };
+  host.extension.report(new Error('Operation failed'), panel);
+  const first = panel.item!;
+  Reflect.get(Object.getPrototypeOf(host.extension), 'resetPackagePage').call(host.extension, panel, 'details');
+  panel.item = { ...first, id: 'second', name: 'second' };
+  resolveChoice!('Retry');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(retries, 0);
+  assert.match(host.confirmations[0], /package page has changed/);
 });
 
 test('the package browser opens details in place, returns to its list and stays separate from details panels', async () => {
@@ -1478,6 +1527,7 @@ test('the package browser opens details in place, returns to its list and stays 
   assert.equal(gallery.scope?.path, workspace.path);
 
   let created = 0;
+  Reflect.set(host.vscode.Uri, 'joinPath', () => ({}));
   Reflect.set(host.vscode.window, 'createWebviewPanel', () => {
     created++;
     return { webview: {}, reveal() {}, onDidDispose() {} };

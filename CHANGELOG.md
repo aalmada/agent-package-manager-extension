@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Reuse a single package-details tab across packages and scopes, with an APM title and transparent icon.
+- Remove the **Close All APM Tabs** command.
+
 ## 0.7.0
 
 - Add local IntelliSense, field documentation, and live structural validation for manually edited `apm.yml` and `apm.lock.yaml`, including nested fields and value suggestions.

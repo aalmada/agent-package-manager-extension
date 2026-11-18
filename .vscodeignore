@@ -5,6 +5,7 @@ node_modules/**
 .vscode/**
 .github/**
 .agents/**
+.apm-local/**
 .aspire/**
 .sharplsp/**
 .vscode-test/**

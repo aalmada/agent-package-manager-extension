@@ -110,7 +110,7 @@ Catalog installation badges appear as soon as installed packages are loaded, wit
 
 ## Package details
 
-Select a package to open its page in an editor tab. In the [package browser window](#package-browser-window), the page opens in the same window instead. **Catalog**, **Installed**, and **Updates** open the same details tab for the same package and installation scope, including packages installed directly from a Git repository. Installed packages show their installed version, local contents, and update/uninstall actions regardless of which list you opened them from.
+Select a package in the APM view to open its page in an editor tab titled **APM: \<package name\>**. Selecting another package or installation scope reuses that tab. In the [package browser window](#package-browser-window), the page opens in the same window instead. Installed packages show their installed version, local contents, and update/uninstall actions regardless of which list you opened them from. Wait for a running package action to finish or cancel it before switching pages.
 
 ![A package page with actions, tags, contents, package information, and README](images/package-details.png)
 
