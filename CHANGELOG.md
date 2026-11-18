@@ -1,8 +1,11 @@
 # Changelog
 
-## 0.6.0
+## 0.7.0
 
 - Add local IntelliSense, field documentation, and live structural validation for manually edited `apm.yml` and `apm.lock.yaml`, including nested fields and value suggestions.
+
+## 0.6.0
+
 - Show available package updates as color-coded Patch, Minor, or Major changes.
 - Offer a confirmed **Force Update** retry for file collisions that APM can resolve, while keeping invalid local materialization evidence on APM's explicit recovery path.
 
