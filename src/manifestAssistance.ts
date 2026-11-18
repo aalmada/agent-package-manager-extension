@@ -4,18 +4,11 @@ import { isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 import { descriptors } from './apm/commands';
 import { containsUrlCredentials } from './apm/redact';
 import { parseTargets } from './apm/actions';
+import { yamlCompletion, yamlDefinition, yamlHover, yamlIssues } from './apm/yamlAssistance';
 import packageManifest from '../package.json';
 
-export const manifestFields: Record<string, string> = {
-  name: 'Package identifier.', version: 'Package version.', description: 'Short package description.', author: 'Package author.',
-  license: 'Package license.', targets: 'Explicit harness targets. Omit to use APM target resolution.',
-  dependencies: 'Agent packages, MCP servers, and LSP servers installed by APM.', devDependencies: 'Development-only dependencies.',
-  scripts: 'Named commands. Execution is explicit and requires APM experimental script support.',
-  includes: 'Local content to publish. auto selects the authoritative source layout.',
-  compilation: 'Context compilation options.', policy: 'Consumer-side policy controls.', marketplace: 'Marketplace authoring metadata.',
-  registries: 'Registry configuration; semantics depend on the selected manifest contract.',
-  '$schema': 'Explicit manifest contract identity. Omission selects the CLI working draft; do not select a schema just for editor completion.'
-};
+export const manifestFields: Record<string, string> = Object.fromEntries(
+  Object.entries(yamlDefinition(false).fields ?? {}).map(([name, field]) => [name, field.description]));
 export function manifestContext(text: string) {
   const document = parseDocument(text);
   return { document, schema: document.get('$schema'), errors: document.errors };
@@ -27,38 +20,66 @@ function targetOptions(): string[] {
 }
 export function registerManifestAssistance(callbacks: { details(dependency: string, uri: vscode.Uri): Promise<void> }): vscode.Disposable {
   const selector: vscode.DocumentSelector = { scheme: 'file', language: 'yaml', pattern: '**/apm.yml' };
+  const yamlSelector: vscode.DocumentSelector = [
+    { scheme: 'file', language: 'yaml', pattern: '**/apm.yml' },
+    { scheme: 'file', language: 'yaml', pattern: '**/apm.lock.yaml' }
+  ];
   const registrations: vscode.Disposable[] = [];
-  const safe = (document: vscode.TextDocument) => vscode.workspace.isTrusted && basename(document.uri.fsPath) === 'apm.yml' && document.getText().length <= 1024 * 1024;
-  registrations.push(vscode.languages.registerCompletionItemProvider(selector, {
+  const safeYaml = (document: vscode.TextDocument) => vscode.workspace.isTrusted && document.uri.scheme === 'file'
+    && ['apm.yml', 'apm.lock.yaml'].includes(basename(document.uri.fsPath)) && document.getText().length <= 1024 * 1024;
+  const safe = (document: vscode.TextDocument) => safeYaml(document) && basename(document.uri.fsPath) === 'apm.yml';
+  const definition = (document: vscode.TextDocument) => yamlDefinition(basename(document.uri.fsPath) === 'apm.lock.yaml', targetOptions());
+  registrations.push(vscode.languages.registerCompletionItemProvider(yamlSelector, {
     provideCompletionItems(document, position) {
-      if (!safe(document)) return [];
+      if (!safeYaml(document)) return [];
       const context = manifestContext(document.getText());
-      const before = document.lineAt(position.line).text.slice(0, position.character);
-      const parent = document.getText().split(/\r?\n/).slice(0, position.line).reverse().find(line => /^[^\s#][\w$-]*:/.test(line));
-      if (/^\s*-\s*[\w-]*$/.test(before) && /^targets?:\s*$/.test(parent ?? '')) {
-        return targetOptions().map(target => new vscode.CompletionItem(target, vscode.CompletionItemKind.EnumMember));
-      }
-      if (!/^[\w$-]*$/.test(before)) return [];
-      const existing = isMap(context.document.contents) ? context.document.contents.items.map(pair => String(pair.key)) : [];
       const hasYaml = vscode.extensions.getExtension('redhat.vscode-yaml')?.isActive;
       if (hasYaml && typeof context.schema === 'string') return [];
-      return Object.entries(manifestFields).filter(([field]) => !existing.includes(field)).map(([field, description]) => {
+      const offset = document.offsetAt(position);
+      const completion = yamlCompletion(document.getText(), offset, definition(document));
+      if (!completion || offset < completion.start || offset > completion.end) return [];
+      const range = new vscode.Range(document.positionAt(completion.start), document.positionAt(completion.end));
+      if (!completion.keys) {
+        const values = completion.field.values ?? (completion.field.types?.includes('boolean') ? ['true', 'false'] : []);
+        const text = document.getText(), quote = text[completion.start - 1];
+        const unquote = completion.field.types?.length === 1 && completion.field.types[0] === 'boolean' && (quote === '"' || quote === "'");
+        return values.map(value => {
+          const item = new vscode.CompletionItem(value, vscode.CompletionItemKind.EnumMember);
+          item.documentation = completion.field.description; item.range = range;
+          if (unquote) {
+            item.range = new vscode.Range(document.positionAt(completion.start - 1), document.positionAt(completion.end + (text[completion.end] === quote ? 1 : 0)));
+            item.filterText = `${quote}${value}${quote}`;
+          }
+          return item;
+        });
+      }
+      const prefix = document.getText().slice(completion.start, offset).toLowerCase();
+      return Object.entries(completion.field.fields ?? {}).filter(([field]) => !completion.keys?.includes(field) && field.toLowerCase().startsWith(prefix)).map(([field, hint]) => {
         const item = new vscode.CompletionItem(field, vscode.CompletionItemKind.Property);
-        item.detail = 'APM manifest'; item.documentation = description;
-        item.insertText = new vscode.SnippetString(`${field}: \${1}`);
+        item.detail = basename(document.uri.fsPath); item.documentation = hint.description; item.range = range;
+        const inline = document.lineAt(position.line).text.slice(0, position.character).includes('{');
+        const suffix = completion.hasColon ? '' : !inline && hint.types?.length === 1 && hint.types[0] === 'mapping'
+          ? ':\n  $0' : !inline && hint.types?.length === 1 && hint.types[0] === 'sequence' ? ':\n  - $0' : ': ${1}';
+        item.insertText = new vscode.SnippetString(`${field}${suffix}`);
         return item;
       });
     }
-  }, ':', '-'));
-  registrations.push(vscode.languages.registerHoverProvider(selector, {
+  }, ':', '-', ' ', '"', "'", '{', '[', ','));
+  registrations.push(vscode.languages.registerHoverProvider(yamlSelector, {
     provideHover(document, position) {
-      if (!safe(document)) return;
-      const word = document.getWordRangeAtPosition(position, /[$\w-]+/);
-      const field = word && document.getText(word);
-      if (!field || !manifestFields[field]) return;
+      if (!safeYaml(document)) return;
       const context = manifestContext(document.getText());
-      const schema = typeof context.schema === 'string' ? 'Explicit contract: inspect the selected schema and CLI support.' : 'No explicit schema: APM working draft. This extension does not claim complete schema validation.';
-      return new vscode.Hover(`${manifestFields[field]}\n\n${schema}`, word);
+      const offset = document.offsetAt(position);
+      const hover = yamlHover(context.document, offset, definition(document));
+      if (!hover) return;
+      const isSchemaField = document.getText().slice(hover.start, hover.end) === '$schema';
+      const note = isSchemaField
+        ? typeof context.schema === 'string'
+          ? 'Explicit contract: inspect the selected schema and CLI support.'
+          : 'Local APM working-draft assistance, not complete CLI validation.'
+        : undefined;
+      const contents = note ? `${hover.field.description}\n\n${note}` : hover.field.description;
+      return new vscode.Hover(contents, new vscode.Range(document.positionAt(hover.start), document.positionAt(hover.end)));
     }
   }));
   registrations.push(vscode.languages.registerCodeLensProvider(selector, {
@@ -145,12 +166,18 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
   }));
   const diagnostics = vscode.languages.createDiagnosticCollection('apm-manifest');
   const validateLocal = (document: vscode.TextDocument) => {
-    if (!safe(document)) { diagnostics.delete(document.uri); return; }
+    if (!safeYaml(document)) { diagnostics.delete(document.uri); return; }
     const context = manifestContext(document.getText());
     const entries = vscode.extensions.getExtension('redhat.vscode-yaml')?.isActive ? [] : context.errors.map(error => {
       const diagnostic = new vscode.Diagnostic(new vscode.Range(document.positionAt(error.pos[0]), document.positionAt(error.pos[1])), error.message, vscode.DiagnosticSeverity.Error);
-      diagnostic.source = 'APM manifest syntax'; return diagnostic;
+      diagnostic.source = 'APM YAML syntax'; return diagnostic;
     });
+    if (!context.errors.length && typeof context.schema !== 'string') {
+      for (const issue of yamlIssues(context.document, definition(document))) {
+        const diagnostic = new vscode.Diagnostic(new vscode.Range(document.positionAt(issue.start), document.positionAt(issue.end)), issue.message, vscode.DiagnosticSeverity.Error);
+        diagnostic.source = 'APM local validation'; entries.push(diagnostic);
+      }
+    }
     const schema = context.document.get('$schema', true);
     if (isScalar(schema) && schema.range) {
       const diagnostic = new vscode.Diagnostic(new vscode.Range(document.positionAt(schema.range[0]), document.positionAt(schema.range[1])),

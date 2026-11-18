@@ -20,18 +20,25 @@ The extension asks for each value in a native input box:
 
 A confirmation notification then shows every value. Choose **Run** to create `apm.yml` in the selected folder. No terminal wizard opens, and no nested project is created. If the folder already has a manifest, the extension opens it instead of overwriting it.
 
-## Edit the manifest
+## Edit manifests and lockfiles
 
-When `apm.yml` is open, the extension provides:
+APM generates and uses `apm.yml` and `apm.lock.yaml`; both can also be edited manually. In a trusted workspace, the extension provides:
 
-- Completion for manifest fields and targets.
-- Hover documentation for fields.
-- Links from dependency entries to their sources.
-- **APM: Validate Manifest and Primitives** and **APM: Preview Compilation** buttons in the editor title bar.
+- Context-aware IntelliSense for known top-level and nested fields, including package, MCP, and LSP dependencies, compilation options, and resolved lockfile dependencies.
+- Value suggestions for targets, transports, compilation modes, and booleans.
+- Completion inside quoted values, inline mappings and lists, and partially typed keys or values. Replacing an existing key preserves its colon and value; new mapping and list fields include an indented snippet.
+- Hover documentation for known fields.
+- Live YAML syntax and local structural validation with error underlines in the editor and entries in **Problems**, including incorrect field types, list entries, supported enum values, and missing manifest identity fields. Empty values underline their field key. Unknown fields remain allowed for forward compatibility.
 
-These features work locally: completion and hover never run APM or make network requests. If the Red Hat YAML extension is active, its syntax diagnostics replace the extension's local ones, and no additional language server is required.
+Press **Ctrl+Space** to request suggestions at the cursor, including inside quoted values.
+
+For `apm.yml`, dependency entries also link to their sources, the `targets` list has a **Select deployment targets** picker, and the editor title bar offers **APM: Validate Manifest and Primitives** and **APM: Preview Compilation**.
+
+These features work locally on unsaved edits: they never run APM, execute scripts, or make network requests. No additional language server is required. If the Red Hat YAML extension is active, it supplies syntax diagnostics while APM continues its local structural checks.
 
 Manifests without a `$schema` use APM's working-draft format. The extension does not assign a published OpenAPM subset schema, change a project's contract, or claim complete schema validation. An explicit `$schema` stays authoritative; the CLI and the selected schema must agree.
+
+When either file selects an explicit `$schema`, the extension leaves structural validation to that contract and defers completion to the active Red Hat YAML extension, if available. Local checks do not verify remote references, commit availability, hashes, dependency resolution, or deployment consistency. Manual lockfile edits can affect reproducibility and ownership records; review changes carefully.
 
 Manifest-driven features such as LSP declarations, lifecycle definitions, and replacement rules stay managed by APM. Edit the manifest, then run the relevant workflow.
 

@@ -14,7 +14,7 @@ This is an independent extension, not affiliated with or published by Microsoft.
 - **Manage installations:** install, update, or remove packages in your workspace or global user scope. Preview changes and choose specific versions.
 - **Keep packages current:** see installed packages and available updates together, with separate workspace and global views.
 - **Work with private repositories:** connect GitHub accounts or use securely stored, repository-scoped access tokens.
-- **Manage APM projects:** initialize projects, edit manifests with completion and hover help, and run compilation, validation, and audits.
+- **Manage APM projects:** initialize projects, edit manifests and lockfiles with IntelliSense, hover help, and local validation, and run compilation, validation, and audits.
 - **Explore more workflows:** inspect dependencies, export SBOMs, manage executable trust, check marketplace health, and discover MCP servers.
 
 ## Work your way

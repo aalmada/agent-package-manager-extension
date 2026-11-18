@@ -11,6 +11,8 @@ import { parseMessage } from '../../src/protocol';
 import { ApmClient } from '../../src/apm/client';
 import type { ContentGroup } from '../../src/apm/contents';
 import type { AuditReport } from '../../src/apm/actions';
+import { parseDocument } from 'yaml';
+import { yamlCompletion, yamlDefinition, yamlHover, yamlIssues } from '../../src/apm/yamlAssistance';
 
 const source = buildSync({
   stdin: { contents: "export * from './navigation'; export * from './manifestAssistance'; export * from './taskProvider';", resolveDir: resolve('src'), loader: 'ts' },
@@ -25,13 +27,32 @@ class Uri {
   static from(value: { scheme: string; path: string; query?: string }) { return new Uri(value.scheme, value.path, value.query); }
   static parse(value: string) { const split = value.indexOf(':'); return new Uri(value.slice(0, split), value.slice(split + 1)); }
 }
-class Range { constructor(readonly startLine: number, readonly startCharacter: number, readonly endLine: number, readonly endCharacter: number) {} }
+class Range {
+  readonly startLine: number; readonly startCharacter: number; readonly endLine: number; readonly endCharacter: number;
+  constructor(start: number | { line: number; character: number }, end: number | { line: number; character: number }, endLine?: number, endCharacter?: number) {
+    this.startLine = typeof start === 'number' ? start : start.line;
+    this.startCharacter = typeof start === 'number' && typeof end === 'number' ? end : typeof start === 'number' ? 0 : start.character;
+    this.endLine = typeof end === 'number' ? endLine ?? this.startLine : end.line;
+    this.endCharacter = typeof end === 'number' ? endCharacter ?? this.startCharacter : end.character;
+  }
+}
 class CodeLens { command?: { title: string; command: string; arguments?: unknown[] }; constructor(readonly range: Range) {} }
 class Diagnostic {
   source?: string; code?: string;
   constructor(readonly range: Range, readonly message: string, readonly severity: number) {}
 }
 const disposable = () => ({ dispose() {} });
+function yamlDocument(text: string, name = 'apm.yml') {
+  return {
+    uri: Uri.file(`/project/${name}`), eol: 1, getText: () => text,
+    lineAt: (line: number) => ({ lineNumber: line, text: text.split('\n')[line] }),
+    offsetAt: (position: { line: number; character: number }) => text.split('\n').slice(0, position.line).reduce((offset, line) => offset + line.length + 1, 0) + position.character,
+    positionAt: (offset: number) => {
+      const lines = text.slice(0, offset).split('\n');
+      return { line: lines.length - 1, character: lines.at(-1)!.length };
+    }
+  };
+}
 type Native = typeof import('../../src/navigation') & typeof import('../../src/manifestAssistance') & typeof import('../../src/taskProvider');
 function harness(root: string, trusted = true, includeScripts = false) {
   const diagnostics = new Map<string, Diagnostic[]>();
@@ -63,7 +84,8 @@ function harness(root: string, trusted = true, includeScripts = false) {
       onDidDeleteFiles: disposable,
       onDidChangeWorkspaceFolders: (listener: object) => { providers.foldersChange = listener; return disposable(); },
       onDidChangeConfiguration: (listener: object) => { providers.configurationChange = listener; return disposable(); },
-      onDidOpenTextDocument: disposable, onDidCloseTextDocument: disposable
+      onDidOpenTextDocument: (listener: object) => { providers.documentOpen = listener; return disposable(); },
+      onDidCloseTextDocument: (listener: object) => { providers.documentClose = listener; return disposable(); }
     },
     languages: {
       createDiagnosticCollection: () => ({
@@ -72,13 +94,13 @@ function harness(root: string, trusted = true, includeScripts = false) {
         set: (uri: Uri, values: Diagnostic[]) => diagnostics.set(uri.toString(), values)
       }),
       registerCodeActionsProvider: (_selector: unknown, provider: object) => { providers.actions = provider; return disposable(); },
-      registerCompletionItemProvider: (_selector: unknown, provider: object) => { providers.completions = provider; return disposable(); },
+      registerCompletionItemProvider: (selector: unknown, provider: object) => { providers.completions = provider; providers.completionSelector = selector; return disposable(); },
       registerCodeLensProvider: (_selector: unknown, provider: object) => { providers.codeLenses = provider; return disposable(); },
       registerHoverProvider: (_selector: unknown, provider: object) => { providers.hovers = provider; return disposable(); },
       registerDocumentLinkProvider: (_selector: unknown, provider: object) => { providers.links = provider; return disposable(); }
     },
     tasks: { registerTaskProvider: (_type: string, provider: object) => { providers.tasks = provider; return disposable(); } },
-    extensions: { getExtension: () => undefined },
+    extensions: { getExtension: () => providers.yamlActive ? { isActive: true } : undefined },
     commands: { registerCommand: (id: string, callback: (...args: unknown[]) => unknown) => {
       const commands = (providers.commands ??= {}) as Record<string, (...args: unknown[]) => unknown>;
       commands[id] = callback;
@@ -92,6 +114,7 @@ function harness(root: string, trusted = true, includeScripts = false) {
     Disposable: { from: (...items: { dispose(): void }[]) => ({ dispose() { for (const item of items) item.dispose(); } }) },
     CompletionItemKind: { Property: 1, EnumMember: 2 }, CodeActionKind: { Source: 'source', QuickFix: 'quickfix' },
     CompletionItem: class { constructor(readonly label: string) {} },
+    Hover: class { constructor(readonly contents: string, readonly range: Range) {} },
     SnippetString: class { constructor(readonly value: string) {} }
   };
   const module = { exports: {} };
@@ -260,15 +283,8 @@ test('manifest assistance uses YAML ranges and does not select a contract', asyn
   assert.equal(explicit.schema, 'https://example.test/unknown');
   assert.equal(host.api.manifestContext('name: [\n').errors.length, 1);
   const registration = host.api.registerManifestAssistance({ async details() {} });
-  const provider = host.providers.completions as { provideCompletionItems(document: { uri: Uri; getText(): string; lineAt(line: number): { text: string } }, position: { line: number; character: number }): { label: string }[] };
-  const document = (text: string) => ({
-    uri: Uri.file('/project/apm.yml'), eol: 1, getText: () => text,
-    lineAt: (line: number) => ({ lineNumber: line, text: text.split('\n')[line] }),
-    positionAt: (offset: number) => {
-      const before = text.slice(0, offset), lines = before.split('\n');
-      return { line: lines.length - 1, character: lines.at(-1)!.length };
-    }
-  });
+  const provider = host.providers.completions as { provideCompletionItems(doc: ReturnType<typeof yamlDocument>, position: { line: number; character: number }): { label: string }[] };
+  const document = yamlDocument;
   const targets = provider.provideCompletionItems(document('targets:\n  - co'), { line: 1, character: 6 });
   assert.ok(targets.some(item => item.label === 'copilot'));
   const dependencies = provider.provideCompletionItems(document('targets:\n  - copilot\ndependencies:\n  apm:\n    - co'), { line: 4, character: 8 });
@@ -292,6 +308,205 @@ test('manifest assistance uses YAML ranges and does not select a contract', asyn
   await commands['apm.selectManifestTargets'](manifest.uri);
   assert.equal((host.providers.edit as { text: string }).text, '', 'Clearing the selection removes the explicit targets field');
   registration.dispose();
+});
+
+test('YAML completion follows nested mappings, object dependencies and scalar values in both formats', () => {
+  const manifest = yamlDefinition(false, ['copilot', 'claude']);
+  const completion = (text: string, lock = false) => yamlCompletion(text, text.length, lock ? yamlDefinition(true) : manifest);
+  assert.ok(completion('compilation:\n  ')?.field.fields?.strategy);
+  assert.ok(completion('dependencies:\n  ')?.field.fields?.mcp);
+  assert.ok(completion('devDependencies:\n  apm:\n  - git: owner/repo\n    ')?.field.fields?.ref);
+  assert.ok(completion('dependencies:\n  mcp:\n    - ')?.field.fields?.transport);
+  assert.deepEqual(completion('dependencies:\n  mcp:\n    - name: example\n      transport: ')?.field.values, ['stdio', 'sse', 'http', 'streamable-http']);
+  assert.deepEqual(completion('targets: [co')?.field.values, ['copilot', 'claude']);
+  assert.deepEqual(completion('targets:\n- cl')?.field.values, ['copilot', 'claude']);
+  assert.deepEqual(completion('compilation:\n  resolve_links: ')?.field.types, ['boolean']);
+  assert.ok(completion('dep', true)?.field.fields?.dependencies);
+  assert.ok(completion('dependencies:\n- repo_url: owner/repo\n  ', true)?.field.fields?.resolved_commit);
+  assert.deepEqual(completion('dependencies:\n- is_dev: ', true)?.field.types, ['boolean']);
+  assert.equal(completion('scripts:\n  custom: ')?.field.description, 'String value.');
+  for (const text of ['# comment', 'description: |\n  ordinary text', 'x-custom:\n  ', 'dependencies:\n  apm:\n    - owner/repo']) {
+    assert.equal(completion(text)?.field.fields, undefined, text);
+  }
+  const duplicate = completion('name: test\nversion: 1.0.0\n');
+  assert.ok(duplicate?.keys?.includes('name'));
+  const crlf = completion('compilation:\r\n  stra');
+  assert.ok(crlf?.field.fields?.strategy);
+});
+
+test('local YAML validation checks structures, values and exact ranges without closing extension points', () => {
+  const manifest = yamlDefinition(false);
+  const text = 'name: test\nversion: 1.0.0\ncompilation:\n  strategy: invalid\n  resolve_links: yes\ndependencies:\n  apm: wrong\n';
+  const issues = yamlIssues(parseDocument(text), manifest);
+  assert.equal(issues.length, 3);
+  assert.equal(text.slice(issues[0].start, issues[0].end), 'invalid');
+  assert.match(issues[0].message, /distributed, single-file/);
+  assert.match(issues[1].message, /boolean/);
+  assert.match(issues[2].message, /sequence/);
+  assert.match(yamlIssues(parseDocument('name: example'), manifest)[0].message, /requires version/);
+  assert.match(yamlIssues(parseDocument('- example'), manifest)[0].message, /mapping/);
+  assert.equal(yamlIssues(parseDocument('name: test\nversion: 1.0.0\nx-custom: [anything]\nnew_field: true\nincludes: [src]\ntargets: copilot\n'), manifest).length, 0);
+  const lock = yamlDefinition(true);
+  assert.equal(yamlIssues(parseDocument("lockfile_version: '1'\ndependencies:\n- repo_url: owner/repo\n  resolved_commit: abc\n  is_dev: false\n  deployed_files: [file.md]\n  future_field: {anything: true}\n"), lock).length, 0);
+  const invalid = yamlIssues(parseDocument('lockfile_version: 1\ndependencies:\n- is_dev: yes\n  deployed_files: [123]\n'), lock);
+  assert.equal(invalid.length, 3);
+  assert.match(invalid[0].message, /lockfile_version.*string/);
+  assert.match(invalid[2].message, /deployed_files\[0\].*string/);
+  const hoverText = 'dependencies:\n- repo_url: owner/repo\n  resolved_commit: abc\n';
+  assert.match(yamlHover(parseDocument(hoverText), hoverText.indexOf('resolved_commit'), lock)!.field.description, /Exact resolved Git commit/);
+  const valueText = 'name: resolved_commit\nversion: 1.0.0\n';
+  assert.equal(yamlHover(parseDocument(valueText), valueText.indexOf('resolved_commit'), manifest), undefined);
+});
+
+test('YAML completion replaces whole tokens and preserves colons, quotes and flow collections', () => {
+  const definition = yamlDefinition(false, ['copilot', 'claude']);
+  for (const marked of [
+    'compilation:\n  stra|tegy: single-file\n',
+    'compilation: { stra|tegy: single-file }\n',
+    "compilation:\n  'stra|tegy': single-file\n"
+  ]) {
+    const offset = marked.indexOf('|'), text = marked.replace('|', '');
+    const context = yamlCompletion(text, offset, definition)!;
+    assert.ok(context.field.fields?.strategy, marked);
+    assert.equal(text.slice(context.start, context.end), 'strategy', marked);
+    assert.equal(context.hasColon, true, marked);
+    assert.ok(!context.keys?.includes('strategy'), marked);
+  }
+  for (const [marked, token, value] of [
+    ['compilation: { strategy: "si|ngle-file" }', 'single-file', 'single-file'],
+    ['compilation:\n  strategy: "|', '', 'single-file'],
+    ["compilation:\n  strategy: '|", '', 'single-file'],
+    ["includes: 'au|to'", 'auto', 'auto'],
+    ['targets: [co|pilot]', 'copilot', 'copilot'],
+    ['dependencies:\n  mcp:\n  - name: test\n    transport: "st|dio"', 'stdio', 'stdio'],
+    ['compilation:\n  resolve_links: fa|lse', 'false', undefined]
+  ] as const) {
+    const offset = marked.indexOf('|'), text = marked.replace('|', '');
+    const context = yamlCompletion(text, offset, definition)!;
+    assert.equal(text.slice(context.start, context.end), token, marked);
+    if (value) assert.ok(context.field.values?.includes(value), marked);
+    else assert.ok(context.field.types?.includes('boolean'), marked);
+  }
+  for (const marked of ['compilation: { | }', 'compilation: { strategy: distributed, | }']) {
+    const context = yamlCompletion(marked.replace('|', ''), marked.indexOf('|'), definition);
+    assert.ok(context?.field.fields?.resolve_links, marked);
+  }
+});
+
+test('empty YAML values and missing fields have visible, focused diagnostic ranges', () => {
+  for (const [text, token, message] of [
+    ['name: test\nversion: 1.0.0\ncompilation:\n  strategy:\n', 'strategy', /strategy must be/],
+    ['name: test\nversion: 1.0.0\ndependencies:\n', 'dependencies', /dependencies must be/],
+    ['name: test\n', 'name', /requires version/],
+    ['name: test\nversion: 1.0.0\ndependencies:\n  mcp:\n  - command: example\n', 'command', /requires name/]
+  ] as const) {
+    const issues = yamlIssues(parseDocument(text), yamlDefinition(false));
+    const issue = issues.find(issue => message.test(issue.message));
+    assert.ok(issue, text);
+    assert.equal(text.slice(issue.start, issue.end), token, text);
+  }
+  const text = 'dependencies:\n- is_dev:\n';
+  const issue = yamlIssues(parseDocument(text), yamlDefinition(true))[0];
+  assert.equal(text.slice(issue.start, issue.end), 'is_dev');
+});
+
+test('YAML providers preserve existing values, insert structured snippets and underline empty values', () => {
+  const host = harness('/project');
+  host.api.registerManifestAssistance({ async details() {} });
+  const provider = host.providers.completions as {
+    provideCompletionItems(document: ReturnType<typeof yamlDocument>, position: { line: number; character: number }): {
+      label: string; insertText?: { value: string }; range: Range;
+    }[];
+  };
+  const document = yamlDocument('compilation:\n  strategy: single-file\n');
+  const item = provider.provideCompletionItems(document, { line: 1, character: 6 }).find(item => item.label === 'strategy')!;
+  assert.ok(item);
+  assert.equal(item.insertText?.value, 'strategy', 'Replacing a key must not insert another colon or overwrite its value');
+  assert.equal(item.range.startCharacter, 2);
+  assert.equal(item.range.endCharacter, 10, 'Replacement covers the full key, not only its prefix');
+  const root = yamlDocument('');
+  const items = provider.provideCompletionItems(root, root.positionAt(0));
+  const expand = (snippet: string, value: string) => snippet.replace('$0', value);
+  const mapping = items.find(item => item.label === 'compilation')?.insertText?.value ?? '';
+  assert.doesNotMatch(mapping, /\t/, 'YAML indentation must use spaces');
+  assert.deepEqual(parseDocument(expand(mapping, 'strategy: distributed')).toJS(), { compilation: { strategy: 'distributed' } });
+  const lock = yamlDocument('', 'apm.lock.yaml');
+  const lockItems = provider.provideCompletionItems(lock, lock.positionAt(0));
+  const sequence = lockItems.find(item => item.label === 'dependencies')?.insertText?.value ?? '';
+  assert.doesNotMatch(sequence, /\t/, 'YAML indentation must use spaces');
+  assert.deepEqual(parseDocument(expand(sequence, 'repo_url: owner/repo')).toJS(), { dependencies: [{ repo_url: 'owner/repo' }] });
+  const quotedBoolean = yamlDocument('compilation:\n  resolve_links: "fa"\n');
+  const boolean = provider.provideCompletionItems(quotedBoolean, { line: 1, character: 20 }).find(item => item.label === 'false')!;
+  assert.ok(boolean);
+  const line = quotedBoolean.lineAt(1).text;
+  assert.equal(line.slice(0, boolean.range.startCharacter) + boolean.label + line.slice(boolean.range.endCharacter), '  resolve_links: false');
+  const invalid = yamlDocument('dependencies:\n- is_dev:\n', 'apm.lock.yaml');
+  (host.providers.documentOpen as (document: ReturnType<typeof yamlDocument>) => void)(invalid);
+  const diagnostic = host.diagnostics.get(invalid.uri.toString())![0];
+  assert.equal(diagnostic.severity, 0, 'Errors produce editor squiggles');
+  assert.equal(diagnostic.range.startLine, 1);
+  assert.equal(diagnostic.range.startCharacter, 2);
+  assert.equal(diagnostic.range.endCharacter, 8);
+});
+
+test('both YAML providers publish live diagnostics, defer explicit contracts and clean up on close', () => {
+  const host = harness('/project');
+  host.api.registerManifestAssistance({ async details() {} });
+  assert.ok((host.providers.completionSelector as { pattern: string }[]).some(selector => selector.pattern.endsWith('/apm.lock.yaml')));
+  const change = host.providers.documentChange as (event: { document: ReturnType<typeof yamlDocument> }) => void;
+  const open = host.providers.documentOpen as (document: ReturnType<typeof yamlDocument>) => void;
+  const close = host.providers.documentClose as typeof open;
+  const lock = yamlDocument('dependencies:\n- is_dev: incorrect\n', 'apm.lock.yaml');
+  open(lock);
+  assert.match(host.diagnostics.get(lock.uri.toString())![0].message, /is_dev.*boolean/);
+  change({ document: yamlDocument('dependencies: []\n', 'apm.lock.yaml') });
+  assert.equal(host.diagnostics.get(lock.uri.toString())!.length, 0);
+  change({ document: yamlDocument('dependencies: [\n', 'apm.lock.yaml') });
+  assert.ok(host.diagnostics.get(lock.uri.toString())!.some(item => item.source === 'APM YAML syntax'));
+  host.providers.yamlActive = true;
+  change({ document: lock });
+  assert.equal(host.diagnostics.get(lock.uri.toString())!.length, 1, 'YAML extension does not suppress APM structural checks');
+  const explicit = yamlDocument('$schema: https://example.test/contract\ndependencies: wrong\n', 'apm.lock.yaml');
+  change({ document: explicit });
+  assert.equal(host.diagnostics.get(lock.uri.toString())!.length, 1);
+  assert.equal(host.diagnostics.get(lock.uri.toString())![0].source, 'APM contract');
+  const completions = host.providers.completions as { provideCompletionItems(doc: ReturnType<typeof yamlDocument>, position: { line: number; character: number }): { label: string }[] };
+  assert.equal(completions.provideCompletionItems(explicit, explicit.positionAt(explicit.getText().length)).length, 0);
+  const booleanDoc = yamlDocument('dependencies:\n- is_dev: ', 'apm.lock.yaml');
+  assert.deepEqual(Array.from(completions.provideCompletionItems(booleanDoc, booleanDoc.positionAt(booleanDoc.getText().length)), item => item.label), ['true', 'false']);
+  close(lock);
+  assert.equal(host.diagnostics.has(lock.uri.toString()), false);
+  open(yamlDocument('dependencies: wrong\n', 'other.yaml'));
+  assert.equal(host.diagnostics.size, 0, 'Unrelated YAML documents are ignored');
+  const untrusted = harness('/project', false);
+  untrusted.api.registerManifestAssistance({ async details() {} });
+  (untrusted.providers.documentOpen as typeof open)(lock);
+  assert.equal(untrusted.diagnostics.size, 0);
+});
+
+test('YAML hover limits contract notes to the $schema field', () => {
+  const host = harness('/project');
+  host.api.registerManifestAssistance({ async details() {} });
+  const hovers = host.providers.hovers as {
+    provideHover(document: ReturnType<typeof yamlDocument>, position: { line: number; character: number }): { contents: string } | undefined;
+  };
+  const plain = yamlDocument('name: test\nversion: 1.0.0\n');
+  const nameHover = hovers.provideHover(plain, plain.positionAt(plain.getText().indexOf('name')));
+  assert.ok(nameHover);
+  assert.doesNotMatch(nameHover.contents, /working-draft|Explicit contract/);
+
+  const manifest = yamlDocument('$schema: https://example.test/contract\nname: test\n');
+  const schemaHover = hovers.provideHover(manifest, manifest.positionAt(manifest.getText().indexOf('$schema')));
+  assert.ok(schemaHover);
+  assert.match(schemaHover.contents, /Explicit contract/);
+  const manifestNameHover = hovers.provideHover(manifest, manifest.positionAt(manifest.getText().indexOf('name')));
+  assert.ok(manifestNameHover);
+  assert.doesNotMatch(manifestNameHover.contents, /working-draft|Explicit contract/);
+
+  const draft = yamlDocument('$schema:\nname: test\n');
+  const draftSchemaHover = hovers.provideHover(draft, draft.positionAt(draft.getText().indexOf('$schema')));
+  assert.ok(draftSchemaHover);
+  assert.match(draftSchemaHover.contents, /Local APM working-draft assistance/);
 });
 
 test('managed task streaming does not retain captured output and supports cancellation', async () => {
