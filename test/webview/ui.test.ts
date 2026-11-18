@@ -879,8 +879,18 @@ test('dependency navigation survives the browser being opened for the first time
   } finally { page.dom.window.close(); }
 });
 
-test('plugin page buttons run package actions and show results in place', () => {
+test('plugin page buttons run package actions and show results in place', async () => {
   const page = browser();
+  let clipboardDenied = false;
+  const copied: string[] = [];
+  Object.defineProperty(page.dom.window.navigator, 'clipboard', {
+    value: {
+      writeText: async (text: string) => {
+        if (clipboardDenied) throw new Error('Clipboard permission denied');
+        copied.push(text);
+      }
+    }
+  });
   const installed = { ...page.state.installed[0], scope: page.state.scopes[0] };
   page.state.installed = [installed];
   Object.assign(page.state, { mode: 'details', item: installed, details: {} });
@@ -900,10 +910,22 @@ test('plugin page buttons run package actions and show results in place', () => 
   click('Cancel');
   assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"cancel"}');
 
-  page.state.actionResult = { action: 'update', title: 'Update sample', status: 'success', command: 'apm update sample', summary: 'Completed successfully.', output: 'project' };
+  const commandOutput = 'project\nwith details\n';
+  page.state.actionResult = { action: 'update', title: 'Update sample', status: 'success', command: 'apm update sample', summary: 'Completed successfully.', output: commandOutput };
   page.update();
   assert.equal(page.document.querySelector<HTMLDetailsElement>('.action-output')!.open, true);
   assert.equal([...page.document.querySelectorAll('button')].some(b => b.textContent === 'Available versions'), false);
+  const copy = page.document.querySelector<HTMLButtonElement>('.action-output-copy')!;
+  assert.equal(copy.getAttribute('aria-label'), 'Copy output');
+  assert.ok(copy.querySelector('svg'));
+  copy.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(copied, [commandOutput]);
+  assert.equal(page.document.querySelector('[role="status"]')!.textContent, 'Output copied to clipboard.');
+  clipboardDenied = true;
+  copy.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(page.document.querySelector('[role="status"]')!.textContent, 'Could not copy output to clipboard.');
 
   page.state.actionResult = { action: 'audit', title: 'Audit sample', status: 'failed', command: 'apm audit sample --format json', summary: 'Findings reported',
     audit: { passed: false, summary: { critical: 1 }, findings: [{ severity: 'critical', file: 'a.md', message: 'Hidden Unicode' }] } };

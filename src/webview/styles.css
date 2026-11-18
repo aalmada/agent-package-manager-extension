@@ -221,6 +221,9 @@ button.badge.update-type[aria-pressed="false"] { font-weight: normal; }
 .action-result-heading button { margin-left: auto; }
 .action-command { display: block; margin: 6px 0; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); }
 .action-summary { margin: 6px 0; }
+.action-output { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.action-output-copy { justify-self: end; }
+.action-output > [role="status"], .action-output > .result { grid-column: 1 / -1; }
 .action-result .result { max-height: 40vh; }
 .findings { padding-left: 18px; }
 .badge.status-success { background: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); color: var(--vscode-editor-background); }

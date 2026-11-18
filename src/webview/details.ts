@@ -251,7 +251,24 @@ export function renderActionResult(result: ActionResult, cancel: () => void, nav
   if (result.output) {
     const output = el('details', 'action-output');
     output.open = result.status === 'failed' || !result.audit;
-    output.append(el('summary', '', 'Command output'), el('pre', 'result', result.output));
+    const commandOutput = result.output;
+    const copy = el('button', 'icon-button codicon action-output-copy');
+    copy.type = 'button';
+    copy.title = 'Copy output';
+    copy.setAttribute('aria-label', 'Copy output');
+    copy.innerHTML = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 1.75h8.5v10.5H5zM2.5 4.25v10h8.5"/></svg>';
+    const copyStatus = el('span', 'muted');
+    copyStatus.setAttribute('role', 'status');
+    copyStatus.setAttribute('aria-live', 'polite');
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(commandOutput);
+        copyStatus.textContent = 'Output copied to clipboard.';
+      } catch {
+        copyStatus.textContent = 'Could not copy output to clipboard.';
+      }
+    });
+    output.append(el('summary', '', 'Command output'), copy, copyStatus, el('pre', 'result', commandOutput));
     section.append(output);
   }
   return section;
