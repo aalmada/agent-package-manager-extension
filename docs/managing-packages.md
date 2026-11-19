@@ -54,12 +54,14 @@ After a successful preview, **Review and apply preview options** runs the same o
 
 APM's dry-run output is a plan, not a file-by-file diff. Offline plans can be incomplete, and resolution can change before you apply them.
 
-## Update a package
+## Update packages
 
 | Where | What to do |
 | --- | --- |
 | Package page | Choose **Update**. It appears when an update is available. |
-| APM view | Find outdated packages in **Updates**, or filter with `@updates`. |
+| APM view | Choose **Update All** in **Updates**, or open an outdated package to update it individually. |
+
+**Update All** runs `apm update` once in each scope that has an available update. APM refreshes all dependencies in each affected scope, not just package rows left after text filtering. Use `@scope:workspace` or `@scope:global` to limit which scopes are updated; the confirmation lists the affected scopes.
 
 Packages pinned to a tag move to the latest tag reported by APM. The extension runs `apm install <package>#<tag>` to change the manifest pin. Other packages use `apm update` with the canonical lockfile identity, which can differ in casing from the installed directory. **Preview update** uses the same package identity as **Update**.
 
@@ -73,7 +75,7 @@ Choose **Uninstall** on the package page. The package is removed from the scope 
 
 ## Confirmations and progress
 
-Install, update, and uninstall ask for confirmation in a non-modal notification. The message names the scope, the execution host, and the risk: APM may write manifests and deployed files or run package scripts. Choose **Install**, **Update**, or **Uninstall** to proceed; dismissing the notification makes no changes. A **Force Update** retry has a separate confirmation that warns it may overwrite local files and deploy despite critical security findings.
+Install, update (including **Update All**), and uninstall ask for confirmation in a non-modal notification. The message names the scope, the execution host, and the risk: APM may write manifests and deployed files or run package scripts. Choose the matching action to proceed; dismissing the notification makes no changes. A **Force Update** retry has a separate confirmation that warns it may overwrite local files and deploy despite critical security findings.
 
 While an action runs, the package page shows progress and a **Cancel** button. When it finishes, the page shows a summary, any audit findings, and APM's output. Full logs are in the **APM** output channel.
 

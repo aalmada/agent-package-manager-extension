@@ -1511,6 +1511,7 @@ class ApmExtension implements vscode.Disposable {
       case 'details': await this.openDetails(message.id, message.scopeKey, context.gallery ? context : undefined); break;
       case 'back': this.showPackageList(context); break;
       case 'install': await this.installPackage({ ...this.scope(context) }); break;
+      case 'updateAll': await this.updateAll(context); break;
       case 'marketplaces': await openSettings('apm.marketplaces'); break;
       case 'setup': await this.setup(); break;
       case 'output': this.output.show(); break;
@@ -1532,6 +1533,77 @@ class ApmExtension implements vscode.Disposable {
           else this.refreshController?.abort();
         }
         break;
+    }
+  }
+  private async updateAll(context: PanelContext) {
+    this.requireTrust();
+    if (context.mode !== 'browser') throw new Error('Update All is available from the package updates section.');
+    if (context.controller) throw new Error('Another APM action is already running. Wait for it or cancel it.');
+    if (this.state.busy) throw new Error('Wait for the current APM refresh to finish before updating packages.');
+
+    const controller = new AbortController();
+    context.controller = controller;
+    try {
+      const scopeFilter = filterTokens(this.search).scope;
+      const scopes = this.state.scopes.filter(scope =>
+        (!scopeFilter || scope.kind === scopeFilter) &&
+        this.state.installed.some(item => inScope(item, scope) && item.updateStatus === 'outdated')
+      );
+      if (!scopes.length) throw new Error('No packages with available updates were found in the selected scope(s). Refresh and retry.');
+
+      const descriptor = descriptors.find(command => command.id === 'update');
+      if (!descriptor) throw new Error('The APM update command is unavailable.');
+      const scopeOptions = (scope: Scope) => scope.kind === 'global' ? { '--global': true } : {};
+      for (const scope of scopes) {
+        const flags = Object.keys(scopeOptions(scope));
+        if (!await this.client(scope).supports(descriptor.command, flags)) {
+          throw new Error(`This APM CLI does not support ${descriptor.label} with ${flags.join(' ') || 'these arguments'}. Upgrade APM.`);
+        }
+      }
+
+      const labels = scopes.map(scope => scope.label).join(', ');
+      const confirmation = await vscode.window.showWarningMessage(
+        `Run apm update in these scopes: ${labels}. This refreshes all APM dependencies in each scope, not just the listed update rows. Host: ${this.hostLabel()}. APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
+        'Update All');
+      if (!confirmation || controller.signal.aborted) return;
+
+      const results: { scope: Scope; result: ActionResult }[] = [];
+      for (const scope of scopes) {
+        const title = `Update all packages — ${scope.label}`;
+        try {
+          await this.runPackageCommand(context, 'update', title, 'update', {}, scopeOptions(scope), true, undefined, true, scope);
+          const result = context.extra.actionResult;
+          if (!result) throw new Error('APM update returned no result. Review APM Output.');
+          results.push({ scope, result });
+        } catch (error) {
+          results.push({ scope, result: {
+            action: 'update', title, status: 'failed', command: `apm update${scope.kind === 'global' ? ' --global' : ''}`,
+            summary: redact(error instanceof Error ? error.message : String(error))
+          } });
+        }
+        if (context.extra.actionResult?.status === 'cancelled') break;
+      }
+
+      const succeeded = results.filter(({ result }) => result.status === 'success').length;
+      const failed = results.filter(({ result }) => result.status === 'failed');
+      const cancelled = controller.signal.aborted || results.some(({ result }) => result.status === 'cancelled');
+      const status = failed.length ? 'failed' : cancelled ? 'cancelled' : 'success';
+      const summary = failed.length
+        ? `Updated ${succeeded} of ${scopes.length} scopes. Failed: ${failed.map(({ scope }) => scope.label).join(', ')}. Review APM Output.`
+        : cancelled ? `Update All was cancelled after updating ${succeeded} of ${scopes.length} scopes.`
+          : `Update All completed in ${succeeded} scope${succeeded === 1 ? '' : 's'}.`;
+      context.extra.actionResult = {
+        action: 'update', title: 'Update All', status,
+        command: scopes.map(scope => `apm update${scope.kind === 'global' ? ' --global' : ''}`).join('\n'),
+        summary,
+        output: tail(results.map(({ scope, result }) => `${scope.label}\n${result.output || result.summary || result.status}`).join('\n\n'))
+      };
+      context.extra.error = failed.length ? summary : undefined;
+      context.retry = () => this.updateAll(context);
+      this.send(context);
+      if (failed.length) this.report(new Error(summary), context);
+    } finally {
+      context.controller = undefined;
     }
   }
   private async packageAction(action: PackageAction, context: PanelContext, scopeChosen = false, forceUpdate = false) {
@@ -1682,31 +1754,33 @@ class ApmExtension implements vscode.Disposable {
     }));
   }
   private async runPackageCommand(context: PanelContext, action: PackageAction, title: string, id: string, args: Record<string, string>, options: Record<string, unknown>,
-    mutating: boolean, interpret?: (stdout: string) => Partial<ActionResult>) {
+    mutating: boolean, interpret?: (stdout: string) => Partial<ActionResult>, confirmed = false, scopeOverride?: Scope) {
     const descriptor = descriptors.find(c => c.id === id);
     if (!descriptor) throw new Error(`Unknown APM command ${id}.`);
-    const scope = this.scope(context), client = this.client(scope);
+    const scope = scopeOverride ?? this.scope(context), client = this.client(scope);
     const preview = options['--dry-run'] === true;
     context.retry = async () => {
       this.requireTrust();
       if (context.controller) throw new Error('Wait for the current package action or cancel it before retrying.');
       context.scope = scope;
       context.controller = new AbortController();
-      try { await this.runPackageCommand(context, action, title, id, { ...args }, { ...options }, mutating, interpret); }
+      try { await this.runPackageCommand(context, action, title, id, { ...args }, { ...options }, mutating, interpret, confirmed, scope); }
       finally { context.controller = undefined; }
     };
     let argv = buildCommandArguments(descriptor, args, options);
     const flags = Object.keys(options);
     if (!await client.supports(descriptor.command, flags)) throw new Error(`This APM CLI does not support ${descriptor.label} with ${flags.join(' ') || 'these arguments'}. Upgrade APM.`);
     if (mutating) {
-      const forceWarning = options['--force'] === true
-        ? 'WARNING: --force can overwrite locally-authored files and deploy despite critical security findings. ' : '';
-      const confirmationLabel = action === 'uninstall' ? 'Uninstall' : action === 'update'
-        ? options['--force'] === true ? 'Force Update' : 'Update' : 'Install';
-      const confirmation = await vscode.window.showWarningMessage(
-        `${title}? Scope: ${scope.label}. Host: ${this.hostLabel()}. ${forceWarning}APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
-        confirmationLabel);
-      if (!confirmation) return;
+      if (!confirmed) {
+        const forceWarning = options['--force'] === true
+          ? 'WARNING: --force can overwrite locally-authored files and deploy despite critical security findings. ' : '';
+        const confirmationLabel = action === 'uninstall' ? 'Uninstall' : action === 'update'
+          ? options['--force'] === true ? 'Force Update' : 'Update' : 'Install';
+        const confirmation = await vscode.window.showWarningMessage(
+          `${title}? Scope: ${scope.label}. Host: ${this.hostLabel()}. ${forceWarning}APM may write manifests and deployed files, or execute package scripts. Only proceed for sources you trust.`,
+          confirmationLabel);
+        if (!confirmation) return;
+      }
       if (descriptor.options.some(o => o.name === '--yes') && await client.supports(descriptor.command, ['--yes'])) argv = buildCommandArguments(descriptor, args, { ...options, '--yes': true });
     }
     const controller = context.controller ?? new AbortController();
@@ -1761,7 +1835,9 @@ class ApmExtension implements vscode.Disposable {
     this.updateSnapshots.delete(scopeKey(scope));
     await this.refresh();
     if (context.extra.actionResult) {
-      const result = verifyPackageUpdate(context.extra.actionResult, context.item, this.state.error ?? context.refreshError);
+      const result = action === 'update' && context.item
+        ? verifyPackageUpdate(context.extra.actionResult, context.item, this.state.error ?? context.refreshError)
+        : context.extra.actionResult;
       context.extra.actionResult = result;
       if (action === 'update' && result.status === 'failed' && result.summary && !context.extra.error) context.extra.error = result.summary;
       this.send(context);

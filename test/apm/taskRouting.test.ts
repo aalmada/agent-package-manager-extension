@@ -1631,6 +1631,70 @@ test('update previews and their application use canonical keys in the selected i
   }
 });
 
+test('Update All runs once per outdated scope with one explicit confirmation', async () => {
+  const host = harness();
+  const workspace = host.extension.state.scopes.find(scope => scope.kind === 'workspace' && scope.path === '/project')!;
+  const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    updateStatus: 'outdated', latestVersion: '2', metadata: { lockIdentity: 'org/sample' } };
+  host.extension.state.installed = [{ ...item, scope: workspace }, { ...item, id: 'global::sample', scope: global }];
+  host.panel.mode = 'browser';
+  assert.deepEqual(parseMessage({ type: 'updateAll' }), { type: 'updateAll' });
+
+  await host.extension.handle({ type: 'updateAll' }, host.panel);
+
+  assert.deepEqual(host.argv.map(args => Array.from(args)), [['update', '--yes'], ['update', '--yes', '--global']]);
+  assert.deepEqual(host.executionScopes.map(scope => scope?.path), [workspace.path, global.path]);
+  assert.equal(host.confirmations.length, 1);
+  assert.match(host.confirmations[0], /project, Global \(user\)/);
+  assert.equal(host.panel.extra.actionResult?.title, 'Update All');
+  assert.equal(host.panel.extra.actionResult?.status, 'success');
+  assert.match(host.panel.extra.actionResult?.summary ?? '', /completed in 2 scopes/);
+});
+
+test('Update All respects the scope filter and cancellation prevents mutations', async () => {
+  const host = harness();
+  const workspace = host.extension.state.scopes.find(scope => scope.kind === 'workspace' && scope.path === '/project')!;
+  const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    scope: workspace, updateStatus: 'outdated', latestVersion: '2' };
+  host.extension.state.installed = [item, { ...item, id: 'global::sample', scope: global }];
+  Reflect.set(host.extension, 'search', '@scope:global');
+  host.panel.mode = 'browser';
+
+  await host.extension.handle({ type: 'updateAll' }, host.panel);
+
+  assert.deepEqual(host.argv.map(args => Array.from(args)), [['update', '--yes', '--global']]);
+  assert.equal(host.executionScopes[0]?.kind, 'global');
+
+  const cancelled = harness({ cancelConfirmation: true });
+  cancelled.extension.state.installed = [{ ...item, scope: cancelled.extension.state.scopes[0] }];
+  cancelled.panel.mode = 'browser';
+  await cancelled.extension.handle({ type: 'updateAll' }, cancelled.panel);
+  assert.equal(cancelled.argv.length, 0);
+  assert.equal(cancelled.panel.extra.actionResult, undefined);
+  assert.equal(cancelled.panel.controller, undefined);
+});
+
+test('Update All reports partial failures without skipping other outdated scopes', async () => {
+  const host = harness({ output: args => args.includes('--global')
+    ? { stdout: '', stderr: 'Registry unavailable.', exitCode: 1 }
+    : { stdout: '', stderr: '', exitCode: 0 } });
+  const workspace = host.extension.state.scopes.find(scope => scope.kind === 'workspace' && scope.path === '/project')!;
+  const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;
+  const item: PackageItem = { id: 'installed::sample', name: 'sample', marketplace: '', version: '1', installed: true,
+    updateStatus: 'outdated', latestVersion: '2' };
+  host.extension.state.installed = [{ ...item, scope: workspace }, { ...item, id: 'global::sample', scope: global }];
+  host.panel.mode = 'browser';
+
+  await host.extension.handle({ type: 'updateAll' }, host.panel);
+
+  assert.equal(host.argv.length, 2);
+  assert.equal(host.panel.extra.actionResult?.status, 'failed');
+  assert.match(host.panel.extra.actionResult?.summary ?? '', /Failed: Global \(user\)/);
+  assert.match(host.errors[0] ?? '', /Updated 1 of 2 scopes/);
+});
+
 test('updating a global duplicate verifies only that installation and invalidates only its update cache', async () => {
   const host = harness();
   const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;

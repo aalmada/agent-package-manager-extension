@@ -45,7 +45,7 @@ Most operations have more than one entry point. Use whichever fits your workflow
 | [Find a package](package-browser.md#search-and-filters) | Search box and filter (funnel) menu; **Open Package Browser** for a larger window | **APM: Open Package Browser** | |
 | [Install a package](managing-packages.md#install-a-package) | **Install** on a package page | **APM: Install Package** | `apm.config.target` for default targets |
 | [Preview a change](managing-packages.md#preview-changes) | **Preview install**, **Preview version…**, **Preview update** | | |
-| [Update a package](managing-packages.md#update-a-package) | **Updates** section; **Update** on a package page | | |
+| [Update packages](managing-packages.md#update-packages) | **Update All** in **Updates**; **Update** on a package page | | |
 | [Audit a package or workspace](managing-packages.md#audit-a-package) | **Audit** on a package page | **APM: Audit Workspace**; `apm.yml` Explorer context menu; `audit` task | |
 | [Initialize a project](projects.md#initialize-a-project) | **Initialize APM project** | **APM: Initialize Project**; Explorer folder context menu | |
 | [Compile or validate](projects.md#compile-preview-and-validate) | | **APM: Compile**, **APM: Preview Compilation**, **APM: Validate Manifest and Primitives**; `apm.yml` editor title; tasks | `apm.config.autoIntegrate` |

@@ -50,7 +50,7 @@ export interface State {
   dependencyTrees?: Record<string, DependencyTreeView>;
 }
 export type Message =
-  | { type: 'ready' | 'refresh' | 'install' | 'dependencies' | 'actions' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' | 'back' }
+  | { type: 'ready' | 'refresh' | 'install' | 'updateAll' | 'dependencies' | 'actions' | 'marketplaces' | 'setup' | 'output' | 'trust' | 'settings' | 'readmeImageSettings' | 'cancel' | 'chooseScope' | 'targets' | 'configureTargets' | 'retry' | 'back' }
   | { type: 'scope'; key: string }
   /** Without `scopeKey`, or outside the package browser window, opens the text report for the page's scope. */
   | { type: 'dependencyTree'; scopeKey?: string }
@@ -66,7 +66,7 @@ export type Message =
 
 export function parseMessage(value: unknown): Message {
   if (!record(value) || typeof value.type !== 'string') throw new Error('Invalid webview message.');
-  const simple = ['ready', 'refresh', 'install', 'dependencies', 'actions', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
+  const simple = ['ready', 'refresh', 'install', 'updateAll', 'dependencies', 'actions', 'marketplaces', 'setup', 'output', 'trust', 'settings', 'readmeImageSettings', 'cancel',
     'chooseScope', 'targets', 'configureTargets', 'retry', 'back'];
   if (simple.includes(value.type)) return { type: value.type } as Message;
   if (value.type === 'dependencyTree') {

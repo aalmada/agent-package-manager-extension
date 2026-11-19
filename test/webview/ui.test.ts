@@ -82,7 +82,7 @@ test('dual installations have two catalog tags, separate scoped rows and unambig
     assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: user.id, scopeKey: 'global:/user/.apm' }));
     installedRows[1].click();
     assert.equal(JSON.stringify(page.messages.at(-1)), JSON.stringify({ type: 'details', id: project.id, scopeKey: 'workspace:/project' }));
-    assert.equal(page.document.querySelector('#section-heading-updates .count-badge')?.textContent, '2');
+    assert.equal(page.document.querySelector('#section-count-updates')?.textContent, '2');
     const updateRows = [...page.document.querySelectorAll<HTMLButtonElement>('#section-body-updates .package-row')];
     assert.equal(updateRows.length, 2);
     assert.deepEqual(updateRows.map(row => row.querySelector('.badge')?.textContent),
@@ -309,6 +309,35 @@ test('hidden sections remove their headers and sashes but preserve fixed search'
     assert.deepEqual([...page.document.querySelectorAll('.count-badge')].map(node => node.textContent), ['2', '1', '1']);
   } finally { page.dom.window.close(); }
 });
+test('updates section exposes Update All beside its collapsible heading', () => {
+  const page = browser('updates');
+  try {
+    const headingRow = page.document.querySelector('#section-heading-updates')?.parentElement;
+    const updateAll = page.document.querySelector<HTMLButtonElement>('#update-all');
+    const count = headingRow?.lastElementChild;
+    assert.ok(headingRow?.classList.contains('section-heading-row'));
+    assert.equal(headingRow?.children[1], updateAll);
+    assert.equal(count?.classList.contains('count-badge'), true);
+    assert.equal(updateAll?.textContent, '');
+    assert.equal(updateAll?.title, 'Update All');
+    assert.equal(updateAll?.getAttribute('aria-label'), 'Update All');
+    assert.ok(updateAll?.querySelector('svg'));
+    assert.equal(updateAll?.disabled, false);
+    updateAll!.dispatchEvent(new page.dom.window.MouseEvent('mouseenter'));
+    const tooltip = page.document.querySelector<HTMLElement>('#apm-webview-tooltip');
+    assert.equal(tooltip?.textContent, 'Update All');
+    assert.equal(tooltip?.hidden, false);
+    assert.equal(updateAll?.getAttribute('aria-describedby'), 'apm-webview-tooltip');
+    updateAll!.dispatchEvent(new page.dom.window.MouseEvent('mouseleave'));
+    assert.equal(tooltip?.hidden, true);
+    updateAll!.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"updateAll"}');
+
+    page.state.installed = page.state.installed.map(item => ({ ...item, updateStatus: 'current' }));
+    page.update();
+    assert.equal(page.document.querySelector<HTMLButtonElement>('#update-all')?.disabled, true);
+  } finally { page.dom.window.close(); }
+});
 test('empty installed list opens native package selection, not a command form or preview', () => {
   const page = browser('installed');
   try {
@@ -507,7 +536,7 @@ test('section sizes and collapse state survive recreation and filter changes', (
     assert.equal(page.document.querySelector('#section-heading-updates')?.getAttribute('aria-expanded'), 'false');
     assert.equal(page.document.querySelectorAll('[role="separator"]').length, 1);
     page.state.installed.push({ ...page.state.installed[0], id: 'another' }); page.update();
-    assert.equal(page.document.querySelector('#section-heading-updates .count-badge')?.textContent, '2');
+    assert.equal(page.document.querySelector('#section-count-updates')?.textContent, '2');
     page.document.querySelector<HTMLButtonElement>('#section-heading-catalog')!.click();
     const restored = browser(undefined, page.saved());
     try {

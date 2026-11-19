@@ -89,6 +89,14 @@ for (const theme of ['dark', 'light', 'high-contrast']) {
     await expect(page.locator('footer')).toHaveCount(0);
     await expect(page.locator('.section-heading')).toHaveCount(3);
     await expect(page.locator('.count-badge')).toHaveText(['2', '1', '1']);
+    const updateAll = page.locator('#update-all');
+    await updateAll.hover();
+    const updateTooltip = page.locator('#apm-webview-tooltip');
+    await expect(updateTooltip).toBeVisible();
+    await expect(updateTooltip).toHaveText('Update All');
+    await expect(updateAll).toHaveAttribute('aria-describedby', 'apm-webview-tooltip');
+    await page.mouse.move(10, 890);
+    await expect(updateTooltip).toBeHidden();
     const badgeBox = (await page.locator('.count-badge').first().boundingBox())!;
     expect(badgeBox.x + badgeBox.width).toBe(328);
     expect(await page.locator('.count-badge').first().evaluate(element => getComputedStyle(element).borderRadius)).toBe('11px');
