@@ -261,12 +261,13 @@ class ApmExtension implements vscode.Disposable {
     const context = this.attach(panel.webview, 'gallery', panel);
     context.gallery = true;
     this.panels.set(key, context);
-    panel.onDidDispose(() => {
-      context.pageGeneration = (context.pageGeneration ?? 0) + 1;
-      context.detailsRequest = (context.detailsRequest ?? 0) + 1;
-      context.detailsController?.abort();
-      this.panels.delete(key);
-    });
+    panel.onDidDispose(() => this.forgetPanel(key, context));
+  }
+  private forgetPanel(key: string, context: PanelContext) {
+    context.pageGeneration = (context.pageGeneration ?? 0) + 1;
+    context.detailsRequest = (context.detailsRequest ?? 0) + 1;
+    context.detailsController?.abort();
+    this.panels.delete(key);
   }
   private attach(webview: vscode.Webview, mode: Mode, panel?: vscode.WebviewPanel): PanelContext {
     const context: PanelContext = { webview, mode, panel, extra: {} };
@@ -507,9 +508,7 @@ class ApmExtension implements vscode.Disposable {
       });
       this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
       this.state.checkedAt = undefined;
-      for (const { scope: target, result } of installed) {
-        if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
-      }
+      this.refreshInstalledDetails(installed);
       this.broadcast();
       for (const { scope: target, result } of installed) {
         if (result.status !== 'fulfilled' || !result.value.length) continue;
@@ -526,9 +525,7 @@ class ApmExtension implements vscode.Disposable {
         }
       }
       this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
-      for (const { scope: target, result } of installed) {
-        if (result.status === 'fulfilled') this.updateDetailItems(target, this.state.installed.filter(item => inScope(item, target)));
-      }
+      this.refreshInstalledDetails(installed);
       await this.refreshOtherDetailScopes(scopes, controller.signal, epoch, pass);
       if (epoch === this.epoch) await Promise.all([...this.panels.values()]
         .filter(entry => entry.mode === 'details' && entry.item && entry.panel && !entry.extra.details && !entry.extra.busy)
@@ -538,6 +535,11 @@ class ApmExtension implements vscode.Disposable {
     } finally {
       this.refreshController = undefined; this.state.busy = false; this.broadcast();
       if (epoch === this.epoch) this.notifyRefresh();
+    }
+  }
+  private refreshInstalledDetails(installed: { scope: Scope; result: PromiseSettledResult<PackageItem[]> }[]) {
+    for (const { scope, result } of installed) {
+      if (result.status === 'fulfilled') this.updateDetailItems(scope, this.state.installed.filter(item => inScope(item, scope)));
     }
   }
   private detailContexts(scope: Scope): PanelContext[] {
@@ -618,10 +620,7 @@ class ApmExtension implements vscode.Disposable {
       const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
         { title: `Explain package policy — ${scope.label}`, placeHolder: 'Select an installed dependency' });
       if (!picked) return;
-      const packageName = packageIdentity(picked.item, picked.item, false);
-      if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
-        throw new Error('APM returned an invalid dependency identity.');
-      }
+      const packageName = this.checkedInstalledIdentity(picked.item);
       await this.showPolicyReport(scope, `Executable trust policy: ${packageName}`, ['policy', 'explain', packageName]);
       return;
     }
@@ -726,16 +725,9 @@ class ApmExtension implements vscode.Disposable {
       args.push(selected.marketplace.name);
       title = `${picked.title}: ${selected.marketplace.name} — ${scope.label}`;
     }
-    const result = await this.executeInspection(scope, title, args);
-    if (!result) return;
-    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty marketplace health report. Review APM Output.');
-    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
-    if (result.exitCode !== 0) {
-      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
-    } else {
-      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
-    }
+    await this.showInspectionReport(scope, title, args, {
+      emptyMessage: 'APM returned an empty marketplace health report. Review APM Output.'
+    });
   }
   async discoverMcpServers() {
     const scope = await this.workflowScope();
@@ -770,16 +762,9 @@ class ApmExtension implements vscode.Disposable {
       args.push(value.trim());
       if (!search) title = `${action.title}: ${value.trim()} — ${scope.label}`;
     }
-    const result = await this.executeInspection(scope, title, args);
-    if (!result) return;
-    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty MCP registry report. Review APM Output.');
-    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
-    if (result.exitCode !== 0) {
-      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
-    } else {
-      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
-    }
+    await this.showInspectionReport(scope, title, args, {
+      emptyMessage: 'APM returned an empty MCP registry report. Review APM Output.'
+    });
   }
   async lifecycleWorkflows() {
     const scope = await this.workflowScope(undefined, undefined, true);
@@ -912,11 +897,20 @@ class ApmExtension implements vscode.Disposable {
     });
   }
   private async showDependencyReport(scope: Scope, title: string, args: string[], validate?: (output: string) => void) {
+    await this.showInspectionReport(scope, title, args, {
+      emptyMessage: 'APM returned an empty dependency report. Review APM Output.',
+      validate
+    });
+  }
+  private async showInspectionReport(scope: Scope, title: string, args: string[], options: {
+    emptyMessage: string;
+    validate?: (output: string) => void;
+  }) {
     const result = await this.executeInspection(scope, title, args);
     if (!result) return;
     const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty dependency report. Review APM Output.');
-    if (result.exitCode === 0) validate?.(result.stdout);
+    if (result.exitCode === 0 && !output) throw new Error(options.emptyMessage);
+    if (result.exitCode === 0) options.validate?.(result.stdout);
     await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
     if (result.exitCode !== 0) {
       void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
@@ -925,16 +919,9 @@ class ApmExtension implements vscode.Disposable {
     }
   }
   private async showLifecycleReport(scope: Scope, title: string, args: string[]) {
-    const result = await this.executeInspection(scope, title, args);
-    if (!result) return;
-    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-    if (result.exitCode === 0 && !output) throw new Error('APM returned an empty lifecycle report. Review APM Output.');
-    await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
-    if (result.exitCode !== 0) {
-      void vscode.window.showWarningMessage(`${title} reported findings or exited with code ${result.exitCode}. Review the result document and APM Output.`);
-    } else {
-      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
-    }
+    await this.showInspectionReport(scope, title, args, {
+      emptyMessage: 'APM returned an empty lifecycle report. Review APM Output.'
+    });
   }
   private async runLifecycleCommand(scope: Scope, id: string, args: Record<string, string>, options: Record<string, unknown>, title: string) {
     const context: PanelContext = { mode: 'native', scope, extra: {} };
@@ -965,10 +952,7 @@ class ApmExtension implements vscode.Disposable {
       item
     })), { title: `Choose package — ${scope.label}`, placeHolder: 'Select a package to change executable trust for' });
     if (!picked) return;
-    const packageName = packageIdentity(picked.item, picked.item, false);
-    if (!packageName || packageName.startsWith('-') || /[\s\0]/.test(packageName)) {
-      throw new Error('APM returned an invalid dependency identity.');
-    }
+    const packageName = this.checkedInstalledIdentity(picked.item);
     const action = await vscode.window.showQuickPick([
       { label: 'Approve executable primitives', description: 'Grant this package permission to use its declared executables', command: 'approve' },
       { label: 'Deny executable primitives', description: "Block this package's executable primitives; deny takes precedence", command: 'deny' }
@@ -1392,12 +1376,7 @@ class ApmExtension implements vscode.Disposable {
       entry = this.attach(panel.webview, 'details', panel);
       this.panels.set(key, entry);
       const panelEntry = entry;
-      panel.onDidDispose(() => {
-        panelEntry.pageGeneration = (panelEntry.pageGeneration ?? 0) + 1;
-        panelEntry.detailsRequest = (panelEntry.detailsRequest ?? 0) + 1;
-        panelEntry.detailsController?.abort();
-        this.panels.delete(key);
-      });
+      panel.onDidDispose(() => this.forgetPanel(key, panelEntry));
     }
     this.resetPackagePage(entry, 'details');
     entry.scope = scope; entry.item = item;
@@ -1405,6 +1384,13 @@ class ApmExtension implements vscode.Disposable {
     entry.panel?.reveal();
     await this.loadDetails(entry);
     return entry;
+  }
+  private checkedInstalledIdentity(item: PackageItem) {
+    const identity = packageIdentity(item, item, false);
+    if (!identity || identity.startsWith('-') || /[\s\0]/.test(identity)) {
+      throw new Error('APM returned an invalid dependency identity.');
+    }
+    return identity;
   }
   private async loadDetails(entry: PanelContext) {
     const item = entry.item!, scope = this.scope(entry);
