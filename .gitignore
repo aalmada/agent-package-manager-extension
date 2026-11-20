@@ -8,6 +8,7 @@ playwright-report/
 .DS_Store
 .aspire
 .sharplsp
+.deslop/
 
 
 # APM dependencies
