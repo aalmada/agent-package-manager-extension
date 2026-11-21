@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- Update development dependencies, including VS Code and Node.js type definitions.
+
 ## 0.7.1
 
 - Reuse a single package-details tab across packages and scopes, with an APM title and transparent icon.
