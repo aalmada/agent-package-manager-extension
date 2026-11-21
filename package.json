@@ -960,7 +960,7 @@
     "docs:screenshots": "tsx scripts/docs-screenshots.ts"
   },
   "dependencies": {
-    "markdown-it": "^14.1.0",
+    "markdown-it": "^15.0.3",
     "sanitize-html": "^2.18.2",
     "yaml": "^2.8.1"
   },
