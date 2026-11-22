@@ -1218,13 +1218,41 @@ test('native install gathers package source and leaves manifest targets unchange
   assert.equal(script.executions.length, 0);
 });
 
-test('native audit reveals Problems even when the CLI reports a nonzero finding status', async () => {
-  const host = harness({ output: () => ({ stdout: JSON.stringify({ passed: false, summary: { critical: 1 }, findings: [] }), stderr: '', exitCode: 1 }) });
+test('native audit opens a readable report and Problems even when findings cause a nonzero exit', async () => {
+  const host = harness({ output: () => ({ stdout: JSON.stringify({ passed: false, summary: { files_scanned: 2, critical: 1 },
+    findings: [{ severity: 'critical', file: 'source.md', line: 3, message: 'Hidden character', remediation: 'Review source.' }] }), stderr: '', exitCode: 1 }) });
   await host.extension.workflow('auditWorkspace');
   assert.deepEqual(Array.from(host.argv[0]), ['audit', '--format', 'json']);
   assert.ok(host.commands.includes('workbench.actions.view.problems'));
-  assert.match(host.notices[0], /reported findings or incomplete coverage/);
+  assert.equal(host.previews[0].title, 'Workspace audit - project');
+  assert.match(host.previews[0].content, /Result: Needs attention[\s\S]*Files scanned: 2[\s\S]*APM exit code: 1/);
+  assert.match(host.previews[0].content, /CRITICAL - source\.md[\s\S]*Hidden character[\s\S]*line 3[\s\S]*Recommended action: Review source\./);
+  assert.doesNotMatch(host.previews[0].content, /"passed"/);
   assert.equal(host.confirmations.length, 0, 'Read-only auditing must not warn about applying changes');
+});
+
+test('workspace audit report surfaces success, incomplete coverage, stale results and CLI failures', async () => {
+  const response = (report: object, exitCode = 0) => () => ({ stdout: JSON.stringify(report), stderr: '', exitCode });
+  const success = harness({ output: response({ passed: true, summary: { files_scanned: 2 }, findings: [] }) });
+  await success.extension.workflow('auditWorkspace');
+  assert.match(success.previews[0].content, /Result: Passed[\s\S]*No findings reported/);
+  const incomplete = harness({ output: response({ passed: true, coverage: { complete: false, primitives: [
+    { file: 'hooks.json', status: 'incomplete', diagnostic: 'Could not inspect.' }
+  ] } }) });
+  await incomplete.extension.workflow('auditWorkspace');
+  assert.match(incomplete.previews[0].content, /Result: Incomplete[\s\S]*Could not inspect/);
+  const stale = harness({ output: response({ passed: true, findings: [] }) });
+  Reflect.set(stale.extension, 'publishAudit', async (_context: unknown, _scope: unknown, audit: { stale?: boolean; passed: boolean }) => {
+    audit.stale = true; audit.passed = false;
+  });
+  await stale.extension.workflow('auditWorkspace');
+  assert.match(stale.previews[0].content, /Result: Out of date/);
+  const failed = harness({ output: response({ passed: true, findings: [] }, 2) });
+  await failed.extension.workflow('auditWorkspace');
+  assert.match(failed.previews[0].content, /Result: Needs attention[\s\S]*APM exit code: 2/);
+  const malformed = harness({ output: () => ({ stdout: 'not JSON', stderr: 'error', exitCode: 2 }) });
+  await assert.rejects(malformed.extension.workflow('auditWorkspace'), /Unrecognized APM JSON audit report/);
+  assert.equal(malformed.previews.length, 0);
 });
 
 test('deployment explanations use native pickers and removed generic messages are rejected', async () => {

@@ -14,7 +14,7 @@ import { filterTokens, withStatus, withToken, type Ordering } from './webview/fi
 import { renderMarkdown } from './views/markdown';
 import { containsUrlCredentials, redact, safePayload } from './apm/redact';
 import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm/installation';
-import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
+import { formatWorkspaceAudit, packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
 import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withCatalogInfo, withInstallations } from './apm/packageState';
 import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
 import { AuditDiagnostics, contentNavigation, openNavigation, registerResultProvider, type NavigationTarget, type AuditTicket } from './navigation';
@@ -674,12 +674,10 @@ class ApmExtension implements vscode.Disposable {
       }
       await vscode.window.showTextDocument(manifest);
     } else if (workflow === 'auditWorkspace') {
+      const result = context.extra.actionResult;
+      if (!result?.audit || result.exitCode === undefined) throw new Error('The APM audit did not return a readable result. Review APM Output.');
+      await this.showTextResult(`Workspace audit - ${scope.label}`, formatWorkspaceAudit(result.audit, scope.label, result.exitCode));
       await vscode.commands.executeCommand('workbench.actions.view.problems');
-      const audit = context.extra.actionResult?.audit;
-      void vscode.window.showInformationMessage(audit?.passed ? `APM audit passed in ${scope.label}.` :
-        `APM audit reported findings or incomplete coverage in ${scope.label}. Review Problems.`, 'Show Output').then(choice => {
-        if (choice) this.output.show();
-      });
     } else if (workflow === 'previewCompile' || workflow === 'doctor') {
       await this.showTextResult(workflow === 'previewCompile' ? 'Compilation preview' : 'APM health check', context.extra.result);
     } else {
@@ -1929,9 +1927,10 @@ class ApmExtension implements vscode.Disposable {
           if (descriptor.id === 'audit' && options['--format'] === 'json') {
             const audit = parseAudit(result.stdout);
             if (!audit) throw new Error('Unrecognized APM JSON audit report. Review APM Output.');
+            if (result.exitCode !== 0) audit.passed = false;
             await this.publishAudit(context, scope, audit, ticket);
             context.extra.actionResult = { action: 'audit', title: 'Workspace audit', command: `apm ${redact(args.join(' '))}`,
-              status: audit.passed ? 'success' : 'failed', audit, summary: audit.stale ? 'Files changed or a newer audit started. Run the audit again.' : audit.coverage?.complete === false ? 'Audit coverage is incomplete.' : `${audit.findings.length} findings.` };
+              status: audit.passed ? 'success' : 'failed', audit, exitCode: result.exitCode, summary: audit.stale ? 'Files changed or a newer audit started. Run the audit again.' : audit.coverage?.complete === false ? 'Audit coverage is incomplete.' : `${audit.findings.length} findings.` };
           }
           if (result.exitCode !== 0) context.extra.error = `APM exited with code ${result.exitCode}. Review the result; diagnostic commands can report findings through a nonzero exit status.`;
         } finally {

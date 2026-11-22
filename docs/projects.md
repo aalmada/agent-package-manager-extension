@@ -65,7 +65,7 @@ These commands run with cancellable progress and log to the **APM** output chann
 | Explorer | Right-click `apm.yml` and choose **APM: Audit Workspace**. |
 | Tasks | Run the `audit` task, which uses `apm audit --ci`. |
 
-The audit runs `apm audit --format json`, publishes findings to the **Problems** panel, and opens it. Findings in decoded structured prompts open a read-only decoded document instead of a misleading physical line. Incomplete coverage is reported as a warning, never as a clean scan. Editing an affected document clears its stale Problems entries.
+The workspace command runs `apm audit --format json` and opens a read-only report with the result, finding counts, remediation guidance, and scan coverage. It also publishes navigable findings to the **Problems** panel and opens it. Findings in decoded structured prompts open a read-only decoded document instead of a misleading physical line. Incomplete coverage is reported, never as a clean scan. Editing an affected document clears its stale Problems entries; run the audit again for an up-to-date report. The full CLI output remains in the **APM** output channel.
 
 To audit a single package, use **Audit** on its page; see [Audit a package](managing-packages.md#audit-a-package).
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult } from '../../src/apm/actions';
+import { formatWorkspaceAudit, packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult } from '../../src/apm/actions';
 import type { PackageItem } from '../../src/apm/types';
 import { parseMessage } from '../../src/protocol';
 import { olderThan } from '../../src/apm/client';
@@ -141,6 +141,29 @@ test('audit preserves incomplete coverage and physical versus decoded finding co
   }))!;
   assert.deepEqual(typed.findings[0], { severity: 'info', file: '', message: 'Finding', category: '', pointer: '/p' });
   assert.deepEqual(typed.coverage?.primitives[0], { file: 'a', status: 'complete', kind: '', pointer: '/q' });
+});
+
+test('workspace audit report explains findings, decoded locations and incomplete coverage', () => {
+  const report = parseAudit(JSON.stringify({
+    passed: false, summary: { files_scanned: 3, files_affected: 2, critical: 1 },
+    findings: [{ severity: 'critical', file: 'hooks.json', pointer: '/prompt', decoded_line: 4, decoded_column: 2,
+      line: 99, message: 'Hidden character', remediation: 'Review the prompt.' }],
+    coverage: { complete: false, primitives: [{ file: 'hooks.json', status: 'incomplete', diagnostic: 'Could not inspect prompt.' }] }
+  }))!;
+  const text = formatWorkspaceAudit(report, 'project', 1);
+  assert.match(text, /Project: project\nResult: Incomplete/);
+  assert.match(text, /Files scanned: 3\nFiles affected: 2\nFindings returned: 1\nAPM exit code: 1/);
+  assert.match(text, /CRITICAL - hooks\.json[\s\S]*Hidden character[\s\S]*\/prompt \| decoded line 4:2[\s\S]*Recommended action: Review the prompt\./);
+  assert.doesNotMatch(text, /line 99/);
+  assert.match(text, /Coverage details[\s\S]*hooks\.json - incomplete[\s\S]*Could not inspect prompt/);
+  assert.match(text, /Problems[\s\S]*APM.*Output panel/);
+});
+
+test('workspace audit report never describes stale or nonzero results as passed', () => {
+  const passed = parseAudit('{"passed":true,"summary":{"files_scanned":0},"findings":[]}')!;
+  assert.match(formatWorkspaceAudit(passed, 'project', 0), /Result: Passed[\s\S]*Scan coverage: Not reported by APM[\s\S]*No findings reported/);
+  assert.match(formatWorkspaceAudit(passed, 'project', 2), /Result: Needs attention[\s\S]*APM exit code: 2[\s\S]*No individual findings were returned/);
+  assert.match(formatWorkspaceAudit({ ...passed, stale: true }, 'project', 0), /Result: Out of date[\s\S]*No individual findings were returned/);
 });
 
 test('long output keeps its tail', () => {

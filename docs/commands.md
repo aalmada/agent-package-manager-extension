@@ -26,7 +26,7 @@ Every extension command starts with **APM:** in the Command Palette (**View** > 
 | **APM: Compile** | Run `apm compile` after confirmation. | `compile` task | Trusted, folder |
 | **APM: Preview Compilation** | Open the `apm compile --dry-run` plan in read-only editors. | `apm.yml` editor title | Trusted, folder |
 | **APM: Validate Manifest and Primitives** | Run `apm compile --validate`. | `apm.yml` editor title; `apm.yml` Explorer context menu; `validate` task | Trusted, folder |
-| **APM: Audit Workspace** | Audit the project and publish findings to **Problems**. | `apm.yml` Explorer context menu; `audit` task | Trusted, folder |
+| **APM: Audit Workspace** | Open a read-only audit report and publish findings to **Problems**. | `apm.yml` Explorer context menu; `audit` task | Trusted, folder |
 | **APM: Run Script** | Pick and run a named manifest script as a task. See [Manifest scripts](projects.md#manifest-scripts). | **Tasks: Run Task** | Trusted, folder, `apm.tasks.includeScripts` enabled |
 | **APM: Manage Lifecycle Workflows** | Inspect, test, run, and trust lifecycle scripts. See [Lifecycle workflows](projects.md#lifecycle-workflows). | More APM Actions | Trusted, folder |
 

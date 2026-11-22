@@ -9,11 +9,27 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { record } from '../../src/apm/adapters';
 import { ApmClient } from '../../src/apm/client';
+import { formatWorkspaceAudit, parseAudit } from '../../src/apm/actions';
 import { descriptors } from '../../src/apm/commands';
 import { addArguments, matches, parseEntry } from '../../src/config/marketplaces';
 
 const executable = process.env.APM_TEST_EXECUTABLE;
 const git = promisify(execFile);
+test('real workspace audit renders its JSON as a readable report', { skip: !executable, timeout: 30_000 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-audit-report-'));
+  try {
+    await writeFile(join(home, 'apm.yml'), 'name: audit-test\nversion: 1.0.0\n');
+    const client = new ApmClient({ executable: executable!, cwd: home, home });
+    const result = await client.execute(['audit', '--format', 'json']);
+    const audit = parseAudit(result.stdout);
+    assert.ok(audit, result.stdout + result.stderr);
+    const report = formatWorkspaceAudit(audit, 'audit-test', result.exitCode);
+    assert.match(report, /Project: audit-test\nResult:/);
+    assert.match(report, /Scan coverage:[\s\S]*Findings returned:/);
+    assert.doesNotMatch(report, /"passed"\s*:/);
+  } finally { await rm(home, { recursive: true }); }
+});
+
 test('real global listing works without a workspace or global manifest', { skip: !executable, timeout: 30_000 }, async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-global-list-'));
   try {

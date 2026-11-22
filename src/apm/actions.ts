@@ -43,6 +43,7 @@ export interface ActionResult {
   command: string;
   summary?: string;
   output?: string;
+  exitCode?: number;
   audit?: AuditReport;
   preview?: boolean;
 }
@@ -154,6 +155,49 @@ export function parseAudit(text: string): AuditReport | undefined {
     passed: value.passed === true && coverage?.complete !== false && (exitCode === undefined || exitCode === 0),
     summary, findings, ...(exitCode !== undefined ? { exitCode } : {}), ...(coverage ? { coverage } : {})
   };
+}
+
+export function formatWorkspaceAudit(report: AuditReport, scope: string, exitCode: number): string {
+  const status = report.stale ? 'Out of date - run the audit again.' :
+    report.coverage?.complete === false ? 'Incomplete - scan coverage needs review.' :
+      report.passed && exitCode === 0 ? 'Passed' : 'Needs attention';
+  const coverage = report.coverage ? report.coverage.complete ? 'Complete' : 'Incomplete' : 'Not reported by APM';
+  const lines = [
+    `Project: ${scope}`,
+    `Result: ${status}`,
+    `Scan coverage: ${coverage}`,
+    `Files scanned: ${report.summary.files_scanned ?? 'Not reported'}`,
+    `Files affected: ${report.summary.files_affected ?? 'Not reported'}`,
+    `Findings returned: ${report.findings.length}`,
+    `APM exit code: ${exitCode}`
+  ];
+  const counts = Object.entries(report.summary).filter(([key]) => key !== 'files_scanned' && key !== 'files_affected');
+  if (counts.length) lines.push(`Finding counts: ${counts.map(([key, count]) => `${key.replace(/_/g, ' ')}: ${count}`).join(', ')}`);
+  lines.push('', 'Findings');
+  if (!report.findings.length) {
+    lines.push(report.passed && exitCode === 0 && !report.stale ? '  No findings reported.' :
+      '  No individual findings were returned. Review scan coverage and APM Output.');
+  }
+  for (const [index, finding] of report.findings.entries()) {
+    const line = finding.pointer ? finding.decodedLine : finding.line;
+    const column = finding.pointer ? finding.decodedColumn : finding.column;
+    const location = line !== undefined ? `${finding.pointer ? 'decoded line' : 'line'} ${line}${column !== undefined ? `:${column}` : ''}` : undefined;
+    lines.push(`  ${index + 1}. ${finding.severity.toUpperCase()} - ${finding.file || 'File not reported'}`,
+      `     ${finding.message}`);
+    const details = [finding.category, finding.pointer, location].filter(Boolean).join(' | ');
+    if (details) lines.push(`     ${details}`);
+    if (finding.remediation) lines.push(`     Recommended action: ${finding.remediation}`);
+  }
+  const coverageDetails = report.coverage?.primitives.filter(entry => entry.status === 'incomplete' || entry.diagnostic) ?? [];
+  if (coverageDetails.length) {
+    lines.push('', 'Coverage details');
+    for (const entry of coverageDetails) {
+      lines.push(`  ${entry.file || 'File not reported'} - ${[entry.status, entry.target, entry.kind, entry.pointer].filter(Boolean).join(' | ')}`);
+      if (entry.diagnostic) lines.push(`    ${entry.diagnostic}`);
+    }
+  }
+  lines.push('', 'Open Problems to navigate available findings. For the full command output, select APM in the Output panel.');
+  return lines.join('\n');
 }
 
 /** Parses the `--target` values listed by `apm install --help`. */

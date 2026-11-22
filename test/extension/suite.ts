@@ -157,6 +157,14 @@ async function steps() {
   assert.match(previewDocument.getText(), /Compilation preview/);
   assert.equal(previewDocument.isDirty, false);
   await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  await vscode.commands.executeCommand('apm.auditWorkspace', manifestUri);
+  const auditDocument = vscode.workspace.textDocuments.find(document =>
+    document.uri.scheme === 'apm-result' && document.getText().startsWith('Workspace audit - '));
+  assert.ok(auditDocument, 'Workspace audit opens a read-only report');
+  assert.match(auditDocument.getText(), /Result:[\s\S]*Scan coverage:[\s\S]*Findings returned:/);
+  assert.doesNotMatch(auditDocument.getText(), /"passed"\s*:/);
+  assert.equal(auditDocument.isDirty, false);
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
   const manifestDocument = await vscode.workspace.openTextDocument(manifestUri);
   const manifestEditor = await vscode.window.showTextDocument(manifestDocument);
   const hover = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', manifestUri, new vscode.Position(0, 1));
