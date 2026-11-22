@@ -1,8 +1,15 @@
-import { record } from '../apm/adapters';
+import { record, stringFields } from '../apm/adapters';
 import { contentTypes, declaredContents, mergeContents, type ContentGroup, type ContentItem } from '../apm/contents';
 import type { PackageItem } from '../apm/types';
 import type { ActionResult } from '../apm/actions';
-import { el } from './dom';
+import { countHeading, el } from './dom';
+
+function navigationButton(label: string, navigationId: string, navigate: (id: string) => void): HTMLButtonElement {
+  const button = el('button', 'secondary', label);
+  button.type = 'button';
+  button.addEventListener('click', () => navigate(navigationId));
+  return button;
+}
 
 function label(key: string): string {
   const known: Record<string, string> = {
@@ -102,9 +109,7 @@ function contentGroups(value: unknown): ContentGroup[] {
       if (!record(item) || typeof item.name !== 'string' || !item.name.trim()) continue;
       items.push({
         name: item.name,
-        ...(typeof item.path === 'string' ? { path: item.path } : {}),
-        ...(typeof item.description === 'string' ? { description: item.description } : {}),
-        ...(typeof item.navigationId === 'string' ? { navigationId: item.navigationId } : {}),
+        ...stringFields(item, ['path', 'description', 'navigationId']),
         ...(item.locationKind === 'source' || item.locationKind === 'installed' || item.locationKind === 'deployed' ? { locationKind: item.locationKind } : {})
       });
     }
@@ -130,8 +135,7 @@ function contentSection(groups: ContentGroup[], loading: boolean, available: boo
     const definition = contentTypes.find(type => type.key === group.kind);
     if (!definition) continue;
     const groupNode = el('section', 'content-group');
-    const heading = el('h3');
-    heading.append(el('span', '', definition.label), el('span', 'content-count', String(group.items.length)));
+    const heading = countHeading('h3', definition.label, group.items.length, 'content-count');
     groupNode.append(heading);
     const list = el('ul', 'content-list');
     for (const item of group.items) {
@@ -139,9 +143,9 @@ function contentSection(groups: ContentGroup[], loading: boolean, available: boo
       const body = el('div', 'content-item-body');
       body.append(el('strong', '', item.name));
       if (item.navigationId && navigate) {
-        const open = el('button', 'secondary', `Open ${item.locationKind === 'installed' ? 'installed package source' : item.locationKind === 'deployed' ? 'deployed content' : 'source'}`);
+        const open = navigationButton(`Open ${item.locationKind === 'installed' ? 'installed package source' : item.locationKind === 'deployed' ? 'deployed content' : 'source'}`, item.navigationId, navigate);
         open.id = `open-${item.navigationId}`;
-        open.type = 'button'; open.addEventListener('click', () => navigate(item.navigationId!)); body.append(open);
+        body.append(open);
       }
       body.append(el('p', item.description ? 'content-description' : 'content-description muted',
         item.description ?? 'Description not available.'));
@@ -237,7 +241,7 @@ export function renderActionResult(result: ActionResult, cancel: () => void, nav
     for (const finding of result.audit.findings) {
       const entry = el('li'); entry.append(el('span', `badge severity-${finding.severity.toLowerCase()}`, finding.severity), el('strong', '', ` ${finding.file}`), el('span', 'muted', ` — ${finding.message}`));
       if (finding.navigationId && navigate) {
-        const open = el('button', 'secondary', 'Open finding'); open.type = 'button'; open.addEventListener('click', () => navigate(finding.navigationId!)); entry.append(open);
+        entry.append(navigationButton('Open finding', finding.navigationId, navigate));
       }
       const line = finding.pointer ? finding.decodedLine : finding.line;
       const column = finding.pointer ? finding.decodedColumn : finding.column;

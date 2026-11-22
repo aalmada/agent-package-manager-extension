@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { record } from './adapters';
+import { record, trimmedString } from './adapters';
 import { awesomeCopilotNamespace, declaredContents, mergeContents, nameFromPath, repositoryComposition, repositoryCompositionNote, safeRepositoryPath,
   type ContentGroup, type ContentItem, type ContentKind } from './contents';
 import { listContained, readBareFile, readContained, resolveContained } from './manifest';
@@ -79,10 +79,8 @@ function frontmatter(text: string, path: string, notices: string[]): Partial<Con
     }
   }
   if (!record(data)) return {};
-  return {
-    ...(typeof data.name === 'string' && data.name.trim() ? { name: data.name.trim() } : {}),
-    ...(typeof data.description === 'string' && data.description.trim() ? { description: data.description.trim() } : {})
-  };
+  const name = trimmedString(data.name), description = trimmedString(data.description);
+  return { ...(name ? { name } : {}), ...(description ? { description } : {}) };
 }
 
 /**

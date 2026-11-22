@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { record } from '../apm/adapters';
+import { gitPortSuffix, record } from '../apm/adapters';
 import { containsUrlCredentials } from '../apm/redact';
 import type { Marketplace } from '../apm/types';
 
@@ -90,8 +90,7 @@ export function location(source: string): string {
   if (scp) return normalize(scp[1], scp[2]);
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     const url = new URL(value);
-    const defaultPort = (url.protocol === 'ssh:' && url.port === '22') || (url.protocol === 'git:' && url.port === '9418');
-    const host = `${url.hostname}${url.port && !defaultPort ? `:${url.port}` : ''}`;
+    const host = `${url.hostname}${gitPortSuffix(url)}`;
     if (isJson(value)) return `url:${url.protocol}//${host.toLowerCase()}${url.pathname}${url.search}`;
     return normalize(host, url.pathname, url.search);
   }
@@ -193,6 +192,10 @@ export function planSync(setting: readonly string[], registered: readonly Market
   const names = new Set(registered.map(m => m.name));
   const claimed = new Set<string>(), seen = new Set<string>(), present = new Set(setting.map(s => s.trim()));
   const plan: SyncPlan = { setting: [], links: {}, add: [], remove: [], invalid: [] };
+  const claim = (text: string, name: string) => {
+    plan.links[text] = name;
+    claimed.add(name);
+  };
   for (const raw of setting) {
     let entry: MarketplaceEntry;
     try { entry = parseEntry(raw, workspaceRoot); } catch (error) {
@@ -204,15 +207,15 @@ export function planSync(setting: readonly string[], registered: readonly Market
     const registration = linked === undefined ? undefined : registered.find(m => m.name === linked);
     if (registration && !matches(entry, registration)) {
       const updated = entryText(registration);
-      plan.setting.push(updated); plan.links[updated] = registration.name; claimed.add(registration.name); continue;
+      plan.setting.push(updated); claim(updated, registration.name); continue;
     }
     const text = resolvedText(entry);
     plan.setting.push(text);
     if (seen.has(identity)) continue;
     seen.add(identity);
-    if (linked !== undefined) { plan.links[text] = linked; claimed.add(linked); continue; }
+    if (linked !== undefined) { claim(text, linked); continue; }
     const match = registered.find(m => !claimed.has(m.name) && matches(entry, m));
-    if (match) { plan.links[text] = match.name; claimed.add(match.name); continue; }
+    if (match) { claim(text, match.name); continue; }
     if (!skip.has(entry.text)) plan.add.push(entry);
   }
   plan.remove = [...new Set(Object.entries(links).filter(([text]) => !present.has(text)).map(([, name]) => name))]
@@ -220,7 +223,7 @@ export function planSync(setting: readonly string[], registered: readonly Market
   for (const marketplace of registered) {
     if (claimed.has(marketplace.name) || plan.remove.includes(marketplace.name)) continue;
     const text = entryText(marketplace);
-    plan.setting.push(text); plan.links[text] = marketplace.name; claimed.add(marketplace.name);
+    plan.setting.push(text); claim(text, marketplace.name);
   }
   return plan;
 }

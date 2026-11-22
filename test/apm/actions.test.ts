@@ -135,6 +135,12 @@ test('audit preserves incomplete coverage and physical versus decoded finding co
   assert.equal(parseAudit(JSON.stringify({ passed: true, coverage: { complete: true, primitives: [] } }))?.passed, true);
   assert.throws(() => parseAudit('{"coverage":{"complete":false}}'), /Unrecognized APM audit coverage/);
   assert.throws(() => parseAudit('{"coverage":{"complete":true,"primitives":[null]}}'), /Unrecognized APM audit coverage entry/);
+  const typed = parseAudit(JSON.stringify({
+    findings: [{ category: '', remediation: 5, pointer: '/p' }],
+    coverage: { complete: true, primitives: [{ file: 'a', status: 'complete', target: 3, kind: '', pointer: '/q' }] }
+  }))!;
+  assert.deepEqual(typed.findings[0], { severity: 'info', file: '', message: 'Finding', category: '', pointer: '/p' });
+  assert.deepEqual(typed.coverage?.primitives[0], { file: 'a', status: 'complete', kind: '', pointer: '/q' });
 });
 
 test('long output keeps its tail', () => {

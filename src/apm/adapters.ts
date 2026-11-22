@@ -85,3 +85,21 @@ export function parseVariablePrompt(output: string, pending: string): VariablePr
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+export function stringFields<K extends string>(value: Record<string, unknown>, keys: readonly K[]): Partial<Record<K, string>> {
+  const fields: Partial<Record<K, string>> = {};
+  for (const key of keys) {
+    const entry = value[key];
+    if (typeof entry === 'string') fields[key] = entry;
+  }
+  return fields;
+}
+
+export function trimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() || undefined : undefined;
+}
+
+export function gitPortSuffix(url: URL): string {
+  const defaultPort = (url.protocol === 'ssh:' && url.port === '22') || (url.protocol === 'git:' && url.port === '9418');
+  return url.port && !defaultPort ? `:${url.port}` : '';
+}

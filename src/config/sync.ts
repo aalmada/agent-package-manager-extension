@@ -15,6 +15,12 @@ function summary(result: ExecutionResult) {
   return (result.stderr || result.stdout).replace(/\[[x*i+!]\]\s*/g, '').replace(/\s+/g, ' ').trim() || `exit code ${result.exitCode}`;
 }
 
+export function marketplaceSetting(): string[] {
+  const value = vscode.workspace.getConfiguration('apm').get<unknown>('marketplaces', []);
+  if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) throw new Error('APM Marketplaces must be a list of strings.');
+  return value;
+}
+
 /** Keeps `apm.marketplaces` and `apm.config.*` mirrored with the user's APM registry and config.json. */
 export class SettingsSync {
   private running?: Promise<void>;
@@ -91,12 +97,6 @@ export class SettingsSync {
     await this.state.update(CONFIG, next);
   }
 
-  private marketplaceSetting(): string[] {
-    const value = vscode.workspace.getConfiguration('apm').get<unknown>('marketplaces', []);
-    if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) throw new Error('APM Marketplaces must be a list of strings.');
-    return value;
-  }
-
   private async migrateLegacy(workspaceRoot?: string) {
     if (this.state.get<boolean>(MIGRATED)) return;
     const legacy = vscode.workspace.getConfiguration('apm').inspect<unknown>('marketplaceEntries')?.globalValue;
@@ -106,7 +106,7 @@ export class SettingsSync {
         try { return legacyEntry(value, workspaceRoot); }
         catch (error) { throw new Error(`Cannot migrate marketplace entry ${index + 1}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       });
-      const current = this.marketplaceSetting();
+      const current = marketplaceSetting();
       const merged = [...new Set([...current, ...entries])];
       if (!same(current, merged)) await this.write('apm.marketplaces', merged);
       await vscode.workspace.getConfiguration('apm').update('marketplaceEntries', undefined, vscode.ConfigurationTarget.Global);
@@ -118,7 +118,7 @@ export class SettingsSync {
     const folders = (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === 'file');
     const workspaceRoot = folders.length === 1 ? folders[0].uri.fsPath : undefined;
     await this.migrateLegacy(workspaceRoot);
-    const client = this.client(), setting = this.marketplaceSetting();
+    const client = this.client(), setting = marketplaceSetting();
     let registered = await client.getMarketplaces();
     const previous = this.state.get<Record<string, string>>(LINKS, {});
     const plan = planSync(setting, registered, previous, new Set(this.failed.keys()), workspaceRoot);
@@ -126,7 +126,7 @@ export class SettingsSync {
     const links = { ...plan.links };
     const partial = { ...previous };
     for (const [text, name] of Object.entries(previous)) if (pending.has(name)) links[text] = name;
-    const unchanged = () => same(this.marketplaceSetting(), setting);
+    const unchanged = () => same(marketplaceSetting(), setting);
     const savePartialIfChanged = async () => {
       if (unchanged()) return false;
       this.again = true;

@@ -328,7 +328,10 @@ test('updates section exposes Update All beside its collapsible heading', () => 
     assert.equal(tooltip?.textContent, 'Update All');
     assert.equal(tooltip?.hidden, false);
     assert.equal(updateAll?.getAttribute('aria-describedby'), 'apm-webview-tooltip');
+    updateAll!.dispatchEvent(new page.dom.window.FocusEvent('focus'));
     updateAll!.dispatchEvent(new page.dom.window.MouseEvent('mouseleave'));
+    assert.equal(tooltip?.hidden, false, 'A focused tooltip remains visible after the pointer leaves');
+    updateAll!.dispatchEvent(new page.dom.window.FocusEvent('blur'));
     assert.equal(tooltip?.hidden, true);
     updateAll!.click();
     assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"updateAll"}');
@@ -984,6 +987,17 @@ test('package browser groups cards by marketplace, filters in place and opens de
     assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Browse packages');
     assert.deepEqual([...page.document.querySelectorAll('.gallery-group-heading > span:first-child')].map(node => node.textContent), ['one', 'two']);
     assert.equal(page.document.querySelector('.gallery-main img'), null, 'Packages have no icons');
+
+    page.document.querySelector<HTMLButtonElement>('#gallery-nav-catalog')!.focus();
+    const press = (key: string) => page.document.activeElement?.dispatchEvent(new page.dom.window.KeyboardEvent('keydown', { key, bubbles: true }));
+    press('ArrowDown');
+    assert.equal(page.document.activeElement?.id, 'gallery-nav-installed');
+    press('End');
+    assert.equal(page.document.activeElement?.id, 'gallery-nav-dependencies');
+    press('ArrowUp');
+    assert.equal(page.document.activeElement?.id, 'gallery-nav-updates');
+    press('Home');
+    assert.equal(page.document.activeElement?.id, 'gallery-nav-catalog');
 
     page.document.querySelector<HTMLButtonElement>('#gallery-nav-installed')!.click();
     assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Installed packages');

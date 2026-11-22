@@ -1,0 +1,5 @@
+[defaults]
+exclude = ["test/**", "scripts/**", "apm_modules/**"]
+
+[tuning.routing]
+nearly_identical_min_content = 0.90

@@ -5,7 +5,7 @@ import { dependencyTreeItem, type DependencyTreeNode } from '../apm/dependencyTr
 import { marketplaceLabel, samePackage } from '../apm/packageState';
 import { versionUpdateKind } from '../apm/versions';
 import { renderActionResult, renderDetailSections } from './details';
-import { el } from './dom';
+import { countHeading, el, setRoleLabel } from './dom';
 import { filterPackages, filterTokens, sectionPackages, withStatus, withToken, type Filters } from './filter';
 import type { Workflow } from '../apm/workflows';
 import { scopeKey, scopeKindLabel } from '../protocol';
@@ -110,9 +110,9 @@ function hideTooltip(target?: HTMLElement) {
   tooltipNode.hidden = true;
 }
 function attachTooltip(target: HTMLElement, label: string) {
-  let hovered = false, focused = false;
+  const active = { hovered: false, focused: false };
   const update = () => {
-    if (!hovered && !focused) { hideTooltip(target); return; }
+    if (!active.hovered && !active.focused) { hideTooltip(target); return; }
     tooltipTarget?.removeAttribute('aria-describedby');
     tooltipTarget = target;
     tooltipNode.textContent = label;
@@ -122,10 +122,11 @@ function attachTooltip(target: HTMLElement, label: string) {
     tooltipNode.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - tip.height - 4)}px`;
     target.setAttribute('aria-describedby', tooltipNode.id);
   };
-  target.addEventListener('mouseenter', () => { hovered = true; update(); });
-  target.addEventListener('mouseleave', () => { hovered = false; update(); });
-  target.addEventListener('focus', () => { focused = true; update(); });
-  target.addEventListener('blur', () => { focused = false; update(); });
+  for (const [enter, leave, key] of [['mouseenter', 'mouseleave', 'hovered'], ['focus', 'blur', 'focused']] as const) {
+    const updateActive = (event: Event) => { active[key] = event.type === enter; update(); };
+    target.addEventListener(enter, updateActive);
+    target.addEventListener(leave, updateActive);
+  }
 }
 function isGallery() { return state.mode === 'gallery' || !!state.gallery; }
 function render() {
@@ -270,9 +271,7 @@ function renderBrowserContents() {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault(); collapsed[section] = event.key === 'ArrowLeft'; save(); render();
       } else {
-        const target = event.key === 'ArrowDown' ? sections[index + 1] : event.key === 'ArrowUp' ? sections[index - 1] :
-          event.key === 'Home' ? sections[0] : event.key === 'End' ? sections.at(-1) : undefined;
-        if (target) { event.preventDefault(); document.getElementById(`section-heading-${target}`)?.focus(); }
+        focusSection(event, sections, index, 'section-heading');
       }
     });
     if (!collapsed[section] && previous) lists.append(sectionSash(previous, { section, node }));
@@ -287,6 +286,19 @@ function renderBrowserContents() {
 }
 const sectionNames: Record<BrowserSection, string> = { catalog: 'Catalog', installed: 'Installed', updates: 'Updates',
   direct: 'Direct dependencies', transitive: 'Transitive dependencies', unclassified: 'Unclassified dependencies' };
+function focusSection(event: KeyboardEvent, sections: readonly string[], index: number, prefix: string) {
+  const target = event.key === 'ArrowDown' ? sections[index + 1] : event.key === 'ArrowUp' ? sections[index - 1] :
+    event.key === 'Home' ? sections[0] : event.key === 'End' ? sections.at(-1) : undefined;
+  if (target) { event.preventDefault(); document.getElementById(`${prefix}-${target}`)?.focus(); }
+}
+function dependencyGroups(): BrowserSection[] {
+  return ['direct', 'transitive', ...(state.installed.some(item => item.direct === undefined) ? ['unclassified' as const] : [])];
+}
+function packageTitle(item: PackageItem) {
+  const title = el('span', 'package-title');
+  title.append(el('strong', '', item.name), el('span', 'version', item.version));
+  return title;
+}
 function sectionSize(section: BrowserSection) {
   const size = sizes[section];
   return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 100;
@@ -357,10 +369,8 @@ function sectionSash(before: { section: BrowserSection; node: HTMLElement }, aft
 function renderList(section: BrowserSection) {
   if (section === 'installed' && filterTokens(search).dependencies) {
     const body = el('div', 'section-body dependency-groups');
-    body.setAttribute('role', 'region');
-    body.setAttribute('aria-label', 'Installed dependencies');
-    const groups: BrowserSection[] = ['direct', 'transitive', ...(state.installed.some(item => item.direct === undefined) ? ['unclassified' as const] : [])];
-    for (const group of groups) {
+    setRoleLabel(body, 'region', 'Installed dependencies');
+    for (const group of dependencyGroups()) {
       const items = filterPackages(sectionPackages(group, state), filters());
       const sectionElement = el('section', 'dependency-group');
       const groupBody = renderList(group);
@@ -375,8 +385,7 @@ function renderList(section: BrowserSection) {
   const dependencies = ['direct', 'transitive', 'unclassified'].includes(section);
   const visible = filterPackages(items, filters());
   const body = el('div', 'section-body');
-  body.setAttribute('role', 'region');
-  body.setAttribute('aria-label', name);
+  setRoleLabel(body, 'region', name);
   const installedErrors = state.errors.filter(error => error.startsWith('Installed:'));
   if (dependencies && installedErrors.length && !visible.some(item => {
     const scope = item.scope;
@@ -393,8 +402,7 @@ function renderList(section: BrowserSection) {
     const row = button('', () => send({ type: 'details', id: item.id, ...(item.scope ? { scopeKey: scopeKey(item.scope) } : {}) }), 'package-row');
     row.id = `package-${name}-${item.scope ? `${scopeKey(item.scope)}-` : ''}${item.id}`;
     const content = el('span', 'package-content');
-    const title = el('span', 'package-title'); title.append(el('strong', '', item.name), el('span', 'version', item.version));
-    content.append(title);
+    content.append(packageTitle(item));
     if (item.description) content.append(el('span', 'description', item.description));
     content.append(el('span', 'marketplace', origin(item)));
     const tags = packageTags(section, item);
@@ -486,9 +494,7 @@ function renderGallery() {
     item.disabled = !ready;
     item.addEventListener('keydown', event => {
       const index = gallerySections.indexOf(section);
-      const target = event.key === 'ArrowDown' ? gallerySections[index + 1] : event.key === 'ArrowUp' ? gallerySections[index - 1] :
-        event.key === 'Home' ? gallerySections[0] : event.key === 'End' ? gallerySections.at(-1) : undefined;
-      if (target) { event.preventDefault(); document.getElementById(`gallery-nav-${target}`)?.focus(); }
+      focusSection(event, gallerySections, index, 'gallery-nav');
     });
     nav.append(item);
   }
@@ -514,7 +520,7 @@ function renderGalleryList(content: HTMLElement, section: GallerySection) {
   controls.append(searchBar(false));
   if (state.busy) {
     const progress = el('div', 'gallery-progress');
-    progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-label', 'Refreshing packages');
+    setRoleLabel(progress, 'progressbar', 'Refreshing packages');
     controls.append(progress);
   }
   content.append(head, controls);
@@ -534,7 +540,7 @@ function renderGalleryList(content: HTMLElement, section: GallerySection) {
 }
 function renderDependencies(content: HTMLElement) {
   const views = el('div', 'toolbar dependency-views');
-  views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Dependency view');
+  setRoleLabel(views, 'group', 'Dependency view');
   for (const [view, label] of [['list', 'List'], ['tree', 'Tree']] as const) {
     const toggle = button(label, () => { dependencyView = view; save(); render(); }, 'secondary');
     toggle.id = `dependency-view-${view}`;
@@ -543,8 +549,7 @@ function renderDependencies(content: HTMLElement) {
   }
   content.append(views);
   if (dependencyView === 'tree') { renderDependencyTree(content); return; }
-  const groups: BrowserSection[] = ['direct', 'transitive', ...(state.installed.some(item => item.direct === undefined) ? ['unclassified' as const] : [])];
-  renderGalleryGroups(content, 'dependencies', groups.map(group => ({
+  renderGalleryGroups(content, 'dependencies', dependencyGroups().map(group => ({
     key: group, title: sectionNames[group], items: filterPackages(sectionPackages(group, state), galleryFilters())
   })), () => state.installed.length ? [el('p', 'empty', 'No dependencies match your filters.')]
     : [el('p', 'empty', 'No dependencies installed.'), button('Install a package', () => send({ type: 'install' }))]);
@@ -760,9 +765,8 @@ function renderGalleryGroups(content: HTMLElement, section: GallerySection, grou
   groups.forEach((group, index) => {
     if (!group.items.length || remaining <= 0) return;
     const node = el('section', 'gallery-group');
-    const heading = el('h2', 'gallery-group-heading');
+    const heading = countHeading('h2', group.title, group.items.length, 'gallery-nav-count', 'gallery-group-heading');
     heading.id = `gallery-group-${index}`;
-    heading.append(el('span', '', group.title), el('span', 'gallery-nav-count', String(group.items.length)));
     const list = el('ul', 'package-cards');
     list.setAttribute('role', 'list'); list.setAttribute('aria-labelledby', heading.id);
     for (const item of group.items.slice(0, remaining)) {
@@ -777,8 +781,7 @@ function renderGalleryGroups(content: HTMLElement, section: GallerySection, grou
 function packageCard(section: BrowserSection, item: PackageItem) {
   const card = button('', () => { galleryFocus = card.id; openPackage(item); }, 'package-card');
   card.id = `card-${section}-${item.scope ? `${scopeKey(item.scope)}-` : ''}${item.id}`;
-  const title = el('span', 'package-title'); title.append(el('strong', '', item.name), el('span', 'version', item.version));
-  card.append(title);
+  card.append(packageTitle(item));
   if (!marketplaceLabel(item)) card.append(el('span', 'marketplace', origin(item)));
   card.append(item.description ? el('span', 'description', item.description) : el('span', 'description muted', 'No description'));
   if (item.direct === false && item.requiredBy?.length) card.append(el('span', 'required-by', requiredByText(item)));
@@ -799,8 +802,7 @@ function renderDetails(container: HTMLElement) {
   const installations = state.installed.filter(installation => samePackage(installation, item) && installation.scope);
   if (installations.length) {
     const scopes = el('div', 'toolbar installation-tags');
-    scopes.setAttribute('role', 'group');
-    scopes.setAttribute('aria-label', 'Package installations');
+    setRoleLabel(scopes, 'group', 'Package installations');
     for (const installation of installations) {
       const scope = installation.scope!;
       const key = scopeKey(scope);

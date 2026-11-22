@@ -61,6 +61,9 @@ test('marketplace and MCP settings reject URL credentials without importing unsa
 
 test('non-GitHub hosts, non-default ports and JSON URLs retain distinct source identities', () => {
   assert.notEqual(location('ssh://git@git.example.com:2222/Team/Repo.git'), location('ssh://git@git.example.com/Team/Repo.git'));
+  assert.equal(location('ssh://git@git.example.com:22/Team/Repo.git'), location('ssh://git@git.example.com/Team/Repo.git'));
+  assert.equal(location('git://git.example.com:9418/Team/Repo.git'), location('git://git.example.com/Team/Repo.git'));
+  assert.notEqual(location('git://git.example.com:9419/Team/Repo.git'), location('git://git.example.com/Team/Repo.git'));
   assert.notEqual(location('https://git.example.com/Team/Repo'), location('https://git.example.com/team/repo'));
   assert.notEqual(location('http://catalog.example/marketplace.json'), location('https://catalog.example/marketplace.json'));
   assert.notEqual(location('https://catalog.example/marketplace.json?channel=one'), location('https://catalog.example/marketplace.json?channel=two'));

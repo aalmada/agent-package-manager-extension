@@ -356,6 +356,12 @@ test('local YAML validation checks structures, values and exact ranges without c
   assert.match(yamlHover(parseDocument(hoverText), hoverText.indexOf('resolved_commit'), lock)!.field.description, /Exact resolved Git commit/);
   const valueText = 'name: resolved_commit\nversion: 1.0.0\n';
   assert.equal(yamlHover(parseDocument(valueText), valueText.indexOf('resolved_commit'), manifest), undefined);
+  const nested = 'dependencies:\n  mcp:\n    - name: test\n      x-custom: ignored\n      transport: stdio\n';
+  assert.match(yamlHover(parseDocument(nested), nested.indexOf('transport'), manifest)!.field.description, /transport/i);
+  assert.equal(yamlHover(parseDocument(nested), nested.indexOf('x-custom'), manifest), undefined);
+  const keyContext = yamlCompletion(nested, nested.indexOf('transport') + 3, manifest)!;
+  assert.ok(keyContext.keys?.includes('name'));
+  assert.ok(!keyContext.keys?.includes('transport'));
 });
 
 test('YAML completion replaces whole tokens and preserves colons, quotes and flow collections', () => {

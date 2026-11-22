@@ -6,7 +6,7 @@ import { platform } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { record } from './adapters';
+import { gitPortSuffix, record } from './adapters';
 import type { Marketplace } from './types';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -23,13 +23,18 @@ export async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
+function marketplaceData(text: string, arrayKey: string, error: string): { data: Record<string, unknown>; entries: unknown[] } {
+  const data: unknown = JSON.parse(text);
+  if (!record(data) || !Array.isArray(data[arrayKey])) throw new Error(error);
+  return { data, entries: data[arrayKey] };
+}
+
 /** Reads APM's marketplace registry (current url and legacy owner/repo shapes) without writing it. */
 export async function readMarketplaces(home: string): Promise<Marketplace[]> {
   const text = await readOptional(join(home, '.apm', 'marketplaces.json'));
   if (text === undefined) return [];
-  const data: unknown = JSON.parse(text);
-  if (!record(data) || !Array.isArray(data.marketplaces)) throw new Error('Invalid APM marketplace registry.');
-  return data.marketplaces.map((entry: unknown) => {
+  const { entries } = marketplaceData(text, 'marketplaces', 'Invalid APM marketplace registry.');
+  return entries.map((entry: unknown) => {
     if (!record(entry) || typeof entry.name !== 'string') throw new Error('Invalid marketplace registration.');
     const host = typeof entry.host === 'string' ? entry.host : 'github.com';
     const source = typeof entry.url === 'string' && entry.url ? entry.url :
@@ -46,15 +51,18 @@ export function projectManifestPath(root: string): string { return join(root, pr
 export function readProjectManifest(root: string): Promise<string | undefined> { return readOptional(projectManifestPath(root)); }
 export async function hasProjectManifest(root: string): Promise<boolean> { return await readProjectManifest(root) !== undefined; }
 
+function escapesRoot(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
 export async function resolveContained(root: string, path: string): Promise<string | undefined> {
   const resolvedRoot = await realpath(root), candidate = resolve(resolvedRoot, path);
-  const lexical = relative(resolvedRoot, candidate);
-  if (lexical === '..' || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) throw new Error('Manifest path escapes its marketplace.');
+  if (escapesRoot(resolvedRoot, candidate)) throw new Error('Manifest path escapes its marketplace.');
   let actual: string;
   try { actual = await realpath(candidate); }
   catch (error) { if (record(error) && error.code === 'ENOENT') return undefined; throw error; }
-  const rel = relative(resolvedRoot, actual);
-  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Manifest symlink escapes its marketplace.');
+  if (escapesRoot(resolvedRoot, actual)) throw new Error('Manifest symlink escapes its marketplace.');
   return actual;
 }
 
@@ -75,7 +83,7 @@ export function cacheShard(source: string): string {
   const hostname = url.hostname.toLowerCase();
   let path = url.pathname.replace(/\/+$/, '').replace(/\.git$/, '');
   if (['github.com', 'gitlab.com', 'bitbucket.org'].includes(hostname)) path = path.toLowerCase();
-  const port = url.port && !((url.protocol === 'ssh:' && url.port === '22') || (url.protocol === 'git:' && url.port === '9418')) ? `:${url.port}` : '';
+  const port = gitPortSuffix(url);
   return hash(`${url.protocol}//${url.username ? `${url.username}@` : ''}${hostname}${port}${path}`).slice(0, 16);
 }
 function cacheRoot(home: string): string {
@@ -85,9 +93,7 @@ function cacheRoot(home: string): string {
   return platform() === 'darwin' ? join(home, 'Library', 'Caches', 'apm') : join(home, '.cache', 'apm');
 }
 function parseManifest(text: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(text);
-  if (!record(parsed) || !Array.isArray(parsed.plugins)) throw new Error('Marketplace manifest has no plugins array.');
-  return parsed;
+  return marketplaceData(text, 'plugins', 'Marketplace manifest has no plugins array.').data;
 }
 
 export async function readBareFile(path: string, ref: string, filename: string): Promise<string | undefined> {

@@ -1,4 +1,4 @@
-import { isAlias, isMap, isNode, isScalar, isSeq, parseDocument } from 'yaml';
+import { isAlias, isMap, isNode, isScalar, isSeq, parseDocument, type Scalar } from 'yaml';
 
 type ValueType = 'string' | 'boolean' | 'integer' | 'mapping' | 'sequence';
 interface Field {
@@ -189,6 +189,34 @@ export function yamlIssues(document: ReturnType<typeof parseDocument>, definitio
 }
 
 interface CompletionContext { field: Field; keys?: string[]; start: number; end: number; hasColon?: boolean }
+
+function walkFields<T>(node: unknown, field: Field, visit: {
+  key: (key: Scalar, field: Field, child: Field | undefined, siblingKeys: () => string[]) => T | undefined;
+  value?: (node: unknown, field: Field) => T | undefined;
+}, depth = 0): T | undefined {
+  if (depth > 64) return;
+  if (isMap(node)) {
+    for (const pair of node.items) {
+      if (!isScalar(pair.key) || typeof pair.key.value !== 'string') continue;
+      const child = childField(field, pair.key.value);
+      const result = visit.key(pair.key, field, child, () =>
+        node.items.flatMap(other => other !== pair && isScalar(other.key) ? [String(other.key.value)] : []));
+      if (result !== undefined) return result;
+      if (child) {
+        const nested = walkFields(pair.value, child, visit, depth + 1);
+        if (nested !== undefined) return nested;
+      }
+    }
+  } else if (isSeq(node) && field.items) {
+    for (const item of node.items) {
+      const nested = walkFields(item, field.items, visit, depth + 1);
+      if (nested !== undefined) return nested;
+    }
+  } else {
+    return visit.value?.(node, field);
+  }
+}
+
 export function yamlCompletion(text: string, offset: number, definition: Field): CompletionContext | undefined {
   const scalarRange = (range: readonly number[]) => {
     const start = range[0], end = range[1];
@@ -197,33 +225,20 @@ export function yamlCompletion(text: string, offset: number, definition: Field):
       ? { start: start + 1, end: end > start + 1 && text[end - 1] === quote ? end - 1 : end }
       : { start, end };
   };
-  const existing = (node: unknown, field: Field, depth: number): CompletionContext | undefined => {
-    if (depth > 64) return;
-    if (isMap(node)) {
-      for (const pair of node.items) {
-        if (!isScalar(pair.key) || typeof pair.key.value !== 'string') continue;
-        const keyRange = pair.key.range;
-        if (keyRange && offset >= keyRange[0] && offset <= keyRange[1]) {
-          return {
-            field, keys: node.items.flatMap(other => other !== pair && isScalar(other.key) ? [String(other.key.value)] : []),
-            ...scalarRange(keyRange), hasColon: /^\s*:/.test(text.slice(keyRange[1]))
-          };
-        }
-        const child = childField(field, pair.key.value);
-        const result = child && existing(pair.value, child, depth + 1);
-        if (result) return result;
+  const current = walkFields<CompletionContext>(parseDocument(text).contents, definition, {
+    key: (key, field, _child, siblingKeys) => {
+      const range = key.range;
+      if (range && offset >= range[0] && offset <= range[1]) {
+        return { field, keys: siblingKeys(), ...scalarRange(range), hasColon: /^\s*:/.test(text.slice(range[1])) };
       }
-    } else if (isSeq(node) && field.items) {
-      for (const item of node.items) {
-        const result = existing(item, field.items, depth + 1);
-        if (result) return result;
+    },
+    value: (node, field) => {
+      if (isScalar(node) && node.range && (field.values || field.types?.includes('boolean'))
+        && offset >= node.range[0] && offset <= node.range[1] && node.type !== 'BLOCK_LITERAL' && node.type !== 'BLOCK_FOLDED') {
+        return { field, ...scalarRange(node.range) };
       }
-    } else if (isScalar(node) && node.range && (field.values || field.types?.includes('boolean'))
-      && offset >= node.range[0] && offset <= node.range[1] && node.type !== 'BLOCK_LITERAL' && node.type !== 'BLOCK_FOLDED') {
-      return { field, ...scalarRange(node.range) };
     }
-  };
-  const current = existing(parseDocument(text).contents, definition, 0);
+  });
   if (current) return current;
   const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
   const before = text.slice(lineStart, offset);
@@ -263,24 +278,10 @@ export function yamlCompletion(text: string, offset: number, definition: Field):
 }
 
 export function yamlHover(document: ReturnType<typeof parseDocument>, offset: number, definition: Field): { field: Field; start: number; end: number } | undefined {
-  const find = (node: unknown, field: Field, depth: number): ReturnType<typeof yamlHover> => {
-    if (depth > 64) return;
-    if (isMap(node)) {
-      for (const pair of node.items) {
-        if (!isScalar(pair.key) || typeof pair.key.value !== 'string') continue;
-        const child = childField(field, pair.key.value);
-        if (!child) continue;
-        const range = pair.key.range;
-        if (range && offset >= range[0] && offset < range[1]) return { field: child, start: range[0], end: range[1] };
-        const nested = find(pair.value, child, depth + 1);
-        if (nested) return nested;
-      }
-    } else if (isSeq(node) && field.items) {
-      for (const item of node.items) {
-        const nested = find(item, field.items, depth + 1);
-        if (nested) return nested;
-      }
+  return walkFields(document.contents, definition, {
+    key: (key, _field, child) => {
+      const range = key.range;
+      if (child && range && offset >= range[0] && offset < range[1]) return { field: child, start: range[0], end: range[1] };
     }
-  };
-  return find(document.contents, definition, 0);
+  });
 }

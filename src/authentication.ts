@@ -254,7 +254,10 @@ export class RepositoryAuthentication implements vscode.Disposable {
     const options = { ...init, headers, redirect: 'error' as const, credentials: 'omit' as const, signal };
     const bound = this.bindings().some(binding => repositoryKey(binding.repository) === repositoryKey(repository));
     let candidate = bound ? await this.select(repository, generation, signal, { reuseAccess: true }) : undefined;
-    if (candidate) for (const [name, value] of Object.entries(this.authenticationHeaders(candidate))) headers.set(name, value);
+    const authorize = (selection: Candidate) => {
+      for (const [name, value] of Object.entries(this.authenticationHeaders(selection))) headers.set(name, value);
+    };
+    if (candidate) authorize(candidate);
     const response = await fetch(url.href, options);
     this.check(generation, signal);
     let anonymousLimit: RepositoryRateLimitError | undefined;
@@ -273,7 +276,7 @@ export class RepositoryAuthentication implements vscode.Disposable {
     candidate = await this.select(repository, generation, signal, { reuseAccess: true, anonymousLimit });
     this.check(generation, signal);
     if (!candidate) return response;
-    for (const [name, value] of Object.entries(this.authenticationHeaders(candidate))) headers.set(name, value);
+    authorize(candidate);
     const authenticated = await fetch(url.href, options);
     this.check(generation, signal);
     permission(authenticated, true);

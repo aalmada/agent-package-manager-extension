@@ -20,6 +20,25 @@ export function taskArguments(definition: ApmTaskDefinition): string[] {
   return [...commands[definition.workflow]];
 }
 
+export function trackTaskCompletion(onComplete: (exitCode: number | undefined) => void): vscode.Disposable & { setExecution(execution: vscode.TaskExecution): void } {
+  let execution: vscode.TaskExecution | undefined;
+  const pending: [vscode.TaskExecution, number | undefined][] = [];
+  const finish = (candidate: vscode.TaskExecution, code: number | undefined) => {
+    if (!execution) { pending.push([candidate, code]); return; }
+    if (candidate === execution) onComplete(code);
+  };
+  const process = vscode.tasks.onDidEndTaskProcess(event => finish(event.execution, event.exitCode));
+  const end = vscode.tasks.onDidEndTask(event => finish(event.execution, undefined));
+  return {
+    setExecution: value => {
+      execution = value;
+      for (const [candidate, code] of pending) finish(candidate, code);
+      pending.length = 0;
+    },
+    dispose: () => { process.dispose(); end.dispose(); }
+  };
+}
+
 export function registerApmTaskProvider(report: (message: string) => void,
   serialize: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation(),
   environment: (args: readonly string[], cwd: string, signal?: AbortSignal) => Promise<Record<string, string>> = githubEnvironment): vscode.Disposable {
@@ -32,21 +51,17 @@ export function registerApmTaskProvider(report: (message: string) => void,
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, focus: true, panel: vscode.TaskPanelKind.Dedicated };
     return new Promise<number>((resolve, reject) => {
       let execution: vscode.TaskExecution | undefined, settled = false;
-      const pending: [vscode.TaskExecution, number | undefined][] = [];
-      const cleanup = () => { process.dispose(); end.dispose(); signal.removeEventListener('abort', stop); };
-      const finish = (candidate: vscode.TaskExecution, code: number | undefined) => {
-        if (!execution) { pending.push([candidate, code]); return; }
-        if (candidate !== execution || settled) return;
+      const cleanup = () => { tracker.dispose(); signal.removeEventListener('abort', stop); };
+      const tracker = trackTaskCompletion(code => {
+        if (settled) return;
         settled = true; cleanup(); resolve(signal.aborted ? 130 : code ?? 1);
-      };
-      const process = vscode.tasks.onDidEndTaskProcess(event => finish(event.execution, event.exitCode));
-      const end = vscode.tasks.onDidEndTask(event => finish(event.execution, undefined));
+      });
       const stop = () => execution?.terminate();
       signal.addEventListener('abort', stop, { once: true });
       void vscode.tasks.executeTask(task).then(result => {
         execution = result;
         if (signal.aborted) execution.terminate();
-        for (const [candidate, code] of pending) finish(candidate, code);
+        tracker.setExecution(execution);
       }, error => { cleanup(); reject(error); });
     });
   };

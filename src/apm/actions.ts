@@ -1,5 +1,5 @@
 import type { Marketplace, PackageItem } from './types';
-import { record } from './adapters';
+import { record, stringFields } from './adapters';
 
 export const packageActions = ['install', 'installWithOptions', 'uninstall', 'update', 'audit', 'previewInstall', 'previewUpdate', 'previewWithOptions', 'applyPreview'] as const;
 export type PackageAction = typeof packageActions[number];
@@ -125,13 +125,11 @@ export function parseAudit(text: string): AuditReport | undefined {
     severity: String(finding.severity ?? finding.level ?? 'info'),
     file: String(finding.file ?? finding.path ?? finding.location ?? ''),
     message: String(finding.message ?? finding.description ?? finding.rule ?? finding.type ?? 'Finding'),
-    ...(typeof finding.category === 'string' ? { category: finding.category } : {}),
-    ...(typeof finding.remediation === 'string' ? { remediation: finding.remediation } : {}),
+    ...stringFields(finding, ['category', 'remediation', 'pointer']),
     ...(typeof finding.line === 'number' ? { line: finding.line } : {}),
     ...(typeof finding.column === 'number' ? { column: finding.column } : {}),
     ...(typeof finding.decoded_line === 'number' ? { decodedLine: finding.decoded_line } : {}),
-    ...(typeof finding.decoded_column === 'number' ? { decodedColumn: finding.decoded_column } : {}),
-    ...(typeof finding.pointer === 'string' ? { pointer: finding.pointer } : {})
+    ...(typeof finding.decoded_column === 'number' ? { decodedColumn: finding.decoded_column } : {})
   }));
   let coverage: AuditReport['coverage'];
   if (value.coverage !== undefined) {
@@ -144,10 +142,7 @@ export function parseAudit(text: string): AuditReport | undefined {
       }
       return {
         file: entry.file, status: entry.status,
-        ...(typeof entry.target === 'string' ? { target: entry.target } : {}),
-        ...(typeof entry.kind === 'string' ? { kind: entry.kind } : {}),
-        ...(typeof entry.pointer === 'string' ? { pointer: entry.pointer } : {}),
-        ...(typeof entry.diagnostic === 'string' ? { diagnostic: entry.diagnostic } : {}),
+        ...stringFields(entry, ['target', 'kind', 'pointer', 'diagnostic']),
         ...(typeof entry.tracked === 'boolean' ? { tracked: entry.tracked } : {}),
         ...(typeof entry.strippable === 'boolean' ? { strippable: entry.strippable } : {})
       };

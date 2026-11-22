@@ -10,6 +10,16 @@ import type { Scope } from './apm/types';
 export interface NavigationTarget { root: string; path: string; line?: number; column?: number; uri?: vscode.Uri }
 export interface AuditTicket { key: string; generation: number; run: number }
 
+export function registerResultProvider(scheme: string, documents: Map<string, string>, expiredMessage: string): vscode.Disposable {
+  return vscode.workspace.registerTextDocumentContentProvider(scheme, {
+    provideTextDocumentContent: uri => {
+      const content = documents.get(uri.toString());
+      if (content === undefined) throw new Error(expiredMessage);
+      return content;
+    }
+  });
+}
+
 export async function contentNavigation(root: string, groups: ContentGroup[], installed: boolean, deployed = false): Promise<Map<string, NavigationTarget>> {
   const targets = new Map<string, NavigationTarget>();
   for (const group of groups) for (const item of group.items) {
@@ -52,13 +62,7 @@ export class AuditDiagnostics implements vscode.Disposable {
   private readonly sourceFiles = new Map<string, Set<string>>();
   private readonly watchers = new Map<string, vscode.FileSystemWatcher[]>();
   private generation = 0;
-  private readonly provider = vscode.workspace.registerTextDocumentContentProvider('apm-decoded', {
-    provideTextDocumentContent: uri => {
-      const content = this.decoded.get(uri.toString());
-      if (content === undefined) throw new Error('This decoded audit result has expired. Run the audit again.');
-      return content;
-    }
-  });
+  private readonly provider = registerResultProvider('apm-decoded', this.decoded, 'This decoded audit result has expired. Run the audit again.');
   private readonly actions = vscode.languages.registerCodeActionsProvider([{ scheme: 'file' }, { scheme: 'apm-decoded' }], {
     provideCodeActions: (_document, _range, context) => context.diagnostics.filter(d => d.source === 'APM').flatMap(diagnostic => {
       const show = new vscode.CodeAction('APM: Show audit output', vscode.CodeActionKind.QuickFix);
@@ -97,13 +101,17 @@ export class AuditDiagnostics implements vscode.Disposable {
     const decoded = new Map<string, string>();
     const sources = new Set<string>();
     const sourceUris = new Set<string>();
+    const trackSource = (actual: string, path: string) => {
+      sources.add(actual);
+      sourceUris.add(vscode.Uri.file(actual).toString());
+      sourceUris.add(vscode.Uri.file(join(scope.path, path)).toString());
+    };
     for (const finding of report.findings) {
       const actual = await resolveContained(scope.path, finding.file);
       if (!actual) continue;
       const text = await readContained(scope.path, finding.file);
       if (text === undefined) continue;
-      sources.add(actual);
-      sourceUris.add(vscode.Uri.file(actual).toString()); sourceUris.add(vscode.Uri.file(join(scope.path, finding.file)).toString());
+      trackSource(actual, finding.file);
       let uri = vscode.Uri.file(actual), content = text, line = finding.line, column = finding.column;
       if (finding.pointer) {
         const parts = finding.pointer.replace(/^#/, '').split('/').slice(1).map(part => part.replace(/~1/g, '/').replace(/~0/g, '~'));
@@ -132,8 +140,7 @@ export class AuditDiagnostics implements vscode.Disposable {
     for (const primitive of report.coverage?.primitives.filter(value => value.status === 'incomplete') ?? []) {
       const actual = await resolveContained(scope.path, primitive.file);
       if (!actual) continue;
-      sources.add(actual);
-      sourceUris.add(vscode.Uri.file(actual).toString()); sourceUris.add(vscode.Uri.file(join(scope.path, primitive.file)).toString());
+      trackSource(actual, primitive.file);
       const uri = vscode.Uri.file(actual), entry = entries.get(uri.toString()) ?? { uri, diagnostics: [] };
       const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 0),
         `Incomplete APM scan coverage: ${primitive.diagnostic ?? primitive.status}. This is not a clean audit.`, vscode.DiagnosticSeverity.Warning);

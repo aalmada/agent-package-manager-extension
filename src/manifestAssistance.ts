@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { basename } from 'node:path';
-import { isMap, isScalar, isSeq, parseDocument, stringify } from 'yaml';
+import { isMap, isNode, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 import { descriptors } from './apm/commands';
 import { containsUrlCredentials } from './apm/redact';
 import { parseTargets } from './apm/actions';
@@ -18,6 +18,12 @@ function targetOptions(): string[] {
   const documented = parseTargets(`--target ${option?.description ?? ''}`);
   return option?.choices ?? (documented.length ? documented : packageManifest.contributes.configuration.flatMap(group => group.properties['apm.config.target']?.items.enum ?? []));
 }
+function manifestTargets(yaml: ReturnType<typeof parseDocument>) {
+  if (!isMap(yaml.contents)) return;
+  const target = yaml.contents.items.find(pair => isScalar(pair.key) && pair.key.value === 'targets');
+  if (!target || !isScalar(target.key) || !target.key.range || !isSeq(target.value)) return;
+  return { key: target.key, value: target.value };
+}
 export function registerManifestAssistance(callbacks: { details(dependency: string, uri: vscode.Uri): Promise<void> }): vscode.Disposable {
   const selector: vscode.DocumentSelector = { scheme: 'file', language: 'yaml', pattern: '**/apm.yml' };
   const yamlSelector: vscode.DocumentSelector = [
@@ -29,6 +35,11 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
     && ['apm.yml', 'apm.lock.yaml'].includes(basename(document.uri.fsPath)) && document.getText().length <= 1024 * 1024;
   const safe = (document: vscode.TextDocument) => safeYaml(document) && basename(document.uri.fsPath) === 'apm.yml';
   const definition = (document: vscode.TextDocument) => yamlDefinition(basename(document.uri.fsPath) === 'apm.lock.yaml', targetOptions());
+  const validManifest = (document: vscode.TextDocument) => {
+    if (!safe(document)) return;
+    const { document: yaml, errors } = manifestContext(document.getText());
+    return errors.length ? undefined : yaml;
+  };
   registrations.push(vscode.languages.registerCompletionItemProvider(yamlSelector, {
     provideCompletionItems(document, position) {
       if (!safeYaml(document)) return [];
@@ -84,11 +95,10 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
   }));
   registrations.push(vscode.languages.registerCodeLensProvider(selector, {
     provideCodeLenses(document) {
-      if (!safe(document)) return [];
-      const { document: yaml, errors } = manifestContext(document.getText());
-      if (errors.length || !isMap(yaml.contents)) return [];
-      const target = yaml.contents.items.find(pair => isScalar(pair.key) && pair.key.value === 'targets');
-      if (!target || !isScalar(target.key) || !target.key.range || !isSeq(target.value)) return [];
+      const yaml = validManifest(document);
+      if (!yaml) return [];
+      const target = manifestTargets(yaml);
+      if (!target?.key.range) return [];
       const selectedCount = target.value.items.filter(item => isScalar(item) && typeof item.value === 'string').length;
       const position = document.positionAt(target.key.range[0]);
       const lens = new vscode.CodeLens(new vscode.Range(position.line, position.character, position.line, position.character));
@@ -106,8 +116,8 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
     if (!safe(document)) throw new Error('Target selection requires a trusted workspace apm.yml file.');
     const { document: yaml, errors } = manifestContext(document.getText());
     if (errors.length || !isMap(yaml.contents)) throw new Error('Cannot select targets from an invalid apm.yml file.');
-    const target = yaml.contents.items.find(pair => isScalar(pair.key) && pair.key.value === 'targets');
-    if (!target || !isScalar(target.key) || !target.key.range || !isSeq(target.value) || !target.value.range) {
+    const target = manifestTargets(yaml);
+    if (!target?.key.range || !target.value.range) {
       throw new Error('The apm.yml targets array is no longer available.');
     }
     const current = target.value.items.flatMap(item => isScalar(item) && typeof item.value === 'string' ? [item.value] : []);
@@ -127,7 +137,7 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
     const line = document.lineAt(keyPosition.line);
     const fieldIndent = line.text.slice(0, keyPosition.character);
     const firstItem = target.value.items[0];
-    const itemIndent = firstItem?.range
+    const itemIndent = isNode(firstItem) && firstItem.range
       ? document.lineAt(document.positionAt(firstItem.range[0]).line).text.match(/^\s*/)?.[0] ?? `${fieldIndent}  `
       : `${fieldIndent}  `;
     const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
@@ -144,9 +154,8 @@ export function registerManifestAssistance(callbacks: { details(dependency: stri
   }));
   registrations.push(vscode.languages.registerDocumentLinkProvider(selector, {
     provideDocumentLinks(document) {
-      if (!safe(document)) return [];
-      const { document: yaml, errors } = manifestContext(document.getText());
-      if (errors.length) return [];
+      const yaml = validManifest(document);
+      if (!yaml) return [];
       const links: vscode.DocumentLink[] = [];
       for (const block of ['dependencies', 'devDependencies']) {
         const sequence = yaml.getIn([block, 'apm'], true);

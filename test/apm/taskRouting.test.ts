@@ -58,6 +58,7 @@ interface Harness {
   installMcpServer(): Promise<void>;
   lifecycleWorkflows(): Promise<void>;
   dependencyReports(): Promise<void>;
+  explainDependency(target?: unknown, scope?: Scope): Promise<void>;
   moreActions(): Promise<void>;
   openPackageBrowser(): Promise<void>;
   resolvePackageBrowser(panel: object): void;
@@ -629,6 +630,19 @@ test('task lifecycle handles startup failure, quick exits, external termination 
   assert.match(fast.panel.extra.result ?? '', /exit code 0/);
   assert.equal(fast.counts().refreshes, 1);
 
+  const concurrent = harness();
+  const second: Panel = { mode: 'native', extra: {} };
+  await concurrent.run('compile', { '--watch': true });
+  await concurrent.extension.runCommand({ type: 'command', id: 'compile', args: {}, options: { '--watch': true } }, second);
+  concurrent.finish(concurrent.executions[0], 0);
+  assert.equal(concurrent.panel.extra.taskRunning, false);
+  assert.equal(second.extra.taskRunning, true);
+  assert.equal(concurrent.counts().processListeners, 1);
+  concurrent.finish(concurrent.executions[1], 1);
+  assert.equal(second.extra.taskRunning, false);
+  assert.match(second.extra.error ?? '', /did not complete successfully/);
+  assert.equal(concurrent.counts().processListeners + concurrent.counts().endListeners, 0);
+
   const terminated = harness();
   await terminated.run('compile', { '--watch': true });
   terminated.finish(terminated.executions[0]);
@@ -1088,6 +1102,26 @@ test('dependency tree and why reports stay in the selected package scope', async
   assert.deepEqual(Array.from(host.argv[1]), ['deps', 'why', '--global', 'owner/package', '--json']);
   assert.match(host.previews[1].content, /"parents": \[\]/);
   assert.equal(host.executionScopes[1]?.kind, 'global');
+});
+
+test('dependency explanation selects an installed package or stops on cancellation', async () => {
+  const installed: PackageItem = {
+    id: 'installed::owner/package', name: 'package', marketplace: '', version: '1.2.0',
+    installed: true, metadata: { cliIdentity: 'owner/package' }
+  };
+  const host = harness({
+    installed: [installed], picks: [0],
+    output: () => ({ stdout: '{"parents":[]}', stderr: '', exitCode: 0 })
+  });
+  await host.extension.explainDependency();
+  assert.deepEqual(Array.from(host.argv[0]), ['deps', 'why', 'owner/package', '--json']);
+  assert.deepEqual(host.choices[0].labels, ['package']);
+
+  const cancelled = harness({ installed: [installed] });
+  await cancelled.extension.explainDependency();
+  assert.equal(cancelled.argv.length, 0);
+
+  await assert.rejects(harness().extension.explainDependency(), /No installed dependencies are available in project/);
 });
 
 test('the package browser loads dependency trees in place per scope and reuses the report as text', async () => {

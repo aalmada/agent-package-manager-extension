@@ -12,6 +12,9 @@ test('versioned cache identities match upstream URL normalization without auth m
   assert.equal(cacheShard('git@gitea.example:Team/Repo.git'), hash('ssh://git@gitea.example/Team/Repo'));
   assert.equal(cacheShard('https://user:password@gitlab.com:443/Team/Repo.git'), hash('https://user@gitlab.com/team/repo'));
   assert.notEqual(cacheShard('https://gitea.example/Team/Repo'), cacheShard('https://gitea.example/team/repo'));
+  assert.equal(cacheShard('ssh://git@gitea.example:22/Team/Repo'), cacheShard('ssh://git@gitea.example/Team/Repo'));
+  assert.equal(cacheShard('git://gitea.example:9418/Team/Repo'), cacheShard('git://gitea.example/Team/Repo'));
+  assert.notEqual(cacheShard('git://gitea.example:9419/Team/Repo'), cacheShard('git://gitea.example/Team/Repo'));
 });
 test('local manifest adapters retain unknown fields and reject escapes and oversized metadata', async () => {
   const home = await mkdtemp(join(tmpdir(), 'apm-manifest-test-'));

@@ -5,10 +5,10 @@ import { parseDocument } from 'yaml';
 import { ApmClient } from './apm/client';
 import { record, type VariablePrompt } from './apm/adapters';
 import { descriptors, buildCommandArguments, requiresTerminal } from './apm/commands';
-import type { Marketplace, PackageItem, Probe, Scope } from './apm/types';
+import type { ExecutionResult, Marketplace, PackageItem, Probe, Scope } from './apm/types';
 import type { DependencyTreeView, Message, Mode, PackageSection, State } from './protocol';
 import { inScope, isSameScope, parseMessage, scopeKey, scopeLabel } from './protocol';
-import { SettingsSync } from './config/sync';
+import { marketplaceSetting, SettingsSync } from './config/sync';
 import { webviewHtml } from './views/html';
 import { filterTokens, withStatus, withToken, type Ordering } from './webview/filter';
 import { renderMarkdown } from './views/markdown';
@@ -17,9 +17,9 @@ import { detectInstallation, selfUpdateCommand, type InstallMethod } from './apm
 import { packageIdentity, packageUpdateCommand, parseAudit, parseTargets, parseVersions, tail, verifyPackageUpdate, versionSource, withRef, type ActionResult, type PackageAction } from './apm/actions';
 import { applyCatalogVersions, applyUpdateRows, findInstalledPackage, getUpdateBadge, reconcileDetailContexts, retainUpdateResults, withCatalogInfo, withInstallations } from './apm/packageState';
 import { resolvedTargets, workflowCommands, recoveryActions, type Workflow, type CommandRequest } from './apm/workflows';
-import { AuditDiagnostics, contentNavigation, openNavigation, type NavigationTarget, type AuditTicket } from './navigation';
+import { AuditDiagnostics, contentNavigation, openNavigation, registerResultProvider, type NavigationTarget, type AuditTicket } from './navigation';
 import { registerManifestAssistance } from './manifestAssistance';
-import { registerApmTaskProvider } from './taskProvider';
+import { registerApmTaskProvider, trackTaskCompletion } from './taskProvider';
 import type { ContentGroup } from './apm/contents';
 import { hasProjectManifest, projectManifestPath, readProjectManifest, resolveContained } from './apm/manifest';
 import { RepositoryAccessError, RepositoryAuthentication, signInToGithub, type AccessPass } from './authentication';
@@ -55,6 +55,9 @@ interface PanelContext {
 const remoteRefreshInterval = 5 * 60_000;
 const packageBrowserViewType = 'apm.packageBrowser';
 const packageBrowserUri = () => vscode.Uri.from({ scheme: 'apm-browser', path: '/Agent Package Manager' });
+function inspectionOutput(result: ExecutionResult): string {
+  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+}
 // VS Code's internal MODAL_GROUP; `vscode.openWith` maps every public ViewColumn to a main editor group.
 const modalEditorGroup = -4;
 function supportsModalEditors() {
@@ -98,10 +101,7 @@ class ApmExtension implements vscode.Disposable {
   };
   constructor(private readonly context: vscode.ExtensionContext) {
     this.authentication = new RepositoryAuthentication(context, async () => {
-      const settings = vscode.workspace.getConfiguration('apm').get<unknown>('marketplaces', []);
-      if (!Array.isArray(settings) || !settings.every(entry => typeof entry === 'string')) {
-        throw new Error('APM Marketplaces must be a list of strings.');
-      }
+      const settings = marketplaceSetting();
       const folders = (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === 'file');
       return { settings, registered: await this.client(this.globalScope()).getMarketplaces(),
         workspaceRoot: folders.length === 1 ? folders[0].uri.fsPath : undefined };
@@ -115,13 +115,8 @@ class ApmExtension implements vscode.Disposable {
       message => this.report(new Error(message)), operation => this.serialize('apm-mutations', operation)
     );
     this.subscriptions.push(this.output, this.diagnostics);
-    this.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('apm-result', {
-      provideTextDocumentContent: uri => {
-        const content = this.results.get(uri.toString());
-        if (content === undefined) throw new Error('This APM result has expired. Run the action again.');
-        return content;
-      }
-    }), vscode.workspace.onDidCloseTextDocument(document => {
+    this.subscriptions.push(registerResultProvider('apm-result', this.results, 'This APM result has expired. Run the action again.'),
+      vscode.workspace.onDidCloseTextDocument(document => {
       if (document.uri.scheme === 'apm-result') this.results.delete(document.uri.toString());
     }));
     this.subscriptions.push(registerManifestAssistance({
@@ -151,20 +146,20 @@ class ApmExtension implements vscode.Disposable {
       } else if (event.affectsConfiguration('apm.config')) void this.settingsSync.sync();
     }));
     for (const pattern of ['**/apm.yml', '**/apm.lock.yaml', '**/apm.lock']) {
-      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-      this.subscriptions.push(watcher, watcher.onDidChange(() => this.scheduleRefresh()), watcher.onDidCreate(() => this.scheduleRefresh()), watcher.onDidDelete(() => this.scheduleRefresh()));
+      this.watchFiles(pattern, () => this.scheduleRefresh());
     }
-    const globalPackages = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), '{apm.yml,apm.lock.yaml,apm.lock}'));
-    this.subscriptions.push(globalPackages, globalPackages.onDidChange(() => this.scheduleRefresh()),
-      globalPackages.onDidCreate(() => this.scheduleRefresh()), globalPackages.onDidDelete(() => this.scheduleRefresh()));
-    const registry = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), 'marketplaces.json'));
+    const apmHome = vscode.Uri.file(join(homedir(), '.apm'));
+    this.watchFiles(new vscode.RelativePattern(apmHome, '{apm.yml,apm.lock.yaml,apm.lock}'), () => this.scheduleRefresh());
     const syncRegistry = () => { void this.settingsSync.sync().then(() => this.scheduleRefresh()); };
-    this.subscriptions.push(registry, registry.onDidChange(syncRegistry), registry.onDidCreate(syncRegistry), registry.onDidDelete(syncRegistry));
-    const cliConfig = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(homedir(), '.apm')), 'config.json'));
+    this.watchFiles(new vscode.RelativePattern(apmHome, 'marketplaces.json'), syncRegistry);
     const syncConfig = () => void this.settingsSync.sync();
-    this.subscriptions.push(cliConfig, cliConfig.onDidChange(syncConfig), cliConfig.onDidCreate(syncConfig), cliConfig.onDidDelete(syncConfig));
+    this.watchFiles(new vscode.RelativePattern(apmHome, 'config.json'), syncConfig);
     void this.settingsSync.sync();
     this.updateFilterContext();
+  }
+  private watchFiles(pattern: vscode.GlobPattern, callback: () => void) {
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    this.subscriptions.push(watcher, watcher.onDidChange(callback), watcher.onDidCreate(callback), watcher.onDidDelete(callback));
   }
   dispose() {
     this.operation?.abort();
@@ -264,10 +259,13 @@ class ApmExtension implements vscode.Disposable {
     panel.onDidDispose(() => this.forgetPanel(key, context));
   }
   private forgetPanel(key: string, context: PanelContext) {
+    this.invalidateDetails(context);
+    this.panels.delete(key);
+  }
+  private invalidateDetails(context: PanelContext) {
     context.pageGeneration = (context.pageGeneration ?? 0) + 1;
     context.detailsRequest = (context.detailsRequest ?? 0) + 1;
     context.detailsController?.abort();
-    this.panels.delete(key);
   }
   private attach(webview: vscode.Webview, mode: Mode, panel?: vscode.WebviewPanel): PanelContext {
     const context: PanelContext = { webview, mode, panel, extra: {} };
@@ -331,9 +329,9 @@ class ApmExtension implements vscode.Disposable {
     const repository = context?.authenticationRepository ?? (source ? repositoryFromPackageSource(source, this.authentication.hosts()) : undefined);
     const scope = context?.scope;
     void vscode.window.showErrorMessage(message, ...labels).then(choice => {
+      const workflow = choice === 'Run Doctor' ? 'doctor' : choice === 'Explain Policy' ? 'policy' : undefined;
       if (choice === 'Show APM Output') this.output.show();
-      else if (choice === 'Run Doctor') void this.workflow('doctor', undefined, scope).catch(error => this.report(error, context));
-      else if (choice === 'Explain Policy') void this.workflow('policy', undefined, scope).catch(error => this.report(error, context));
+      else if (workflow) void this.workflow(workflow, undefined, scope).catch(error => this.report(error, context));
       else if (choice === 'Show Targets') void this.showTargets(context).catch(error => this.report(error, context));
       else if (choice === 'Authentication Help') void vscode.env.openExternal(vscode.Uri.parse('https://microsoft.github.io/apm/getting-started/authentication/'));
       else if (choice === 'Sign in to GitHub') void this.signIn().catch(error => this.report(error, context));
@@ -607,6 +605,17 @@ class ApmExtension implements vscode.Disposable {
       { title: 'Choose APM project', placeHolder: 'Select the project for this action' });
     return picked?.scope;
   }
+  private async chooseInstalledPackage(scope: Scope, title: string, placeHolder: string, emptyMessage: string, detail?: string) {
+    const installed = await this.client(scope).getInstalled(scope);
+    if (!installed.length) throw new Error(emptyMessage);
+    const picked = await vscode.window.showQuickPick(installed.map(item => ({
+      label: item.name, description: item.version, ...(detail !== undefined ? { detail } : {}), item
+    })), { title, placeHolder });
+    return picked?.item;
+  }
+  private chooseScopedAction<T extends vscode.QuickPickItem>(items: T[], scope: Scope, title: string, placeHolder: string) {
+    return vscode.window.showQuickPick(items, { title: `${title} — ${scope.label}`, placeHolder });
+  }
   async workflow(workflow: Workflow, uri?: vscode.Uri, capturedScope?: Scope) {
     const scope = await this.workflowScope(uri, capturedScope, workflow !== 'previewInstall' && workflow !== 'doctor' && workflow !== 'policy');
     if (!scope) return;
@@ -615,12 +624,10 @@ class ApmExtension implements vscode.Disposable {
     const command = workflowCommands[workflow];
     const args: Record<string, string> = {}, options: Record<string, unknown> = { ...command.options };
     if (workflow === 'policy') {
-      const installed = await this.client(scope).getInstalled(scope);
-      if (!installed.length) throw new Error('Install a package before inspecting its policy.');
-      const picked = await vscode.window.showQuickPick(installed.map(item => ({ label: item.name, description: item.version, item })),
-        { title: `Explain package policy — ${scope.label}`, placeHolder: 'Select an installed dependency' });
-      if (!picked) return;
-      const packageName = this.checkedInstalledIdentity(picked.item);
+      const item = await this.chooseInstalledPackage(scope, `Explain package policy — ${scope.label}`,
+        'Select an installed dependency', 'Install a package before inspecting its policy.');
+      if (!item) return;
+      const packageName = this.checkedInstalledIdentity(item);
       await this.showPolicyReport(scope, `Executable trust policy: ${packageName}`, ['policy', 'explain', packageName]);
       return;
     }
@@ -690,10 +697,7 @@ class ApmExtension implements vscode.Disposable {
       { label: 'Pending executable approvals', description: 'Packages with unapproved executable primitives', title: 'Pending executable approvals', args: ['approve', '--pending'] },
       { label: 'Effective trust decisions', description: 'Current executable allow and deny decisions', title: 'Effective executable trust decisions', args: ['approve', '--list'] }
     ];
-    const picked = await vscode.window.showQuickPick(reports, {
-      title: `Review executable trust — ${scope.label}`,
-      placeHolder: 'Choose a read-only policy report'
-    });
+    const picked = await this.chooseScopedAction(reports, scope, 'Review executable trust', 'Choose a read-only policy report');
     if (!picked) return;
     await this.showPolicyReport(scope, picked.title, picked.args, picked.json);
   }
@@ -709,10 +713,7 @@ class ApmExtension implements vscode.Disposable {
       { label: 'Validate a registered marketplace', description: 'Check marketplace structure and plugin schema', title: 'Marketplace validation', args: ['marketplace', 'validate'], marketplaceCommand: 'validate' as const },
       { label: 'Audit marketplace dependencies (may fetch refs)', description: 'Check whether plugin dependencies resolve through the marketplace', title: 'Marketplace dependency audit', args: ['marketplace', 'audit'], marketplaceCommand: 'audit' as const }
     ];
-    const picked = await vscode.window.showQuickPick(reports, {
-      title: `Marketplace health — ${scope.label}`,
-      placeHolder: 'Choose a read-only check; network actions are labeled'
-    });
+    const picked = await this.chooseScopedAction(reports, scope, 'Marketplace health', 'Choose a read-only check; network actions are labeled');
     if (!picked) return;
     const args = [...picked.args];
     let title = `${picked.title} — ${scope.label}`;
@@ -737,10 +738,7 @@ class ApmExtension implements vscode.Disposable {
       { label: 'Search MCP servers (registry/network)', description: 'Search by keyword or phrase', command: 'search', title: 'MCP registry search' },
       { label: 'Show MCP server details (registry/network)', description: 'Look up an exact registry name', command: 'show', title: 'MCP server details' }
     ];
-    const action = await vscode.window.showQuickPick(actions, {
-      title: `Discover MCP servers — ${scope.label}`,
-      placeHolder: 'Choose an explicit registry query'
-    });
+    const action = await this.chooseScopedAction(actions, scope, 'Discover MCP servers', 'Choose an explicit registry query');
     if (!action) return;
     const args = ['mcp', action.command];
     let title = `${action.title} — ${scope.label}`;
@@ -783,10 +781,7 @@ class ApmExtension implements vscode.Disposable {
       { label: 'Add starter lifecycle block', description: 'Add an example lifecycle block to apm.yml', actionType: 'command', id: 'lifecycle init', options: {}, title: 'Add starter lifecycle block' },
       { label: 'Replace lifecycle block (overwrite)', description: 'Overwrite the existing lifecycle definition in apm.yml', actionType: 'command', id: 'lifecycle init', options: { '--force': true }, title: 'Replace lifecycle block' }
     ];
-    const action = await vscode.window.showQuickPick(actions, {
-      title: `Lifecycle workflows — ${scope.label}`,
-      placeHolder: 'Choose an explicit inspection, test, or trust action'
-    });
+    const action = await this.chooseScopedAction(actions, scope, 'Lifecycle workflows', 'Choose an explicit inspection, test, or trust action');
     if (!action) return;
     if (action.actionType === 'report') {
       await this.showLifecycleReport(scope, `${action.title} — ${scope.label}`, action.args);
@@ -801,12 +796,12 @@ class ApmExtension implements vscode.Disposable {
       if (!event) return;
       const args = { event: event.label };
       const title = `${action.execute ? 'Executed' : 'Dry-run'} lifecycle event: ${event.label} — ${scope.label}`;
-      if (action.execute) await this.runLifecycleCommand(scope, 'lifecycle test', args, { '--execute': true }, title);
+      if (action.execute) await this.runNativeReportCommand(scope, 'lifecycle test', args, { '--execute': true }, title);
       else await this.showLifecycleReport(scope, title, ['lifecycle', 'test', event.label]);
       return;
     }
     if (!await hasProjectManifest(scope.path)) throw new Error(`Initialize an APM project in ${scope.label} before changing its lifecycle configuration.`);
-    await this.runLifecycleCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
+    await this.runNativeReportCommand(scope, action.id, {}, action.options, `${action.title} — ${scope.label}`);
   }
   async moreActions() {
     const actions = [
@@ -836,21 +831,10 @@ class ApmExtension implements vscode.Disposable {
       { label: 'View SBOM in editor', description: 'Generate CycloneDX or SPDX output without writing a file', actionType: 'view' },
       { label: 'Save SBOM to file...', description: 'Write a CycloneDX or SPDX file to a location you choose', actionType: 'save' }
     ];
-    const action = await vscode.window.showQuickPick(actions, {
-      title: `Dependency reports — ${scope.label}`,
-      placeHolder: 'Choose a report; outdated checks may use the network'
-    });
+    const action = await this.chooseScopedAction(actions, scope, 'Dependency reports', 'Choose a report; outdated checks may use the network');
     if (!action) return;
     if (action.actionType === 'outdated') {
-      const context: PanelContext = { mode: 'native', scope, extra: {} };
-      this.nativeOperations.add(context);
-      try { await this.runCommand({ type: 'command', id: 'outdated', args: {}, options: {} }, context); }
-      finally { this.nativeOperations.delete(context); }
-      if (!context.extra.result) return;
-      const title = `Outdated dependencies — ${scope.label}`;
-      await this.showTextResult(title, context.extra.result);
-      if (context.extra.error) throw new Error(context.extra.error);
-      void vscode.window.showInformationMessage(`${title} completed. Review the result document for details.`);
+      await this.runNativeReportCommand(scope, 'outdated', {}, {}, `Outdated dependencies — ${scope.label}`);
       return;
     }
     const formats = [
@@ -862,8 +846,8 @@ class ApmExtension implements vscode.Disposable {
       placeHolder: 'Select a supported APM lock export format'
     });
     if (!format) return;
+    const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value];
     if (action.actionType === 'view') {
-      const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value];
       await this.showDependencyReport(scope, `${format.label} SBOM — ${scope.label}`, args);
       return;
     }
@@ -880,10 +864,9 @@ class ApmExtension implements vscode.Disposable {
       `Write the ${format.value} SBOM from ${scope.label} to ${outputPath}? Host: ${this.hostLabel()}. APM reads the selected lockfile and writes only this report file.`,
       'Write SBOM');
     if (confirmation !== 'Write SBOM') return;
-    const args = ['lock', 'export', ...(scope.kind === 'global' ? ['--global'] : []), '--format', format.value, '--output', outputPath];
-    const result = await this.serialize('apm-mutations', () => this.executeInspection(scope, title, args));
+    const result = await this.serialize('apm-mutations', () => this.executeInspection(scope, title, [...args, '--output', outputPath]));
     if (!result) return;
-    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    const output = inspectionOutput(result);
     if (result.exitCode === 0 && !output) throw new Error('APM returned no confirmation for the SBOM file. Review APM Output.');
     await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
     if (result.exitCode !== 0) {
@@ -908,7 +891,7 @@ class ApmExtension implements vscode.Disposable {
   }) {
     const result = await this.executeInspection(scope, title, args);
     if (!result) return;
-    const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+    const output = inspectionOutput(result);
     if (result.exitCode === 0 && !output) throw new Error(options.emptyMessage);
     if (result.exitCode === 0) options.validate?.(result.stdout);
     await this.showTextResult(title, `Exit code: ${result.exitCode}\n\n${output || 'APM exited without returning report text.'}`);
@@ -923,7 +906,7 @@ class ApmExtension implements vscode.Disposable {
       emptyMessage: 'APM returned an empty lifecycle report. Review APM Output.'
     });
   }
-  private async runLifecycleCommand(scope: Scope, id: string, args: Record<string, string>, options: Record<string, unknown>, title: string) {
+  private async runNativeReportCommand(scope: Scope, id: string, args: Record<string, string>, options: Record<string, unknown>, title: string) {
     const context: PanelContext = { mode: 'native', scope, extra: {} };
     this.nativeOperations.add(context);
     try { await this.runCommand({ type: 'command', id, args, options }, context); }
@@ -943,16 +926,10 @@ class ApmExtension implements vscode.Disposable {
     })), { title: 'Choose package scope', placeHolder: 'Select where the package is installed' });
     if (!selectedScope) return;
     const scope = { ...selectedScope.scope };
-    const installed = await this.client(scope).getInstalled(scope);
-    if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
-    const picked = await vscode.window.showQuickPick(installed.map(item => ({
-      label: item.name,
-      description: item.version,
-      detail: scope.label,
-      item
-    })), { title: `Choose package — ${scope.label}`, placeHolder: 'Select a package to change executable trust for' });
-    if (!picked) return;
-    const packageName = this.checkedInstalledIdentity(picked.item);
+    const item = await this.chooseInstalledPackage(scope, `Choose package — ${scope.label}`, 'Select a package to change executable trust for',
+      `No installed dependencies are available in ${scope.label}.`, scope.label);
+    if (!item) return;
+    const packageName = this.checkedInstalledIdentity(item);
     const action = await vscode.window.showQuickPick([
       { label: 'Approve executable primitives', description: 'Grant this package permission to use its declared executables', command: 'approve' },
       { label: 'Deny executable primitives', description: "Block this package's executable primitives; deny takes precedence", command: 'deny' }
@@ -1032,7 +1009,7 @@ class ApmExtension implements vscode.Disposable {
       const result = await this.executeInspection({ ...scope }, `Dependency tree — ${scope.label}`,
         ['deps', 'tree', ...(scope.kind === 'global' ? ['--global'] : [])]);
       if (result) {
-        const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+        const output = inspectionOutput(result);
         next = { output, exitCode: result.exitCode, signature: this.installedSignature(key) };
         if (result.exitCode !== 0) next.error = `APM exited with code ${result.exitCode}. Open the report as text to review its output.`;
         else if (!output) next.error = 'APM returned an empty dependency report. Review APM Output.';
@@ -1065,13 +1042,10 @@ class ApmExtension implements vscode.Disposable {
     const scope = { ...(capturedScope ?? this.scope()) };
     let packageName = typeof target === 'string' ? target : undefined;
     if (!packageName) {
-      const installed = await this.client(scope).getInstalled(scope);
-      if (!installed.length) throw new Error(`No installed dependencies are available in ${scope.label}.`);
-      const picked = await vscode.window.showQuickPick(installed.map(dependency => ({
-        label: dependency.name, description: dependency.version, dependency
-      })), { title: `Explain APM dependency — ${scope.label}`, placeHolder: 'Choose an installed dependency' });
-      if (!picked) return;
-      packageName = packageIdentity(picked.dependency, picked.dependency, false);
+      const item = await this.chooseInstalledPackage(scope, `Explain APM dependency — ${scope.label}`, 'Choose an installed dependency',
+        `No installed dependencies are available in ${scope.label}.`);
+      if (!item) return;
+      packageName = packageIdentity(item, item, false);
     }
     if (packageName.startsWith('-') || /[\s\0]/.test(packageName)) throw new Error('APM returned an invalid dependency identity.');
     const result = await this.executeInspection(scope, `Why ${packageName} is installed`, [
@@ -1358,9 +1332,7 @@ class ApmExtension implements vscode.Disposable {
     this.send(context);
   }
   private resetPackagePage(context: PanelContext, mode: 'gallery' | 'details') {
-    context.pageGeneration = (context.pageGeneration ?? 0) + 1;
-    context.detailsRequest = (context.detailsRequest ?? 0) + 1;
-    context.detailsController?.abort();
+    this.invalidateDetails(context);
     context.detailsController = undefined;
     Object.assign(context, { mode, scope: undefined, item: undefined, extra: {}, navigation: undefined, retry: undefined, forceUpdate: undefined,
       preview: undefined, refreshError: undefined, authenticationRepository: undefined });
@@ -1629,18 +1601,21 @@ class ApmExtension implements vscode.Disposable {
   }
   private async dispatchPackageAction(action: PackageAction, context: PanelContext, item: PackageItem, installed: PackageItem | undefined, scope: Scope, global: boolean, forceUpdate = false) {
     switch (action) {
-      case 'install': {
-        await this.runPackageCommand(context, action, `Install ${item.name}`, 'install', { packages: packageIdentity(item, installed, true) }, global ? { '--global': true } : {}, true);
+      case 'install':
+      case 'uninstall': {
+        const installing = action === 'install';
+        if (!installing && !installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
+        await this.runPackageCommand(context, action, `${installing ? 'Install' : 'Uninstall'} ${item.name}`, action,
+          { packages: packageIdentity(item, installed, installing) }, global ? { '--global': true } : {}, true);
         break;
       }
       case 'previewInstall':
-        await this.runPackageCommand(context, action, `Preview install ${item.name}`, 'install', { packages: packageIdentity(item, installed, true) },
-          { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
-        break;
       case 'previewUpdate': {
-        if (!installed) throw new Error('Install this package before previewing an update.');
-        const command = packageUpdateCommand(installed);
-        await this.runPackageCommand(context, action, `Preview update ${item.name}`, command.id, { packages: command.packages },
+        if (action === 'previewUpdate' && !installed) throw new Error('Install this package before previewing an update.');
+        const command = action === 'previewUpdate' && installed
+          ? packageUpdateCommand(installed)
+          : { id: 'install', packages: packageIdentity(item, installed, true) };
+        await this.runPackageCommand(context, action, `Preview ${action === 'previewUpdate' ? 'update' : 'install'} ${item.name}`, command.id, { packages: command.packages },
           { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
         break;
       }
@@ -1650,26 +1625,17 @@ class ApmExtension implements vscode.Disposable {
         await this.runPackageCommand(context, preview.action, preview.title, preview.id, preview.args, preview.options, true);
         break;
       }
-      case 'installWithOptions': {
-        const choice = await this.chooseInstallOptions(context, item, installed);
-        if (!choice) return;
-        await this.runPackageCommand(context, action, `Install ${item.name}${choice.ref ? ` #${choice.ref}` : ''}`, 'install',
-          { packages: withRef(packageIdentity(item, installed, true), choice.ref) },
-          global ? { '--global': true } : {}, true);
-        break;
-      }
+      case 'installWithOptions':
       case 'previewWithOptions': {
         const choice = await this.chooseInstallOptions(context, item, installed);
         if (!choice) return;
-        await this.runPackageCommand(context, action, `Preview install ${item.name}`, 'install',
+        const preview = action === 'previewWithOptions';
+        const title = preview ? `Preview install ${item.name}` : `Install ${item.name}${choice.ref ? ` #${choice.ref}` : ''}`;
+        await this.runPackageCommand(context, action, title, 'install',
           { packages: withRef(packageIdentity(item, installed, true), choice.ref) },
-          { ...(global ? { '--global': true } : {}), '--dry-run': true }, false);
+          { ...(global ? { '--global': true } : {}), ...(preview ? { '--dry-run': true } : {}) }, !preview);
         break;
       }
-      case 'uninstall':
-        if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
-        await this.runPackageCommand(context, action, `Uninstall ${item.name}`, 'uninstall', { packages: packageIdentity(item, installed, false) }, global ? { '--global': true } : {}, true);
-        break;
       case 'update': {
         if (!installed) throw new Error(`${item.name} is not installed in ${scope.label}.`);
         const command = packageUpdateCommand(installed);
@@ -1912,33 +1878,30 @@ class ApmExtension implements vscode.Disposable {
       task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, panel: vscode.TaskPanelKind.Dedicated };
       const active: { execution?: vscode.TaskExecution; cancelled: boolean } = { cancelled: false };
       this.commandTasks.set(context, active);
-      const pending: [vscode.TaskExecution, number | undefined][] = [];
-      const finish = (execution: vscode.TaskExecution, exitCode: number | undefined) => {
-        if (!active.execution) { pending.push([execution, exitCode]); return; }
-        if (execution !== active.execution || this.commandTasks.get(context) !== active) return;
+      const cleanup = () => {
         this.commandTasks.delete(context);
-        processListener.dispose(); endListener.dispose();
+        tracker.dispose();
         context.extra.busy = false; context.extra.taskRunning = false;
+      };
+      const tracker = trackTaskCompletion(exitCode => {
+        if (this.commandTasks.get(context) !== active) return;
+        cleanup();
         context.extra.result = active.cancelled ? 'APM task cancelled. Partial changes may remain. See its terminal for output.' :
           exitCode === undefined ? 'APM task ended without an exit code. Review the terminal; partial changes may remain.' :
             `APM task finished with exit code ${exitCode}. See its terminal for output.`;
         if (!active.cancelled && exitCode !== 0) context.extra.error = 'APM task did not complete successfully. Review its terminal.';
         this.send(context); this.scheduleRefresh();
-      };
-      const processListener = vscode.tasks.onDidEndTaskProcess(event => finish(event.execution, event.exitCode));
-      const endListener = vscode.tasks.onDidEndTask(event => finish(event.execution, undefined));
-      this.subscriptions.push(processListener, endListener);
+      });
+      this.subscriptions.push(tracker);
       context.extra.busy = true; context.extra.taskRunning = true;
       context.extra.result = 'APM task started. Review its terminal output. Use Cancel or Tasks: Terminate Task to stop it.';
       this.send(context);
       try {
         active.execution = await vscode.tasks.executeTask(task);
         if (active.cancelled) active.execution.terminate();
-        for (const [execution, exitCode] of pending) finish(execution, exitCode);
+        tracker.setExecution(active.execution);
       } catch (error) {
-        this.commandTasks.delete(context);
-        processListener.dispose(); endListener.dispose();
-        context.extra.busy = false; context.extra.taskRunning = false;
+        cleanup();
         context.extra.result = undefined;
         this.send(context);
         throw error;

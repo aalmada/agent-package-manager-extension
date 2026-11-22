@@ -1,4 +1,4 @@
-import { record } from './adapters';
+import { record, trimmedString } from './adapters';
 
 export const contentTypes = [
   { key: 'skills', label: 'Skills', fields: ['skills'] },
@@ -42,10 +42,10 @@ function declaredItem(value: unknown, key?: string): ContentItem | undefined {
     return path ? { name: key ?? nameFromPath(path), path } : undefined;
   }
   if (!record(value)) return key ? { name: key } : undefined;
-  const path = typeof value.path === 'string' && value.path.trim() ? value.path.trim() : undefined;
-  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : key ?? (path ? nameFromPath(path) : '');
+  const path = trimmedString(value.path);
+  const name = trimmedString(value.name) ?? key ?? (path ? nameFromPath(path) : '');
   if (!name) return undefined;
-  const description = typeof value.description === 'string' && value.description.trim() ? value.description.trim() : undefined;
+  const description = trimmedString(value.description);
   return { name, ...(path ? { path } : {}), ...(description ? { description } : {}) };
 }
 
