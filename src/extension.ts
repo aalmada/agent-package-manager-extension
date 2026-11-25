@@ -29,6 +29,7 @@ import { parseDependencyTree } from './apm/dependencyTree';
 
 /** `output` and `exitCode` stay on the host for "Open as text"; `signature` detects later package changes. */
 interface StoredDependencyTree extends DependencyTreeView { output?: string; exitCode?: number; signature?: string }
+type CatalogResult = Awaited<ReturnType<ApmClient['getCatalog']>>;
 interface PanelContext {
   webview?: vscode.Webview;
   mode: Mode | 'native';
@@ -396,23 +397,62 @@ class ApmExtension implements vscode.Disposable {
     if (epoch === this.epoch) this.probeSnapshots.set(key, { at, probe });
     return probe;
   }
-  private async refreshCatalog(client: ApmClient, marketplaces: Marketplace[]) {
-    const items: PackageItem[] = [], errors: string[] = [], keys = new Set<string>();
+  private async refreshCatalog(client: ApmClient, marketplaces: Marketplace[], onProgress?: (result: CatalogResult) => void) {
+    const results = new Map<string, CatalogResult>(), keys = new Set<string>();
+    const pending: { marketplace: Marketplace; key: string }[] = [];
+    const epoch = this.epoch;
     for (const marketplace of marketplaces) {
+      results.set(marketplace.name, {
+        items: this.state.catalog.filter(item => item.marketplace === marketplace.name)
+          .map(item => ({ ...item, metadata: { ...item.metadata, stale: true } })),
+        errors: []
+      });
+    }
+    const collect = (): CatalogResult => ({
+      items: marketplaces.flatMap(marketplace => results.get(marketplace.name)?.items ?? []),
+      errors: marketplaces.flatMap(marketplace => results.get(marketplace.name)?.errors ?? [])
+    });
+    const publish = (marketplace: Marketplace, result: CatalogResult) => {
+      const previous = results.get(marketplace.name)?.items ?? this.state.catalog.filter(item => item.marketplace === marketplace.name);
+      results.set(marketplace.name, {
+        items: !result.items.length && result.errors.length
+          ? previous.map(item => ({ ...item, metadata: { ...item.metadata, stale: true } })) : result.items,
+        errors: result.errors
+      });
+      onProgress?.(collect());
+    };
+    for (const marketplace of marketplaces) {
+      if (epoch !== this.epoch) return collect();
       const key = JSON.stringify([marketplace.name, marketplace.source, marketplace.ref, marketplace.path]);
       keys.add(key);
-      let snapshot = this.catalogSnapshots.get(key);
+      const snapshot = this.catalogSnapshots.get(key);
       const local = isAbsolute(marketplace.source) || marketplace.source.startsWith('file://');
-      if (!snapshot || local || Date.now() - snapshot.at >= remoteRefreshInterval) {
-        const at = Date.now(), epoch = this.epoch;
+      if (snapshot && !local && Date.now() - snapshot.at < remoteRefreshInterval) {
+        publish(marketplace, snapshot);
+      } else if (local) {
+        const at = Date.now();
         const result = await client.getCatalog([marketplace]);
-        snapshot = { at, ...result };
-        if (epoch === this.epoch) this.catalogSnapshots.set(key, snapshot);
+        if (epoch === this.epoch) this.catalogSnapshots.set(key, { at, ...result });
+        publish(marketplace, result);
+      } else {
+        if (onProgress) {
+          const cached = await client.getCatalog([marketplace], { cachedOnly: true });
+          // A cache miss is provisional; the network refresh below supplies the definitive error.
+          const items = cached.items.length ? cached.items : this.state.catalog.filter(item => item.marketplace === marketplace.name);
+          publish(marketplace, { items: items.map(item => ({ ...item, metadata: { ...item.metadata, stale: true } })), errors: [] });
+        }
+        pending.push({ marketplace, key });
       }
-      items.push(...snapshot.items); errors.push(...snapshot.errors);
     }
-    for (const key of this.catalogSnapshots.keys()) if (!keys.has(key)) this.catalogSnapshots.delete(key);
-    return { items, errors };
+    for (const { marketplace, key } of pending) {
+      if (epoch !== this.epoch) return collect();
+      const at = Date.now();
+      const result = await client.getCatalog([marketplace]);
+      if (epoch === this.epoch) this.catalogSnapshots.set(key, { at, ...result });
+      publish(marketplace, result);
+    }
+    if (epoch === this.epoch) for (const key of this.catalogSnapshots.keys()) if (!keys.has(key)) this.catalogSnapshots.delete(key);
+    return collect();
   }
   private async refreshUpdates(client: ApmClient, scope: Scope, installed: PackageItem[], previous: PackageItem[]) {
     const key = scopeKey(scope), snapshot = this.updateSnapshots.get(key);
@@ -465,65 +505,87 @@ class ApmExtension implements vscode.Disposable {
     const workspace = scope.kind === 'workspace' ? scope : this.state.scopes.find(candidate => candidate.kind === 'workspace');
     const scopes = [this.globalScope(), ...(workspace ? [workspace] : [])];
     const previousInstalled = this.state.installed;
-    this.state.busy = true; this.state.error = undefined; this.state.errors = []; this.broadcast();
-    try {
-      const probe = await this.refreshProbe(client, scope);
-      if (epoch !== this.epoch) return;
-      this.state.version = probe.version; this.state.warning = probe.warning; this.state.availableCommands = probe.commands;
-      this.state.projectPresent = !!workspace && await hasProjectManifest(workspace.path);
-      await this.settingsSync.sync();
-      if (epoch !== this.epoch) return;
-      const { registered, catalog, installed } = await this.serialize('apm-mutations', async () => {
-        const registered = await client.getMarketplaces();
-        const [catalog, installed] = await Promise.all([
-          Promise.allSettled([this.refreshCatalog(client, registered)]).then(([result]) => result),
-          Promise.all(scopes.map(async target => ({
-            scope: target,
-            result: await Promise.allSettled([target.kind === 'workspace' && !this.state.projectPresent
-              ? Promise.resolve([] as PackageItem[]) : this.client(target, controller.signal, pass).getInstalled(target)]).then(([result]) => result)
-          })))
-        ]);
-        return { registered, catalog, installed };
-      });
-      if (epoch !== this.epoch) return;
-      this.state.marketplaces = registered;
-      if (catalog.status === 'fulfilled') {
-        const failed = registered.filter(m => !catalog.value.items.some(i => i.marketplace === m.name) && catalog.value.errors.some(error => error.startsWith(`${m.name}:`))).map(m => m.name);
-        this.state.catalog = [...catalog.value.items, ...this.state.catalog.filter(i => failed.includes(i.marketplace)).map(i => ({ ...i, metadata: { ...i.metadata, stale: true } }))];
-        this.state.errors.push(...catalog.value.errors);
-      } else this.state.errors.push(`Catalog: ${redact(String(catalog.reason))}`);
-      // `apm deps list` has no descriptions or marketplace names for direct sources; borrow catalog ones for display and filters.
-      this.state.installed = installed.flatMap<PackageItem>(({ scope: target, result }) => {
-        if (result.status === 'fulfilled') {
-          this.setDetailRefreshError(target);
-          return applyCatalogVersions(withCatalogInfo(result.value, this.state.catalog, registered), this.state.catalog).map(item => ({ ...item, scope: target }));
-        }
-        const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
-        this.state.errors.push(error);
-        this.setDetailRefreshError(target, error, false);
-        return previousInstalled.filter(item => inScope(item, target))
-          .map(item => ({ ...item, updateStale: true }));
-      });
+    this.state.busy = true; this.state.loading = ['catalog', 'installed', 'updates'];
+    this.state.error = undefined; this.state.errors = []; this.state.checkedAt = undefined; this.broadcast();
+    const current = () => epoch === this.epoch && !controller.signal.aborted;
+    const complete = (section: PackageSection) => { this.state.loading = this.state.loading?.filter(value => value !== section); };
+    const installed: { scope: Scope; result: PromiseSettledResult<PackageItem[]> }[] = [];
+    const publish = () => {
       this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
-      this.state.checkedAt = undefined;
       this.refreshInstalledDetails(installed);
       this.broadcast();
-      for (const { scope: target, result } of installed) {
-        if (result.status !== 'fulfilled' || !result.value.length) continue;
-        const items = this.state.installed.filter(item => inScope(item, target));
-        const updates = await this.refreshUpdates(this.client(target, controller.signal, pass), target, items, previousInstalled);
-        if (epoch !== this.epoch) return;
-        this.state.installed = this.state.installed.map(item => inScope(item, target)
-          ? findInstalledPackage(item, updates.items) ?? item : item);
-        this.state.checkedAt = updates.checkedAt;
-        if (updates.error) {
-          const error = `Updates: ${target.label}: ${updates.error}`;
-          this.state.errors.push(error);
-          this.setDetailRefreshError(target, error, false);
-        }
-      }
-      this.state.catalog = withInstallations(this.state.catalog, this.state.installed);
-      this.refreshInstalledDetails(installed);
+    };
+    try {
+      const probe = await this.refreshProbe(client, scope);
+      if (!current()) return;
+      this.state.version = probe.version; this.state.warning = probe.warning; this.state.availableCommands = probe.commands;
+      this.broadcast();
+      this.state.projectPresent = !!workspace && await hasProjectManifest(workspace.path);
+      await this.settingsSync.sync();
+      if (!current()) return;
+      await this.serialize('apm-mutations', async () => {
+        if (!current()) return;
+        const registered = await client.getMarketplaces();
+        if (!current()) return;
+        this.state.marketplaces = registered;
+        this.state.catalog = this.state.catalog.filter(item => registered.some(marketplace => marketplace.name === item.marketplace))
+          .map(item => ({ ...item, metadata: { ...item.metadata, stale: true } }));
+        const setInstalled = (target: Scope, items: PackageItem[]) => {
+          this.state.installed = scopes.flatMap(scope => isSameScope(scope, target) ? items : this.state.installed.filter(item => inScope(item, scope)));
+        };
+        const enrich = (items: PackageItem[], target: Scope) => applyCatalogVersions(withCatalogInfo(items, this.state.catalog, registered), this.state.catalog)
+          .map(item => ({ ...item, scope: target }));
+        publish();
+        const catalog = Promise.allSettled([this.refreshCatalog(client, registered, result => {
+          if (!current()) return;
+          this.state.catalog = result.items;
+          for (const { scope: target, result } of installed) {
+            if (result.status === 'fulfilled') setInstalled(target, enrich(result.value, target));
+          }
+          publish();
+        })]).then(([result]) => {
+          if (!current()) return;
+          if (result.status === 'fulfilled') this.state.errors.push(...result.value.errors);
+          else this.state.errors.push(`Catalog: ${redact(String(result.reason))}`);
+          complete('catalog'); this.broadcast();
+        });
+        await Promise.all([catalog, ...scopes.map(async target => {
+          const [result] = await Promise.allSettled([target.kind === 'workspace' && !this.state.projectPresent
+            ? Promise.resolve([] as PackageItem[]) : this.client(target, controller.signal, pass).getInstalled(target)]);
+          if (!current()) return;
+          installed.push({ scope: target, result });
+          let items: PackageItem[];
+          if (result.status === 'fulfilled') {
+            this.setDetailRefreshError(target);
+            items = enrich(result.value, target);
+          } else {
+            const error = `Installed: ${target.label}: ${redact(String(result.reason))}`;
+            this.state.errors.push(error);
+            this.setDetailRefreshError(target, error, false);
+            items = previousInstalled.filter(item => inScope(item, target)).map(item => ({ ...item, updateStale: true }));
+          }
+          setInstalled(target, items);
+          if (installed.length === scopes.length) complete('installed');
+          publish();
+          // Outdated reads APM's marketplace cache; it must wait for every marketplace update.
+          await catalog;
+          if (!current() || result.status !== 'fulfilled' || !result.value.length) return;
+          const updates = await this.refreshUpdates(this.client(target, controller.signal, pass), target,
+            this.state.installed.filter(item => inScope(item, target)), previousInstalled);
+          if (!current()) return;
+          this.state.installed = this.state.installed.map(item => inScope(item, target)
+            ? findInstalledPackage(item, updates.items) ?? item : item);
+          this.state.checkedAt = updates.checkedAt;
+          if (updates.error) {
+            const error = `Updates: ${target.label}: ${updates.error}`;
+            this.state.errors.push(error);
+            this.setDetailRefreshError(target, error, false);
+          }
+          publish();
+        })]);
+        if (current()) { complete('updates'); publish(); }
+      });
+      if (!current()) return;
       await this.refreshOtherDetailScopes(scopes, controller.signal, epoch, pass);
       if (epoch === this.epoch) await Promise.all([...this.panels.values()]
         .filter(entry => entry.mode === 'details' && entry.item && entry.panel && !entry.extra.details && !entry.extra.busy)
@@ -531,7 +593,7 @@ class ApmExtension implements vscode.Disposable {
     } catch (error) {
       if (epoch === this.epoch) throw error;
     } finally {
-      this.refreshController = undefined; this.state.busy = false; this.broadcast();
+      this.refreshController = undefined; this.state.busy = false; this.state.loading = undefined; this.broadcast();
       if (epoch === this.epoch) this.notifyRefresh();
     }
   }

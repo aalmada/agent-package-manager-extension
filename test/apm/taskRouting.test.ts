@@ -28,6 +28,11 @@ class Task {
 interface Execution { task: Task; terminate(): void }
 interface Panel { mode: 'native' | 'details' | 'browser' | 'gallery'; gallery?: boolean; panel?: unknown; extra: Partial<State>; item?: PackageItem; scope?: Scope; controller?: AbortController;
   detailsController?: AbortController; detailsRequest?: number; retry?: () => Promise<void>; authenticationRepository?: { provider: 'github'; origin: string; path: string } }
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
 interface Harness {
   toggleSection(section: PackageSection): Promise<void>;
   state: State;
@@ -469,7 +474,8 @@ test('catalog refresh cannot overlap registry mutations', async () => {
     probe: async () => ({ version: '0.35.0', commands: [] }),
     getMarketplaces: async () => [{ name: 'catalog', source: 'org/catalog' }],
     getInstalled: async () => [],
-    getCatalog: async () => {
+    getCatalog: async (_entries: Marketplace[], options?: { cachedOnly?: boolean }) => {
+      if (options?.cachedOnly) return { items: [], errors: [] };
       calls.push('catalog:start'); started();
       await pending;
       calls.push('catalog:end');
@@ -503,7 +509,10 @@ test('repeated browser and command refreshes do not repeat remote marketplace or
     probe: async () => { calls.probe++; return { version: '0.35.0', commands: [] }; },
     getMarketplaces: async () => [{ name: 'catalog', source: 'org/catalog' }],
     getInstalled: async () => { calls.installed++; return [item]; },
-    getCatalog: async () => { calls.catalog++; return { items: [], errors: [] }; },
+    getCatalog: async (_entries: Marketplace[], options?: { cachedOnly?: boolean }) => {
+      if (!options?.cachedOnly) calls.catalog++;
+      return { items: [], errors: [] };
+    },
     checkUpdates: async () => {
       calls.outdated++;
       return [{ package: item.name, current: '1', latest: '1', status: 'current', source: 'git' }];
@@ -518,6 +527,143 @@ test('repeated browser and command refreshes do not repeat remote marketplace or
     await host.extension.refreshAll();
     assert.deepEqual(calls, { probe: 2, catalog: 2, installed: 11, outdated: 2 });
   } finally { host.extension.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('refresh publishes cached catalogs, individual marketplaces, installations and updates without a shared barrier', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-progressive-refresh-'));
+  const host = harness({ root });
+  const prototype = Object.getPrototypeOf(host.extension);
+  const first = deferred<void>(), second = deferred<void>(), globalScan = deferred<void>(), update = deferred<void>();
+  const globalUpdate = deferred<void>(), globalChecking = deferred<void>();
+  const started = deferred<void>(), workspaceShown = deferred<void>(), catalogShown = deferred<void>();
+  const checking = deferred<void>(), refined = deferred<void>();
+  const item: PackageItem = { id: 'one::sample', name: 'sample', marketplace: 'one', version: '1.0.0', installed: true };
+  const global = host.extension.state.scopes.find(scope => scope.kind === 'global')!;
+  host.extension.state.installed = [{ ...item, scope: global, updateStatus: 'outdated', latestVersion: '3.0.0' }];
+  const published: { catalog: PackageItem[]; installed: PackageItem[]; loading?: PackageSection[] }[] = [];
+  const checks: string[] = [];
+  Reflect.set(host.extension, 'epoch', 0);
+  Reflect.set(host.extension, 'serialize', prototype.serialize);
+  Reflect.set(host.extension, 'settingsSync', { sync: async () => {} });
+  Reflect.set(host.extension, 'broadcast', () => {
+    const state = host.extension.state;
+    published.push({ catalog: state.catalog, installed: state.installed, loading: state.loading });
+    const workspace = state.installed.find(item => item.scope?.kind === 'workspace');
+    if (workspace) workspaceShown.resolve();
+    if (workspace?.updateStatus === 'outdated' && state.catalog.some(item => item.marketplace === 'one' && !item.metadata?.stale)) catalogShown.resolve();
+    if (workspace?.updateStatus === 'current') refined.resolve();
+  });
+  Reflect.set(host.extension, 'client', (scope: Scope) => ({
+    probe: async () => ({ version: '0.35.0', commands: [] }),
+    getMarketplaces: async () => ['one', 'two'].map(name => ({ name, source: `org/${name}` })),
+    getCatalog: async ([marketplace]: Marketplace[], options?: { cachedOnly?: boolean }) => {
+      const entry = { ...item, id: `${marketplace.name}::sample`, marketplace: marketplace.name, installed: false, version: '2.0.0' };
+      if (options?.cachedOnly) return { items: [entry], errors: [] };
+      if (marketplace.name === 'one') {
+        started.resolve(); await first.promise;
+        return { items: [entry], errors: [] };
+      }
+      await second.promise;
+      return { items: [], errors: ['two: network unavailable'] };
+    },
+    getInstalled: async () => {
+      if (scope.kind === 'global') await globalScan.promise;
+      return [item];
+    },
+    checkUpdates: async () => {
+      checks.push(scope.kind);
+      if (scope.kind === 'global') {
+        globalChecking.resolve(); await globalUpdate.promise;
+        throw new Error('Global update check unavailable');
+      }
+      checking.resolve(); await update.promise;
+      return [{ package: item.name, current: '1.0.0', latest: '1.0.0', status: 'current', source: 'git' }];
+    }
+  }));
+  let refresh: Promise<void> | undefined;
+  try {
+    await writeFile(join(root, 'apm.yml'), 'name: project\n');
+    refresh = prototype.doRefresh.call(host.extension);
+    await Promise.all([started.promise, workspaceShown.promise]);
+    assert.equal(host.extension.state.catalog.length, 2, 'All cached marketplaces appear before network work finishes');
+    assert.ok(host.extension.state.catalog.every(item => item.metadata?.stale));
+    assert.equal(host.extension.state.installed.find(item => item.scope?.kind === 'workspace')?.updateStatus, undefined,
+      'Unverified cached catalog versions must not imply a fresh update');
+    assert.equal(checks.length, 0);
+    first.resolve();
+    await catalogShown.promise;
+    assert.equal(host.extension.state.catalog.find(item => item.marketplace === 'two')?.metadata?.stale, true);
+    assert.equal(checks.length, 0, 'Outdated cannot overlap the second marketplace update');
+    second.resolve();
+    await checking.promise;
+    assert.deepEqual(checks, ['workspace'], 'A slow global installed scan does not delay workspace update checks');
+    assert.ok(host.extension.state.loading?.includes('installed'));
+    globalScan.resolve();
+    await globalChecking.promise;
+    update.resolve();
+    await refined.promise;
+    assert.deepEqual(checks, ['workspace', 'global']);
+    assert.ok(!host.extension.state.loading?.includes('installed'));
+    assert.ok(!host.extension.state.loading?.includes('catalog'));
+    assert.ok(host.extension.state.loading?.includes('updates'), 'Workspace updates publish while the global update check is pending');
+    assert.equal(host.extension.state.busy, true);
+    globalUpdate.resolve();
+    await refresh;
+    assert.equal(host.extension.state.installed.find(item => item.scope?.kind === 'global')?.updateStale, true);
+    assert.ok(host.extension.state.errors.some(error => error.includes('two: network unavailable')));
+    assert.ok(host.extension.state.errors.some(error => error.startsWith('Updates: Global')));
+    assert.equal(host.extension.state.loading, undefined);
+    assert.equal(host.extension.state.busy, false);
+    for (const snapshot of published) {
+      for (const entry of snapshot.catalog) {
+        const expected = snapshot.installed.filter(item => item.id === entry.id);
+        assert.deepEqual(Array.from(entry.installations ?? [], item => [item.scope?.kind, item.updateStatus]),
+          Array.from(expected, item => [item.scope?.kind, item.updateStatus]));
+      }
+    }
+  } finally {
+    first.resolve(); second.resolve(); globalScan.resolve(); update.resolve(); globalUpdate.resolve();
+    await refresh;
+    host.extension.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('authentication changes discard late progressive results and stop remaining marketplace refreshes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apm-progressive-cancel-'));
+  const host = harness({ root });
+  const prototype = Object.getPrototypeOf(host.extension);
+  const pending = deferred<void>(), started = deferred<void>();
+  const calls: string[] = [];
+  Reflect.set(host.extension, 'epoch', 0);
+  Reflect.set(host.extension, 'settingsSync', { sync: async () => {}, retry() {} });
+  Reflect.set(host.extension, 'broadcast', () => {});
+  Reflect.set(host.extension, 'client', () => ({
+    probe: async () => ({ version: '0.35.0', commands: [] }),
+    getMarketplaces: async () => ['one', 'two'].map(name => ({ name, source: `org/${name}` })),
+    getInstalled: async () => { await pending.promise; return [{ id: 'late', name: 'late', version: '1', marketplace: '', installed: true }]; },
+    getCatalog: async ([marketplace]: Marketplace[], options?: { cachedOnly?: boolean }) => {
+      if (options?.cachedOnly) return { items: [], errors: [] };
+      calls.push(marketplace.name); started.resolve(); await pending.promise;
+      return { items: [], errors: ['one: obsolete failure'] };
+    },
+    checkUpdates: async () => assert.fail('Invalidated installations must not start update checks')
+  }));
+  const refresh: Promise<void> = prototype.doRefresh.call(host.extension);
+  try {
+    await started.promise;
+    host.extension.authenticationChanged();
+    pending.resolve();
+    await refresh;
+    assert.deepEqual(calls, ['one']);
+    assert.equal(host.extension.state.installed.length, 0);
+    assert.equal(host.extension.state.errors.length, 0);
+    assert.equal(Reflect.get(host.extension, 'catalogSnapshots').size, 0);
+  } finally {
+    pending.resolve(); await refresh;
+    host.extension.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('interactive APM tasks inherit the authorized VS Code account without putting tokens in arguments', async () => {
@@ -1381,7 +1527,8 @@ test('refresh lists and checks both scopes independently and keeps global result
   Reflect.set(host.extension, 'epoch', 0);
   Reflect.set(host.extension, 'client', (scope: Scope) => ({
     probe: async () => ({ version: '0.35.0', commands: [] }),
-    getMarketplaces: async () => [],
+    getMarketplaces: async () => [{ name: 'one', source: '/catalog' }],
+    getCatalog: async () => ({ items: [{ ...item, installed: false }], errors: [] }),
     getInstalled: async () => {
       reads.push(scope.kind);
       if (failGlobal && scope.kind === 'global') throw new Error('Global list unavailable');
@@ -1396,7 +1543,6 @@ test('refresh lists and checks both scopes independently and keeps global result
   try {
     await writeFile(join(root, 'apm.yml'), 'name: project\n');
     host.extension.state.catalog = [{ ...item, installed: false }];
-    Reflect.set(host.extension, 'refreshCatalog', async () => ({ items: [{ ...item, installed: false }], errors: [] }));
     await prototype.doRefresh.call(host.extension);
     assert.deepEqual(reads, ['global', 'workspace']);
     assert.deepEqual(checks, ['global', 'workspace']);

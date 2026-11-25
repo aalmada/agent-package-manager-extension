@@ -24,6 +24,59 @@ async function expectBorderlessBadges(page: Page) {
   }
 }
 
+for (const mode of ['browser', 'gallery'] as const) {
+  test(`${mode} renders progressive lists while preserving search focus`, async ({ page }) => {
+    await page.setContent('<main id="app"></main>');
+    await page.addStyleTag({ path: 'dist/webview.css' });
+    await page.evaluate(() => {
+      Object.defineProperty(window, 'acquireVsCodeApi', {
+        value: () => ({ getState: () => undefined, setState() {}, postMessage() {} })
+      });
+    });
+    await page.addScriptTag({ path: 'dist/webview.js' });
+    const state: State = {
+      mode, trusted: true, busy: true, loading: ['catalog', 'installed', 'updates'], errors: [],
+      scopes: [{ kind: 'workspace', label: 'project', path: '/project' }], scopeKey: 'workspace:/project',
+      commands: descriptors, availableCommands: [], marketplaces: [], catalog: [], installed: []
+    };
+    await postMessage(page, { type: 'state', state });
+    await expect(page.getByText('Loading packages…', { exact: true })).toBeVisible();
+    state.version = '0.35.0';
+    await postMessage(page, { type: 'state', state });
+    await expect(page.getByText('Loading catalog…', { exact: true })).toBeVisible();
+    await expect(page.getByText('No marketplaces registered.', { exact: true })).toHaveCount(0);
+    if (mode === 'browser') {
+      await expect(page.getByText('Loading installed packages…', { exact: true })).toBeVisible();
+      await expect(page.getByText('Checking for updates…', { exact: true })).toBeVisible();
+      await expect(page.locator('[data-section="installed"]')).toHaveAttribute('aria-busy', 'true');
+    }
+    await page.locator('#search').focus();
+    state.installed = [{
+      id: 'one::sample', name: 'sample', marketplace: 'one', version: '1.0.0', installed: true, scope: state.scopes[0]
+    }];
+    await postMessage(page, { type: 'state', state });
+    if (mode === 'browser') await expect(page.locator('#section-body-installed .package-row')).toHaveCount(1);
+    else await expect(page.locator('#gallery-nav-installed .gallery-nav-count')).toHaveText('1');
+    await expect(page.locator('#search')).toBeFocused();
+    state.marketplaces = [{ name: 'one', source: 'org/catalog' }];
+    state.catalog = withInstallations([{ ...state.installed[0], installed: false, version: '2.0.0', metadata: { stale: true } }], state.installed);
+    await postMessage(page, { type: 'state', state });
+    await expect(page.getByText('Cached catalog', { exact: true })).toBeVisible();
+    await expect(page.locator('#search')).toBeFocused();
+    state.installed = state.installed.map(item => ({ ...item, updateStatus: 'outdated', latestVersion: '2.0.0' }));
+    state.catalog = withInstallations(state.catalog.map(item => ({ ...item, metadata: {} })), state.installed);
+    state.loading = ['installed'];
+    await postMessage(page, { type: 'state', state });
+    await expect(page.getByText('Cached catalog', { exact: true })).toHaveCount(0);
+    if (mode === 'browser') {
+      await expect(page.locator('#section-body-updates .package-row')).toHaveCount(1);
+      await expect(page.locator('[data-section="catalog"]')).toHaveAttribute('aria-busy', 'false');
+    } else await expect(page.locator('#gallery-nav-updates .gallery-nav-count')).toHaveText('1');
+    await expect(page.locator('#app')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#search')).toBeFocused();
+  });
+}
+
 for (const theme of ['dark', 'light', 'high-contrast']) {
   test(`sidebar is functional at a narrow width in ${theme}`, async ({ page }, testInfo) => {
     const dark = theme !== 'light';

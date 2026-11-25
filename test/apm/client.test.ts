@@ -126,6 +126,29 @@ test('local catalogs read live manifests without APM calls while remote catalogs
   } finally { await rm(home, { recursive: true }); }
 });
 
+test('cached-only catalogs never run APM and report missing or malformed snapshots', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'apm-cached-catalog-'));
+  try {
+    const client = new ApmClient({ executable: '/must-not-start', cwd: home, home });
+    t.mock.method(client, 'execute', async () => assert.fail('Cache previews must not run APM'));
+    const marketplace = { name: 'remote', source: 'https://github.com/org/catalog' };
+    const missing = await client.getCatalog([marketplace], { cachedOnly: true });
+    assert.equal(missing.items.length, 0);
+    assert.match(missing.errors[0], /No cached plugin manifest/);
+    const cache = join(home, '.apm/cache/marketplace');
+    await mkdir(cache, { recursive: true });
+    await writeFile(join(cache, 'remote.json'), JSON.stringify({ plugins: [{ name: 'sample', version: '1.2.3' }] }));
+    const cached = await client.getCatalog([marketplace], { cachedOnly: true });
+    assert.deepEqual(cached.errors, []);
+    assert.equal(cached.items[0].version, '1.2.3');
+    await writeFile(join(cache, 'remote.json'), 'invalid json');
+    const malformed = await client.getCatalog([marketplace], { cachedOnly: true });
+    assert.equal(malformed.items.length, 0);
+    assert.equal(malformed.errors.length, 1);
+    assert.match(malformed.errors[0], /^remote:/);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('direct repository installations match their catalog source without marketplace lock metadata', async t => {
   const home = await mkdtemp(join(tmpdir(), 'apm-source-identity-'));
   try {

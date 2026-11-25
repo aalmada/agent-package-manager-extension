@@ -152,12 +152,12 @@ export class ApmClient {
     return true;
   }
   getMarketplaces(): Promise<Marketplace[]> { return readMarketplaces(this.home); }
-  async getCatalog(marketplaces: Marketplace[]): Promise<{ items: PackageItem[]; errors: string[] }> {
+  async getCatalog(marketplaces: Marketplace[], options: { cachedOnly?: boolean } = {}): Promise<{ items: PackageItem[]; errors: string[] }> {
     const items: PackageItem[] = [], errors: string[] = [];
     // Keep requests bounded; CLI fetching also owns transport authentication.
     for (const marketplace of marketplaces) {
       try {
-        if (!isAbsolute(marketplace.source) && !marketplace.source.startsWith('file://')) {
+        if (!options.cachedOnly && !isAbsolute(marketplace.source) && !marketplace.source.startsWith('file://')) {
           await this.checked(['marketplace', 'update', marketplace.name]);
         }
         let manifest: Record<string, unknown> | undefined;
@@ -165,6 +165,7 @@ export class ApmClient {
           const snapshot = await marketplaceManifest(marketplace, this.home);
           manifest = snapshot.manifest;
         } catch (error) {
+          if (options.cachedOnly) throw error;
           errors.push(`${marketplace.name}: Full manifest could not be read; using the CLI table. ${String(error)}`);
         }
         if (manifest && Array.isArray(manifest.plugins)) {
@@ -183,6 +184,7 @@ export class ApmClient {
           }
           continue;
         }
+        if (options.cachedOnly) throw new ApmError(`No cached plugin manifest is available for ${marketplace.name}.`);
         const result = await this.checked(['marketplace', 'browse', marketplace.name]);
         items.push(...parseCatalog(result.stdout, marketplace.name));
       } catch (error) {

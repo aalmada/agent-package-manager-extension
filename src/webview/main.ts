@@ -176,7 +176,9 @@ function welcome(className: string) {
   const node = el('div', className);
   if (!state.trusted) {
     node.append(el('p', '', 'Trust this workspace to browse and manage APM packages.'), button('Manage Workspace Trust', () => send({ type: 'trust' })));
-  } else if (!state.busy) {
+  } else if (state.busy) {
+    node.append(el('p', 'empty', 'Loading packages…'));
+  } else {
     node.append(el('p', '', 'APM CLI is not available. Install it to browse and manage packages.'), action('Install APM CLI', 'setup'));
     if (state.error || state.errors.length) {
       const output = action('Show Output', 'output'); output.className = 'secondary'; node.append(output);
@@ -240,6 +242,7 @@ function renderBrowserContents() {
   for (const section of sections) {
     const node = el('section', 'package-section');
     node.dataset.section = section;
+    node.setAttribute('aria-busy', String(sectionLoading(section)));
     node.classList.toggle('collapsed', !!collapsed[section]);
     node.style.flexGrow = String(sectionSize(section));
     const name = sectionNames[section];
@@ -413,6 +416,10 @@ function renderList(section: BrowserSection) {
   if (visible.length > limit) body.append(button(`Show more (${visible.length - limit} remaining)`, () => { limits[name] = limit + 100; save(); render(); }, 'secondary'));
   return body;
 }
+function sectionLoading(section: BrowserSection): boolean {
+  const packages = ['direct', 'transitive', 'unclassified'].includes(section) ? 'installed' : section;
+  return state.loading?.some(value => value === packages) ?? (section === 'updates' && state.busy);
+}
 function emptyContent(section: BrowserSection, total: number) {
   const dependencies = ['direct', 'transitive', 'unclassified'].includes(section);
   const narrowed = !!withToken(withStatus(search, ''), '@sort:', '');
@@ -421,20 +428,21 @@ function emptyContent(section: BrowserSection, total: number) {
     ['unchecked', 'unknown', 'failed'].includes(item.updateStatus ?? '') || item.updateStale
   );
   const incomparableUpdates = state.installed.some(item => item.updateStatus === 'not-comparable');
-  const text = section === 'catalog' && !state.marketplaces.length ? 'No marketplaces registered.' :
-    dependencies ? total ? 'No dependencies match your filters.' : 'No dependencies in this group.' :
-      narrowed ? 'No packages match your filters.' :
-      section === 'updates' ? !state.installed.length ? 'No installed packages to check for updates.' :
-        state.busy ? 'Checking for updates…' :
-          updateError ? 'Could not check for updates. See APM Output for details.' :
-            uncertainUpdates ? 'No updates found, but some packages could not be checked.' :
-              incomparableUpdates ? 'No updates found, but some package versions could not be compared.' :
-                'All installed packages are up to date.' :
-        'No packages found.';
+  const loading = sectionLoading(section);
+  const text = loading ? section === 'updates' ? 'Checking for updates…' : section === 'catalog' ? 'Loading catalog…' : 'Loading installed packages…' :
+    section === 'catalog' && !state.marketplaces.length ? 'No marketplaces registered.' :
+      dependencies ? total ? 'No dependencies match your filters.' : 'No dependencies in this group.' :
+        narrowed ? 'No packages match your filters.' :
+          section === 'updates' ? !state.installed.length ? 'No installed packages to check for updates.' :
+            updateError ? 'Could not check for updates. See APM Output for details.' :
+              uncertainUpdates ? 'No updates found, but some packages could not be checked.' :
+                incomparableUpdates ? 'No updates found, but some package versions could not be compared.' :
+                  'All installed packages are up to date.' :
+            'No packages found.';
   const nodes: HTMLElement[] = [el('p', 'empty', text)];
   if (section === 'updates' && updateError && !narrowed) nodes.push(action('Show APM Output', 'output'));
-  if (section === 'catalog' && !state.marketplaces.length) nodes.push(action('Add marketplace', 'marketplaces'));
-  if (section === 'installed' && !total && !narrowed) nodes.push(button('Install a package', () => send({ type: 'install' })));
+  if (!loading && section === 'catalog' && !state.marketplaces.length) nodes.push(action('Add marketplace', 'marketplaces'));
+  if (!loading && section === 'installed' && !total && !narrowed) nodes.push(button('Install a package', () => send({ type: 'install' })));
   return nodes;
 }
 function packageTags(section: BrowserSection, item: PackageItem) {
@@ -509,6 +517,7 @@ function renderGallery() {
   else renderGalleryList(content, current);
 }
 function renderGalleryList(content: HTMLElement, section: GallerySection) {
+  content.setAttribute('aria-busy', String(sectionLoading(section === 'dependencies' ? 'installed' : section)));
   const [, title, subtitle] = galleryHeadings[section];
   const head = el('header', 'gallery-header');
   const titles = el('div', 'gallery-titles');

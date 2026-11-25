@@ -95,18 +95,19 @@ Other badges:
 | Badge | Meaning |
 | --- | --- |
 | **Transitive** | Installed as a dependency of another package, not declared directly. Hover it to see the packages that require it. |
-| **Cached catalog** | The marketplace could not be refreshed, so its last known entries are shown. |
+| **Cached catalog** | Last known entries are shown while the marketplace refreshes, or because its refresh failed. |
 
 The **APM** Activity Bar icon shows a badge with the number of global and workspace updates, regardless of search filters, plus one when the extension recommends a CLI upgrade. Its tooltip identifies results saved from an earlier check. The badge disappears when there are no updates, the CLI is unavailable, or the workspace is untrusted.
 
 ## Refresh and caching
 
 - The view refreshes automatically when workspace or global manifests and lockfiles, the APM marketplace registry or configuration, extension settings, or accounts change.
+- Both the view and package browser window show results progressively: cached catalog entries appear before network refreshes, each marketplace and installation scope appears when ready, and update results arrive independently per scope. Empty lists show a loading message until their data is ready.
 - Automatic refreshes reload installed packages locally but reuse remote marketplace and update checks for five minutes, including failed checks. This reduces API rate-limit pressure.
 - **Refresh** checks immediately. Changing accounts clears cached remote results, and installing, updating, or uninstalling forces a fresh update check for that scope.
 - Refresh progress appears as VS Code's native view progress indicator. Repeated refresh warnings are shown once until they change or clear.
 
-Catalog installation badges appear as soon as installed packages are loaded, without waiting for update checks. Comparing installed and catalog versions supplies the initial update status; APM's `apm outdated` check then refines it during the same refresh.
+Catalog installation badges appear as soon as installed packages are loaded, without waiting for other marketplaces or scopes. Comparing installed and freshly loaded catalog versions supplies the initial update status; APM's `apm outdated` check then refines it during the same refresh. Update checks wait for marketplace refreshes to finish to avoid reading APM's cache while it is being written.
 
 ## Package details
 

@@ -30,6 +30,8 @@ export interface State {
   error?: string;
   errors: string[];
   busy: boolean;
+  /** Lists still receiving results during a refresh; absent outside progressive refreshes. */
+  loading?: PackageSection[];
   host?: string;
   projectPresent?: boolean;
   targets?: ResolvedTarget[];
