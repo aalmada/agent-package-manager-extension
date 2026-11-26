@@ -137,14 +137,31 @@ async function steps() {
     tasks: discoveredTasks.map(task => ({ definition: task.definition, scope: typeof task.scope === 'number' ? task.scope : task.scope?.uri.toString() }))
   }));
   assert.deepEqual(nativeTasks.map(task => task.definition.workflow).sort(), ['audit', 'compile', 'validate', 'watch']);
-  const validationTask = nativeTasks.find(task => task.definition.workflow === 'validate');
-  assert.ok(validationTask);
   let taskFinished = false;
   let taskExitCode: number | undefined;
   const taskEnd = vscode.tasks.onDidEndTask(event => { if (event.execution.task.definition.workflow === 'validate') taskFinished = true; });
   const taskProcessEnd = vscode.tasks.onDidEndTaskProcess(event => { if (event.execution.task.definition.workflow === 'validate') taskExitCode = event.exitCode; });
   try {
-    await vscode.tasks.executeTask(validationTask);
+    let startupError = '';
+    await until('the native validation task starts', async () => {
+      const tasks = await vscode.tasks.fetchTasks({ type: 'apm' });
+      const validationTask = tasks.find(task => task.definition.workflow === 'validate' && typeof task.scope !== 'number' &&
+        task.scope?.uri.toString() === nativeFolder.uri.toString());
+      if (!validationTask) {
+        startupError = 'The native validation task is not available';
+        console.warn(`[suite] ${startupError}; retrying discovery`);
+        return false;
+      }
+      try {
+        await vscode.tasks.executeTask(validationTask);
+        return true;
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'Task not found' || taskFinished) throw error;
+        startupError = error.message;
+        console.warn(`[suite] task system is not ready: ${startupError}; rediscovering the validation task`);
+        return false;
+      }
+    }, 30_000, () => startupError);
     await until('the native validation task completes', () => taskFinished);
     assert.equal(taskExitCode, 0, 'Native validation task succeeds, not merely terminates');
     assert.equal(await readFile(manifestUri.fsPath, 'utf8'), nativeManifest);
