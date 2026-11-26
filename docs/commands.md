@@ -49,11 +49,11 @@ Every extension command starts with **APM:** in the Command Palette (**View** > 
 | **APM: Check Marketplace Health** | Run marketplace checks, outdated reports, validation, or audits. See [Check marketplace health](marketplaces.md#check-marketplace-health). | More APM Actions | Trusted, folder |
 | **APM: Discover MCP Servers** | List, search, or show servers in the MCP registry. See [MCP servers](mcp-servers.md). | More APM Actions | Trusted |
 | **APM: Install MCP Server** | Install an MCP server by registry name. | More APM Actions | Trusted |
-| **APM: More APM Actions** | Open the More APM Actions picker. | The APM view's **...** menu | Trusted |
+| **More APM Action...** | Open the More APM Actions picker. | The APM view's **...** menu | Trusted |
 
 ## More APM Actions
 
-**More APM Actions** groups the less frequent workflows in one searchable picker. Open it from the **...** menu at the top right of the APM view, or run **APM: More APM Actions**. It contains:
+**More APM Actions** groups the less frequent workflows in one searchable picker. Open it from the **...** menu at the top right of the APM view, or run **More APM Action...**. It contains:
 
 - **Dependency Reports**, **View Dependency Tree**, **Explain Dependency**, and **Find File Owner**.
 - **Review Executable Trust**, **Manage Executable Trust**, and **Explain Package Policy**.

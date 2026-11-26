@@ -22,7 +22,7 @@ The top-right toolbar of the view has:
 - The **...** menu:
   - **Views**: show or hide **Catalog**, **Installed**, and **Updates**. Visibility is saved per workspace and is independent of search filters.
   - **Settings**: open the extension's settings in the Settings editor. See [Settings](settings.md).
-  - **APM: More APM Actions**: open the **More APM Actions** picker of dependency, trust, marketplace, MCP, and lifecycle workflows. It appears only in trusted workspaces. See [Commands](commands.md#more-apm-actions).
+  - **More APM Action...**: open the **More APM Actions** picker of dependency, trust, marketplace, MCP, and lifecycle workflows. It appears only in trusted workspaces. See [Commands](commands.md#more-apm-actions).
 
 **Refresh** and **Settings** are available only from this toolbar, not from the Command Palette.
 

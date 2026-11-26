@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- Add an **Install plugin** button with a hollow plug icon to the Installed section and package browser page, including direct-source installation.
+- Show cached catalogs and individual package refresh results progressively while preserving search focus.
+- Explain Git subpath errors reported by APM without restricting accepted source formats in the extension.
+- Rename **APM: More APM Actions** to **More APM Action...**.
+- Exclude local analysis caches from extension packages.
+
 ## 0.8.0
 
 - Update development dependencies, including VS Code and Node.js type definitions.

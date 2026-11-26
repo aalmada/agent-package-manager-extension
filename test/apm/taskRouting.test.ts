@@ -1364,6 +1364,36 @@ test('native install gathers package source and leaves manifest targets unchange
   assert.equal(script.executions.length, 0);
 });
 
+test('installation explains CLI-rejected Git subpaths from stdout or stderr without prevalidating hosts', async () => {
+  for (const preview of [false, true]) for (const stream of ['stdout', 'stderr'] as const) {
+    const source = 'https://gitlab.example.com/group/repo/-/tree/main/skills/example';
+    const diagnostic = 'A subpath cannot be embedded in a git URL. Use the path: key instead.';
+    const host = harness({ picks: [0, 0], inputs: [source], output: () => ({
+      stdout: '', stderr: '', [stream]: diagnostic, exitCode: 1
+    }) });
+    await host.extension.installPackage(undefined, preview);
+    assert.equal(host.errors.length, 1);
+    assert.match(host.errors[0], /APM rejected the source.*subpath cannot be embedded/);
+    assert.match(host.errors[0], /git:.*path:.*ref:/);
+    assert.ok(host.errorActions[0].includes('Show APM Output'));
+    assert.deepEqual(Array.from(host.argv[0]), preview
+      ? ['install', '--dry-run', '--global', source] : ['install', '--global', source]);
+    assert.equal(host.argv.length, 1);
+    assert.ok(host.messages.some(message => message.actionResult?.output?.includes(diagnostic)));
+    assert.equal(host.notices.length, 0);
+  }
+});
+
+test('direct installation leaves source format support to APM', async () => {
+  for (const source of ['https://github.com/owner/repo.git#main', 'https://gitlab.com/group/subgroup/repo.git',
+    'https://github.com/figma/mcp-server-guide/tree/main/skills/figma-use']) {
+    const host = harness({ picks: [0, 0], inputs: [source] });
+    await host.extension.installPackage();
+    assert.equal(host.errors.length, 0);
+    assert.deepEqual(Array.from(host.argv[0]), ['install', '--global', source]);
+  }
+});
+
 test('native audit opens a readable report and Problems even when findings cause a nonzero exit', async () => {
   const host = harness({ output: () => ({ stdout: JSON.stringify({ passed: false, summary: { files_scanned: 2, critical: 1 },
     findings: [{ severity: 'critical', file: 'source.md', line: 3, message: 'Hidden character', remediation: 'Review source.' }] }), stderr: '', exitCode: 1 }) });

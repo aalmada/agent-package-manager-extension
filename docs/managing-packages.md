@@ -18,16 +18,19 @@ A package installed in both scopes appears as two separate entries, each with it
 | Where | What to do |
 | --- | --- |
 | Package page | Select a catalog package, then choose **Install**. |
-| APM view | Choose **Install a package** when **Installed** is empty. |
+| APM view | Select **Install plugin** in the **Installed** header, or choose **Install a package** when the list is empty. |
+| Package browser window | Select **Install plugin** on the **Installed** page. |
 | Command Palette | Run **APM: Install Package**. |
 
 **APM: Install Package** asks for:
 
 1. The destination.
-2. A catalog package, or **Enter package source...** to type a source such as `owner/repository` or `package@marketplace`.
+2. A catalog package, or **Enter plugin or package source...** to type a source such as `owner/repository` or `package@marketplace`.
 3. Confirmation.
 
 When installation finishes, choose **Open Package** in the notification to open the package page.
+
+APM validates source formats, including repositories hosted outside GitHub. If it rejects a Git URL with an embedded subpath, the notification explains how to declare `git:`, `path:`, and `ref:` separately in `apm.yml`, or use APM-supported host-qualified shorthand. **Show APM Output** preserves the CLI's original diagnostic and examples. The extension does not guess the branch or rewrite your source.
 
 To install a package that is already installed in one scope into another, choose **Install in…** on its page. Select a **Workspace** or **Global** installation badge to switch between existing installations; hover over a badge to see its installed version.
 

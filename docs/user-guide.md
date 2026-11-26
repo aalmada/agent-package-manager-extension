@@ -13,7 +13,7 @@ Most operations have more than one entry point. Use whichever fits your workflow
 | Entry point | Use it for |
 | --- | --- |
 | **APM view** | Select the **APM** icon in the Activity Bar to browse packages, filter them, and open package pages with install, preview, update, uninstall, and audit actions. |
-| **View toolbar** | **Refresh**, **Open Package Browser** for a large browsing window, and the **...** menu with **Views**, **Settings**, and **APM: More APM Actions**. |
+| **View toolbar** | **Refresh**, **Open Package Browser** for a large browsing window, and the **...** menu with **Views**, **Settings**, and **More APM Action...**. |
 | **Command Palette** | Run any **APM:** command, such as **APM: Install Package** or **APM: Compile**. See [Commands](commands.md). |
 | **More APM Actions** | A searchable picker of dependency, trust, marketplace, MCP, and lifecycle workflows, in the view's **...** menu. |
 | **Context menus and editor title** | Right-click a folder, `apm.yml`, or any file in the Explorer or editor, or use the buttons above an open `apm.yml`. |

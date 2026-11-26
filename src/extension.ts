@@ -1157,7 +1157,7 @@ class ApmExtension implements vscode.Disposable {
     const scope = await this.installScope(capturedScope);
     if (!scope) return;
     const choices = [
-      { label: '$(edit) Enter package source...', description: 'Repository or marketplace package', item: undefined as PackageItem | undefined },
+      { label: '$(edit) Enter plugin or package source...', description: 'Repository or direct source', item: undefined as PackageItem | undefined },
       ...this.state.catalog.map(item => ({ label: item.name, description: item.marketplace ?? item.source, detail: item.description, item }))
     ];
     const picked = await vscode.window.showQuickPick(choices, { title: preview ? 'Preview package installation' : 'Install APM package',
@@ -1165,7 +1165,8 @@ class ApmExtension implements vscode.Disposable {
     if (!picked) return;
     let item = picked.item;
     if (!item) {
-      const source = await vscode.window.showInputBox({ title: 'Install APM package', prompt: 'Package source, for example owner/repository or package@marketplace',
+      const source = await vscode.window.showInputBox({ title: 'Install APM package',
+        prompt: 'Plugin or package source, for example owner/repository or package@marketplace',
         validateInput: value => !value.trim() || value.startsWith('-') || /[\s\0]/.test(value) || containsUrlCredentials(value)
           ? 'Enter a package source without whitespace, leading flags, or credentials.' : undefined });
       if (source === undefined) return;
@@ -1828,7 +1829,13 @@ class ApmExtension implements vscode.Disposable {
             context.extra.actionResult.summary = 'Files changed or a newer audit started during this scan. Run the audit again.';
           }
         }
-        if (result.exitCode !== 0 && !context.extra.actionResult.audit) context.extra.error = redact(result.stderr || `APM exited with code ${result.exitCode}. Review the output.`);
+        if (result.exitCode !== 0 && !context.extra.actionResult.audit) {
+          const subpathRejected = id === 'install' && /a subpath cannot be embedded in a git URL/i.test(output);
+          context.extra.error = subpathRejected
+            ? 'APM rejected the source: a subpath cannot be embedded in a Git URL. Declare the repository URL with git:, the skill folder with path:, and the branch or tag with ref: in apm.yml. Alternatively, use APM-supported host-qualified shorthand. Review APM Output for the original diagnostic and examples.'
+            : redact(result.stderr || `APM exited with code ${result.exitCode}. Review the output.`);
+          if (subpathRejected) context.extra.actionResult.summary = context.extra.error;
+        }
       } catch (error) {
         if (error instanceof RepositoryAccessError) context.authenticationRepository = error.repository;
         context.extra.actionResult = { action, title, command, status: controller.signal.aborted ? 'cancelled' : 'failed',

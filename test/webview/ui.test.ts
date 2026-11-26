@@ -309,6 +309,29 @@ test('hidden sections remove their headers and sashes but preserve fixed search'
     assert.deepEqual([...page.document.querySelectorAll('.count-badge')].map(node => node.textContent), ['2', '1', '1']);
   } finally { page.dom.window.close(); }
 });
+test('installed section exposes Install plugin beside its collapsible heading', () => {
+  const page = browser('installed');
+  try {
+    const headingRow = page.document.querySelector('#section-heading-installed')?.parentElement;
+    const install = page.document.querySelector<HTMLButtonElement>('#install-plugin');
+    const count = headingRow?.lastElementChild;
+    assert.ok(headingRow?.classList.contains('section-heading-row'));
+    assert.equal(headingRow?.children[1], install);
+    assert.equal(count?.classList.contains('count-badge'), true);
+    assert.equal(install?.textContent, '');
+    assert.equal(install?.title, 'Install plugin');
+    assert.equal(install?.getAttribute('aria-label'), 'Install plugin');
+    assert.ok(install?.querySelector('svg'));
+    assert.equal(install?.disabled, false);
+    install!.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"install"}');
+
+    page.state.busy = true;
+    page.update();
+    assert.equal(page.document.querySelector<HTMLButtonElement>('#install-plugin')?.disabled, true);
+  } finally { page.dom.window.close(); }
+});
+
 test('updates section exposes Update All beside its collapsible heading', () => {
   const page = browser('updates');
   try {
@@ -1001,6 +1024,11 @@ test('package browser groups cards by marketplace, filters in place and opens de
 
     page.document.querySelector<HTMLButtonElement>('#gallery-nav-installed')!.click();
     assert.equal(page.document.querySelector('.gallery-header h1')!.textContent, 'Installed packages');
+    const galleryInstall = page.document.querySelector<HTMLButtonElement>('#gallery-install-plugin');
+    assert.equal(galleryInstall?.title, 'Install plugin');
+    assert.ok(galleryInstall?.querySelector('svg'));
+    galleryInstall!.click();
+    assert.equal(JSON.stringify(page.messages.at(-1)), '{"type":"install"}');
     assert.deepEqual([...page.document.querySelectorAll('.gallery-group-heading > span:first-child')].map(node => node.textContent), ['one', 'Other sources']);
     assert.match(page.document.querySelector('.gallery-group:last-of-type .package-card')!.textContent!, /tool.*3\.0\.0.*Direct install.*Global/);
     page.document.querySelector<HTMLButtonElement>('#gallery-nav-catalog')!.click();
