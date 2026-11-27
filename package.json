@@ -970,7 +970,7 @@
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.6",
     "@types/sanitize-html": "^2.16.0",
-    "@types/vscode": "^1.96.0",
+    "@types/vscode": "^1.146.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
@@ -979,7 +979,7 @@
     "tsx": "^4.20.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "typescript-eslint": "^8.72.2"
+    "typescript-eslint": "^8.74.0"
   },
   "overrides": {
     "@vscode/vsce": {
